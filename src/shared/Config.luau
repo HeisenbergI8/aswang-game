@@ -28,6 +28,24 @@ local Config = {
 		-- Nothing kills a session faster than never being the monster.
 		RepeatCooldownRounds = 2,
 		IntroDuration = 3,
+
+		--[[
+			The anti-repeat weights (§4.2 "heavily reduced weight"). A player's draw weight is picked by
+			how many rounds ago they were last the Aswang:
+
+				1 round ago                        -> RecentAswangWeight
+				2..RepeatCooldownRounds rounds ago -> OlderAswangWeight
+				never, or longer ago               -> BaseWeight
+
+			NONE OF THESE MAY BE ZERO. A zero weight is not "unlikely", it is "impossible", and with
+			MinPlayers = 3 a zero-weight rule can leave a round with no eligible Aswang at all. The draw
+			would then have to fall back to something, and a fallback that fires under a condition
+			nobody tested is worse than a small number. `tests/role-draw.test.luau` proves no player
+			starves; `tests/config.test.luau` proves the numbers stay ordered and positive.
+		]]
+		BaseWeight = 1,
+		RecentAswangWeight = 0.1,
+		OlderAswangWeight = 0.4,
 	},
 
 	Monster = {
@@ -103,6 +121,54 @@ local Config = {
 		-- Mobile is ~60% of players. Many dynamic lights is the #1 mobile FPS killer.
 		MaxVisibleLights = 8,
 		TargetFPSMobile = 30,
+	},
+
+	--[[
+		Rate limits, one budget per client->server remote (C02).
+
+		A budget is a token bucket: `Capacity` tokens, refilling at `RefillPerSecond`, one token per
+		request. Capacity is the BURST a legitimate player may produce in one moment; RefillPerSecond is
+		the SUSTAINED rate they may hold.
+
+		Tune these LOOSER than legitimate play, never tighter. A limiter that refuses a real player is a
+		gameplay bug that presents as lag, and it is far more expensive than an exploiter getting three
+		extra requests through — the validation behind the limiter is what actually refuses them.
+		`tests/anti-cheat-budgets.test.luau` pins that relationship for the remotes where a legitimate
+		cadence is known.
+	]]
+	AntiCheat = {
+		-- Every name here must appear in Remotes.EVENTS_UP, and every name there must appear here.
+		-- The test pins BOTH directions, because a budget for a remote that no longer exists is a
+		-- rename nobody noticed and a remote with no budget is refused outright (see UnknownRemote).
+		Budgets = {
+			-- A presence heartbeat while standing at a task point. Must out-pace the snapshot tick or
+			-- a player holding a task is throttled while doing exactly what the game asked of them.
+			RequestTaskProgress = { Capacity = 12, RefillPerSecond = 6 },
+			-- Deliberate, rare acts. Capacity covers a double-tap and a reconnect retry; nothing more.
+			RequestTransform = { Capacity = 3, RefillPerSecond = 0.2 },
+			RequestKill = { Capacity = 3, RefillPerSecond = 0.25 },
+			RequestThrowSalt = { Capacity = 3, RefillPerSecond = 0.2 },
+			RequestQuickChat = { Capacity = 4, RefillPerSecond = 0.5 },
+			RequestGhostSpook = { Capacity = 2, RefillPerSecond = 0.05 },
+			RequestEquipCosmetic = { Capacity = 5, RefillPerSecond = 0.5 },
+			RequestClaimDaily = { Capacity = 2, RefillPerSecond = 0.1 },
+		},
+
+		-- One request costs one token. Here rather than in the service so C41 can price an expensive
+		-- handler higher without touching code.
+		DefaultCost = 1,
+
+		-- FAIL CLOSED. A remote with no budget is refused, not allowed. The alternative — allowing the
+		-- unknown — means a new remote added without a budget is silently unlimited, which is exactly
+		-- the state C02 exists to make impossible.
+		AllowUnbudgetedRemote = false,
+
+		-- C02 LOGS. C41 ENFORCES. Kicking on a rate limit before there is real data behind the numbers
+		-- kicks real players on bad connections, and a false kick is unrecoverable.
+		LogOnly = true,
+		-- One log line per player per remote per this many seconds. An exploiter firing 1000/s would
+		-- otherwise produce 1000 warn() calls per second, which is its own denial of service.
+		LogThrottleSeconds = 5,
 	},
 
 	Debug = {

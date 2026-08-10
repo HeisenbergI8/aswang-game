@@ -107,6 +107,54 @@ check(
 -- Spec §5: many dynamic lights is the #1 mobile FPS killer, and 60% of players are on mobile.
 check("the mobile light budget is still capped", Config.Performance.MaxVisibleLights <= 8)
 
+-- Spec §4.2: the anti-repeat weighting must be MONOTONIC in recency — more recent means less likely —
+-- and never zero. Three numbers in the wrong order still draw an Aswang every round, so nothing about
+-- the game looks broken; the only symptom is players quietly being the monster twice in a row.
+check(
+	"a more recent Aswang is less likely than an older one",
+	Config.Roles.RecentAswangWeight < Config.Roles.OlderAswangWeight,
+	`recent={Config.Roles.RecentAswangWeight}, older={Config.Roles.OlderAswangWeight}`
+)
+
+check(
+	"any recent Aswang is less likely than someone who has never been one",
+	Config.Roles.OlderAswangWeight < Config.Roles.BaseWeight,
+	`older={Config.Roles.OlderAswangWeight}, base={Config.Roles.BaseWeight}`
+)
+
+-- Zero is a ban, not a discount. See the Config comment.
+check(
+	"nobody is ever excluded from the draw outright",
+	Config.Roles.RecentAswangWeight > 0,
+	`recent={Config.Roles.RecentAswangWeight}`
+)
+
+-- Spec §4.2: history covers the last 2 rounds. A history as long as the server is large would give
+-- every player a reduced weight at once, which is the same as no weighting at all.
+check(
+	"the anti-repeat history is shorter than a full server",
+	Config.Roles.RepeatCooldownRounds >= 1
+		and Config.Roles.RepeatCooldownRounds < Config.Round.MaxPlayers,
+	`RepeatCooldownRounds={Config.Roles.RepeatCooldownRounds}`
+)
+
+-- Spec §4.2 / §3: exactly one Aswang, and at least two survivors at the minimum player count — a
+-- round drawn with AswangCount >= MinPlayers is over before ACTIVE begins.
+check(
+	"a minimum-sized round still has survivors in it",
+	Config.Roles.AswangCount < Config.Round.MinPlayers,
+	`AswangCount={Config.Roles.AswangCount}, MinPlayers={Config.Round.MinPlayers}`
+)
+
+-- Spec §4.2: the 3-second private intro plays during STARTING. If it outlasts StartingDelay it is
+-- still on screen when ACTIVE begins, and the Aswang spends the opening seconds of the round reading
+-- a card instead of moving — the one moment when standing still is most conspicuous.
+check(
+	"the Aswang intro finishes before the round goes live",
+	Config.Roles.IntroDuration < Config.Round.StartingDelay,
+	`IntroDuration={Config.Roles.IntroDuration}, StartingDelay={Config.Round.StartingDelay}`
+)
+
 -- Spec §6.5 / README: shipping with SoloTesting on skips MinPlayers for everyone.
 check(
 	"solo testing is off",
@@ -118,4 +166,4 @@ if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end
 
-print("  PASS  config: 13 balance invariants")
+print("  PASS  config: 19 balance invariants")

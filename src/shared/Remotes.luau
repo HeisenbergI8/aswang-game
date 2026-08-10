@@ -21,10 +21,10 @@ local FOLDER_NAME = "Remotes"
 local EVENTS_DOWN = {
 	"RoundSnapshot", -- periodic ClientRoundSnapshot for HUD
 	"PhaseChanged",
-	"RoleAssigned", -- fired ONLY to the player it concerns
+	"RoleAssigned", -- C03. FireClient ONLY, to the one player it concerns. Never FireAllClients.
 	"TaskProgressChanged",
 	"PlayerKilled",
-	"MonsterTransformed", -- public by design: this is the tell
+	"MonsterTransformed", -- C04. Public by design: this is the tell, and broadcasting it is correct.
 	"SaltEffect",
 	"RoundEnded", -- includes the reveal
 	"QuickChatBroadcast",
@@ -34,7 +34,7 @@ local EVENTS_DOWN = {
 -- Client -> Server (the client asks; the server decides)
 local EVENTS_UP = {
 	"RequestTaskProgress",
-	"RequestTransform",
+	"RequestTransform", -- C04. The first handler in this repo to consult AntiCheatService.
 	"RequestKill",
 	"RequestThrowSalt",
 	"RequestQuickChat",
