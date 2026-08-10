@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "anthropic.claude-code",
+    "JohnnyMorganz.luau-lsp",
+    "evaera.vscode-rojo",
+    "JohnnyMorganz.stylua"
+  ]
+}
