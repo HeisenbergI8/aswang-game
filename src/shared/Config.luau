@@ -57,6 +57,23 @@ local Config = {
 		TransformedSpeedMult = 1.25,
 		TransformAudioRange = 40, -- how far the transform sound carries
 		CorpseDuration = 45,
+
+		--[[
+			The transform's LOOK (§4.3). No custom mesh — avatar scale, a colour and material shift,
+			glowing eyes and a particle emitter. That is why this mechanic is cheap, and cheap is
+			load-bearing for a project with no art budget.
+
+			STORED AS RGB TRIPLES, NEVER AS Color3. `tests/config.test.luau` requires this file under
+			LUNE, which has no Roblox datatypes at all. A `Color3.fromRGB(...)` here does not fail to
+			typecheck — it fails at TEST time, in every balance test at once, with an error naming
+			Config rather than the edit that broke it. MonsterService builds the Color3.
+		]]
+		TransformedScale = 1.15,
+		TransformedTintRgb = { 90, 20, 20 },
+		EyeGlowRgb = { 255, 45, 45 },
+		EyeGlowRange = 6,
+		EyeGlowBrightness = 3,
+		TransformParticleRate = 12,
 	},
 
 	Tasks = {
