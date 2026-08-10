@@ -156,8 +156,11 @@ function RoleService.AssignRoles(candidates: { number }): number?
 		local player = Players:GetPlayerByUserId(userId)
 
 		if player == nil then
-			-- Drawn, then disconnected inside STARTING. If it was the Aswang, RoundService's existing
-			-- onPlayerRemoving case aborts the round; there is nothing to do here but not error.
+			-- Drawn, then disconnected inside STARTING. RoundService.onPlayerRemoving aborts the round
+			-- when the departed player was the Aswang, and it covers STARTING as well as ACTIVE —
+			-- which it did NOT until an audit found that an Aswang could delete a round for everyone
+			-- by quitting inside the four-second role-card window. There is nothing to do here but
+			-- not error.
 			continue
 		end
 

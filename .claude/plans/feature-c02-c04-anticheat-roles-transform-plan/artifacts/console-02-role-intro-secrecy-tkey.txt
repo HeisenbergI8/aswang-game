@@ -1,0 +1,70 @@
+Captured via mcp__Roblox_Studio__execute_luau (Client datamodel) and mcp__Roblox_Studio__inspect_instance
+during the same live Play session as console-01. Solo player: Demiurgos_18 (UserId 11461085874).
+
+--------------------------------------------------------------------------------
+1. ROLE INTRO CARD — captured by cloning PlayerGui.RoleIntro the instant WaitForChild returned (to
+   avoid racing its 3s self-destruct), then screen_capture'd (see report body; image not persistable to
+   disk in this environment, viewed directly in-session).
+--------------------------------------------------------------------------------
+execute_luau result:
+Captured RoleIntro. Text = [You are a survivor.
+Finish five tasks and escape.]
+
+This is the SURVIVOR variant of UIController.showIntro(). The ASWANG variant ("YOU ARE THE ASWANG.\nDo
+not get seen.") was read in source but never observed live in this session — see report body for why
+(RoleDraw never draws this solo player as Aswang).
+
+--------------------------------------------------------------------------------
+2. SECRECY CHECK — attributes / CollectionService tags on the player, character and humanoid
+--------------------------------------------------------------------------------
+execute_luau result:
+Player attributes: []
+Character attributes: []
+Character tags:
+Humanoid attributes: []
+Player tags:
+All tagged instances in game (client view): <13 CoreGui entries, all Roblox UI internals like
+  CapturesCoreUI, SettingsShield, PlayerList, ExperienceChat, TopBarApp — none game-authored, none
+  role-related>
+
+No Role/Aswang/IsMonster-shaped attribute or tag exists anywhere in the client-visible DataModel.
+Consistent with RoleService's design comment ("not an attribute, not a tag...").
+
+--------------------------------------------------------------------------------
+3. T-KEY INPUT PATH (InputController, added mid-session per coordinator's live-diff note)
+--------------------------------------------------------------------------------
+Studio was stopped and restarted (Play -> Play) to load the new InputController.luau /
+AudioController.luau client scripts, since StarterPlayerScripts are cloned into the client at Play
+start and a live Rojo sync does not retroactively touch already-running script instances.
+
+Post-restart bootstrap (identical to console-01, reproduced clean):
+  [RoundService] -> INTERMISSION (8s)
+  [Bootstrap] Ready. 13 services loaded.
+  [Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+  [Client] Ready. 5 controllers loaded.
+  [RoleService] Drew 1 roles.
+  [RoundService] -> STARTING (4s)
+  [RoundService] -> ACTIVE (45s)
+
+Then: mcp__Roblox_Studio__user_keyboard_input sent keyPress T to the Client datamodel while
+round #1 was ACTIVE and the solo player ALIVE (a survivor, per RoleDraw's clamp — see report body).
+
+Console AFTER the T press (full, unchanged from the ACTIVE line above — no new lines at all):
+  [RoundService] -> INTERMISSION (8s)
+  [Bootstrap] Ready. 13 services loaded.
+  [Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+  [Client] Ready. 5 controllers loaded.
+  [Client] Snapshot — INTERMISSION round #0 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+  [RoleService] Drew 1 roles.
+  [RoundService] -> STARTING (4s)
+  [Client] Phase -> STARTING (4s)
+  [Client] Snapshot — STARTING round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+  [RoundService] -> ACTIVE (45s)
+  [Client] Phase -> ROUND LIVE (45s)
+  [Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+
+No RequestTransform reached the server at all (no NOT_ASWANG line, unlike every prior probe that called
+Remotes.Get("RequestTransform"):FireServer() directly). This confirms InputController's client-side
+gate (`if UIController.GetMyRole() ~= Enums.Role.Aswang then return Enum.ContextActionResult.Pass end`)
+works as coded: the T keybind is a no-op for a survivor and never even attempts the remote, let alone
+reaches AntiCheatService or TransformRules. No error/warn from InputController or ContextActionService.

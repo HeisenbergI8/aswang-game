@@ -334,7 +334,24 @@ end
 local function onPlayerRemoving(player: Player)
 	state.PlayerStates[player.UserId] = nil
 
-	if state.Phase ~= Enums.RoundPhase.Active then
+	--[[
+		STARTING COUNTS TOO, and leaving it out was a live exploit.
+
+		The Aswang sees their role card for the whole of StartingDelay before ACTIVE begins. Guarding
+		only on ACTIVE meant: get the card, quit within four seconds, and `state.AswangUserId` points
+		at nobody. ACTIVE then runs its full duration with no monster in it — RoundTransitions ignores
+		the headcount during ACTIVE by design — and the round ends on Timeout revealing a UserId that
+		is not in the server. Every round you were drawn for, you could delete for six other people at
+		zero cost.
+
+		Redrawing from the remaining roster would be the richer fix; aborting is the honest one for
+		C03, because a redraw mid-STARTING would fire a second RoleAssigned to players who already have
+		a card and nothing yet handles that. C05 can revisit it.
+	]]
+	local inRound = state.Phase == Enums.RoundPhase.Active
+		or state.Phase == Enums.RoundPhase.Starting
+
+	if not inRound then
 		return
 	end
 

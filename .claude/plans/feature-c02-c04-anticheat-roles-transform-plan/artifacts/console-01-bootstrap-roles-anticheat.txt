@@ -1,0 +1,71 @@
+Captured via mcp__Roblox_Studio__get_console_output during live Play session.
+Studio: Place3 (7107daa3-2aac-4437-a1cf-546ecae82ce7). Config.Round.Intermission=8, Duration=45,
+EndScreen(ENDING)=6, Debug.SoloTesting=true, Debug.VerboseLogging=true. Solo player: Demiurgos_18.
+
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 13 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Client] Ready. 5 controllers loaded.
+[Client] Snapshot — INTERMISSION round #0 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #1 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+... (rounds 2-3 cycle identically) ...
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #3 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[MonsterService] Refused transform for Demiurgos_18: WRONG_PHASE     <- probe #1: fired RequestTransform during INTERMISSION
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #4 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #4 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[MonsterService] Refused transform for Demiurgos_18: NOT_ASWANG     <- probe #2: fired RequestTransform during ACTIVE
+[RoundService] -> ENDING (6s)
+...
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #6 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[MonsterService] Refused transform for Demiurgos_18: NOT_ASWANG    <- burst probe: 8x FireServer(RequestTransform)
+[MonsterService] Refused transform for Demiurgos_18: NOT_ASWANG    <- token 2 of 3 in bucket
+[MonsterService] Refused transform for Demiurgos_18: NOT_ASWANG    <- token 3 of 3 in bucket
+[AntiCheat] Rate limit refused Demiurgos_18 (11461085874) on RequestTransform   <- 4th+ requests refused by AntiCheatService.Consume, BEFORE reaching validateAndTransform
+
+OBSERVATIONS
+------------
+1. Bootstrap: "[Bootstrap] Ready. 13 services loaded." with NO warn lines. No require-cycle error
+   between RoundService/RoleService, no failure resolving require(script.Parent.Parent.pure.RoleDraw).
+   This was the item flagged UNVERIFIED in the plan and is now confirmed clean across 6+ round cycles.
+
+2. "[RoleService] Drew 1 roles." appears once per round (6 times observed), always a COUNT
+   (#candidates), never a name, UserId, or role breakdown.
+
+3. Rate limiter: AntiCheatService.Consume() runs BEFORE RoleService.IsAswang()/TransformRules — proven
+   because the NOT_ASWANG log (from validateAndTransform, past the guard) appears for the first 3 of 8
+   burst-fired requests, then the AntiCheat refusal appears for the 4th, matching
+   Config.AntiCheat.Budgets.RequestTransform.Capacity = 3. Only ONE AntiCheat warn line printed for the
+   remaining ~5 refused requests, consistent with Config.AntiCheat.LogThrottleSeconds = 5.
+
+4. The verdict is NEVER echoed to the client — only server console (VerboseLogging=true). Confirmed by
+   design (MonsterService.luau comment) and behaviorally: the client received no reply/remote for either
+   refusal, only the fire-and-forget RequestTransform.
+
+5. IMPORTANT FINDING (see report body): RoleDraw.draw's clamp `math.max(#candidates - 1, 0)` means with
+   exactly 1 real candidate (solo testing), picks = clamp(AswangCount=1, 0, 0) = 0. No round ever draws
+   this solo player as Aswang. Confirmed by NOT_ASWANG refusal on every ACTIVE-phase probe across rounds
+   4 and 6. This is a genuine structural limitation of 1-player SoloTesting for verifying C04's visual
+   transform, not a bug in the guard itself (the guard exists to prevent a 100%-Aswang round).

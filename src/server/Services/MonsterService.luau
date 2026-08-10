@@ -41,8 +41,29 @@ local Types = require(Shared.Types)
 
 local MonsterService = {}
 
+-- One part's appearance as it was BEFORE the transform touched it. See restoreLook().
+type PartLook = {
+	Part: BasePart,
+	Color: Color3,
+	Material: Enum.Material,
+}
+
 type MonsterState = {
+	-- A transform has been requested and not yet reverted. Set BEFORE the windup, so it also closes
+	-- the same-instant spam race — the second request sees ALREADY_TRANSFORMED.
 	Transformed: boolean,
+	-- The look is physically on a character and needs undoing. Distinct from Transformed because a
+	-- revert during the windup must not run a cleanup for changes that were never applied.
+	Applied: boolean,
+	-- MonsterTransformed(true) was broadcast. A revert broadcasts false ONLY if this is set; otherwise
+	-- clients receive a revert for a transform they never saw, which at C14 is a free identity leak.
+	Announced: boolean,
+	-- The character the look was applied TO. Resolving player.Character at revert time can land on a
+	-- freshly respawned character that never transformed, and whiten it.
+	AppliedTo: Model?,
+	OriginalParts: { PartLook },
+	OriginalScales: { [string]: number },
+	Effects: { Instance }, -- exactly what this service created, so the revert removes nothing else
 	LastRevertedAt: number?, -- nil until the first revert of the round; drives the cooldown
 	BaseWalkSpeed: number?,
 	Generation: number, -- invalidates an in-flight forced revert; see revert()
@@ -62,6 +83,12 @@ local function stateFor(userId: number): MonsterState
 
 	local created: MonsterState = {
 		Transformed = false,
+		Applied = false,
+		Announced = false,
+		AppliedTo = nil,
+		OriginalParts = {},
+		OriginalScales = {},
+		Effects = {},
 		LastRevertedAt = nil,
 		BaseWalkSpeed = nil,
 		Generation = 0,
@@ -101,25 +128,111 @@ local function applyScale(humanoid: Humanoid, scale: number)
 	end
 end
 
--- The folder replicates, which is correct: the point is that everyone sees it.
-local FX_FOLDER = "AswangTransformFX"
+--[[
+	CAPTURE BEFORE MUTATING. This is the whole of the fix for the worst bug C04 shipped in review.
 
-local function addLook(character: Model)
-	local existing = character:FindFirstChild(FX_FOLDER)
+	The first version restored hardcoded defaults on revert — every part to white Plastic, every scale
+	to 1.0. That is not what was there before, and the consequence is not cosmetic: after any revert
+	the ex-Aswang becomes the ONLY character in the game whose parts are pure white Plastic at scale
+	1.0. An exploiter reads that off the replicated properties from across the map, retroactively, with
+	no remote traffic to intercept and no need to have witnessed anything.
 
-	if existing ~= nil then
-		existing:Destroy()
-	end
+	It also breaks the mechanic with no exploit at all. §4.3's revert exists so the Aswang blends back
+	into the crowd; a survivor walking past a white plastic avatar a minute later gets the reveal free.
 
-	local folder = Instance.new("Folder")
-	folder.Name = FX_FOLDER
+	Note the asymmetry that made this easy to miss: `BaseWalkSpeed` was already captured and restored
+	correctly. The same discipline simply was not applied to colour, material and scale.
+]]
+local function captureLook(state: MonsterState, character: Model, humanoid: Humanoid)
+	table.clear(state.OriginalParts)
+	table.clear(state.OriginalScales)
 
 	for _, part in character:GetChildren() do
 		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-			part.Color = rgb(Config.Monster.TransformedTintRgb)
-			part.Material = Enum.Material.Slate
+			table.insert(
+				state.OriginalParts,
+				{ Part = part, Color = part.Color, Material = part.Material }
+			)
 		end
 	end
+
+	for _, name in SCALE_VALUES do
+		local value = humanoid:FindFirstChild(name)
+
+		if value ~= nil and value:IsA("NumberValue") then
+			state.OriginalScales[name] = value.Value
+		end
+	end
+
+	state.BaseWalkSpeed = humanoid.WalkSpeed
+end
+
+local function restoreLook(state: MonsterState)
+	for _, look in state.OriginalParts do
+		-- The character may have been destroyed under us (respawn, disconnect). A destroyed Instance
+		-- still answers property writes harmlessly, but Parent is the cheap liveness test.
+		if look.Part.Parent ~= nil then
+			look.Part.Color = look.Color
+			look.Part.Material = look.Material
+		end
+	end
+
+	table.clear(state.OriginalParts)
+	table.clear(state.OriginalScales)
+end
+
+-- Every Instance this service adds, tracked so the revert removes exactly what it created and nothing
+-- else. The previous version destroyed EVERY PointLight and ParticleEmitter on the Head, which would
+-- have deleted a lamp effect or a cosmetic from C34 that happened to live there.
+local function trackedEffect(state: MonsterState, instance: Instance)
+	table.insert(state.Effects, instance)
+end
+
+local function clearEffects(state: MonsterState)
+	for _, effect in state.Effects do
+		effect:Destroy()
+	end
+
+	table.clear(state.Effects)
+end
+
+--[[
+	THE WINDUP'S TELL, applied at the START of the 1.2s rather than after it.
+
+	§4.3 step 2 calls the windup "visible to anyone with line of sight", and the original code applied
+	nothing until `task.wait(TransformTime)` had already returned — so the Aswang went from ordinary to
+	monster in a single frame after a silent pause, and the entire risk half of the risk/reward was
+	missing. An Aswang could fire the request in a crowd, walk into cover during 1.2s of nothing, and
+	emerge already transformed.
+
+	Particles first, then the full look. It escalates, which is what makes it a tell you can react to.
+]]
+local function applyWindupLook(state: MonsterState, character: Model)
+	local head = character:FindFirstChild("Head")
+
+	if head == nil or not head:IsA("BasePart") then
+		return
+	end
+
+	local particles = Instance.new("ParticleEmitter")
+	particles.Color = ColorSequence.new(rgb(Config.Monster.EyeGlowRgb))
+	particles.Rate = Config.Monster.TransformParticleRate
+	particles.Lifetime = NumberRange.new(1)
+	particles.Speed = NumberRange.new(1)
+	particles.Parent = head
+
+	trackedEffect(state, particles)
+end
+
+local function applyFullLook(state: MonsterState, character: Model, humanoid: Humanoid)
+	for _, look in state.OriginalParts do
+		if look.Part.Parent ~= nil then
+			look.Part.Color = rgb(Config.Monster.TransformedTintRgb)
+			look.Part.Material = Enum.Material.Slate
+		end
+	end
+
+	applyScale(humanoid, Config.Monster.TransformedScale)
 
 	local head = character:FindFirstChild("Head")
 
@@ -130,45 +243,7 @@ local function addLook(character: Model)
 		glow.Brightness = Config.Monster.EyeGlowBrightness
 		glow.Parent = head
 
-		local particles = Instance.new("ParticleEmitter")
-		particles.Color = ColorSequence.new(rgb(Config.Monster.EyeGlowRgb))
-		particles.Rate = Config.Monster.TransformParticleRate
-		particles.Lifetime = NumberRange.new(1)
-		particles.Speed = NumberRange.new(1)
-		particles.Parent = head
-
-		-- Reparenting into the folder keeps the revert a single Destroy.
-		glow.Parent = folder
-		particles.Parent = folder
-		glow.Parent = head
-		particles.Parent = head
-	end
-
-	folder.Parent = character
-end
-
-local function removeLook(character: Model)
-	local folder = character:FindFirstChild(FX_FOLDER)
-
-	if folder ~= nil then
-		folder:Destroy()
-	end
-
-	local head = character:FindFirstChild("Head")
-
-	if head ~= nil then
-		for _, child in head:GetChildren() do
-			if child:IsA("PointLight") or child:IsA("ParticleEmitter") then
-				child:Destroy()
-			end
-		end
-	end
-
-	for _, part in character:GetChildren() do
-		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-			part.Color = Color3.new(1, 1, 1)
-			part.Material = Enum.Material.Plastic
-		end
+		trackedEffect(state, glow)
 	end
 end
 
@@ -177,9 +252,11 @@ end
 --------------------------------------------------------------------------------
 
 local function revert(player: Player)
-	local monster = stateFor(player.UserId)
+	-- READ, do not construct. `stateFor` here would re-insert a departed player's UserId every time a
+	-- stale forced-revert timer fired, growing `monsters` unbounded inside a single ACTIVE phase.
+	local monster = monsters[player.UserId]
 
-	if not monster.Transformed then
+	if monster == nil or not monster.Transformed then
 		return
 	end
 
@@ -190,26 +267,53 @@ local function revert(player: Player)
 	-- fresh transform would be cut short by the first transform's expiry timer.
 	monster.Generation += 1
 
-	local character = player.Character
+	--[[
+		THE CHARACTER THE LOOK WAS APPLIED TO, not player.Character.
 
-	if character ~= nil then
+		Resolving the character at revert time lands on whatever the player is wearing NOW, which after
+		a respawn is a fresh body that never transformed — and the revert would then strip it and
+		announce it. Cleanup belongs to the thing that was changed.
+	]]
+	local character = monster.AppliedTo
+
+	if monster.Applied and character ~= nil then
 		local humanoid = character:FindFirstChildOfClass("Humanoid")
 
 		if humanoid ~= nil then
-			applyScale(humanoid, 1)
+			for name, value in monster.OriginalScales do
+				local scaleValue = humanoid:FindFirstChild(name)
+
+				if scaleValue ~= nil and scaleValue:IsA("NumberValue") then
+					scaleValue.Value = value
+				end
+			end
 
 			if monster.BaseWalkSpeed ~= nil then
 				humanoid.WalkSpeed = monster.BaseWalkSpeed
 			end
 		end
 
-		removeLook(character)
+		restoreLook(monster)
+	end
 
+	clearEffects(monster)
+
+	--[[
+		ANNOUNCE ONLY WHAT WAS ANNOUNCED. `Transformed` is set before the windup so the spam race is
+		closed, which means a revert during the windup reaches here for a player NO CLIENT EVER SAW
+		TRANSFORM. Broadcasting a revert for them is an unconditional identity broadcast — inert today,
+		and at C14 it is "throw salt at a suspect mid-windup and be told whether you were right".
+	]]
+	if monster.Announced and character ~= nil then
 		local payload: Types.MonsterTransformedPayload =
 			{ Character = character, Transformed = false }
 
 		transformedRemote:FireAllClients(payload)
 	end
+
+	monster.Applied = false
+	monster.Announced = false
+	monster.AppliedTo = nil
 end
 
 local function transform(player: Player)
@@ -228,11 +332,18 @@ local function transform(player: Player)
 
 	monster.Transformed = true
 	monster.Generation += 1
+	monster.AppliedTo = character
 
 	local generation = monster.Generation
 
-	-- The windup (§4.3 step 2). VISIBLE BY DESIGN: it is the risk half of the risk/reward, and a
-	-- windup shorter than a frame is the invisible kill §2 rules out.
+	-- Capture BEFORE anything is mutated. Everything the revert restores is read here and nowhere else.
+	captureLook(monster, character, humanoid)
+
+	-- The windup (§4.3 step 2), and its tell starts NOW rather than when it ends. `Applied` is set
+	-- with it, so a revert during the windup cleans up exactly these particles and nothing more.
+	monster.Applied = true
+	applyWindupLook(monster, character)
+
 	task.wait(Config.Monster.TransformTime)
 
 	-- Still the same transform? A revert during the windup (a disconnect, a phase change, salt at
@@ -241,23 +352,29 @@ local function transform(player: Player)
 		return
 	end
 
-	monster.BaseWalkSpeed = humanoid.WalkSpeed
 	humanoid.WalkSpeed = humanoid.WalkSpeed * Config.Monster.TransformedSpeedMult
 
-	applyScale(humanoid, Config.Monster.TransformedScale)
-	addLook(character)
+	applyFullLook(monster, character, humanoid)
 
-	local payload: Types.MonsterTransformedPayload = { Character = character, Transformed = true }
+	--[[
+		THE GUARANTEE BEFORE THE ANNOUNCEMENT.
 
-	transformedRemote:FireAllClients(payload)
-
-	-- Forced revert (§4.3 step 5). The Aswang cannot choose to stay a monster: the form is a timer,
-	-- and outlasting it is what makes a failed hunt cost something.
+		Registered before the broadcast, deliberately. If FireAllClients throws — and its payload
+		carries a Model that can be destroyed under it — the coroutine dies, and with the ordering
+		reversed the forced-revert timer would never have been registered, leaving a permanent monster
+		clearable only by a phase change.
+	]]
 	task.delay(Config.Monster.MaxTransformTime, function()
 		if monster.Generation == generation and monster.Transformed then
 			revert(player)
 		end
 	end)
+
+	monster.Announced = true
+
+	local payload: Types.MonsterTransformedPayload = { Character = character, Transformed = true }
+
+	transformedRemote:FireAllClients(payload)
 end
 
 --------------------------------------------------------------------------------
