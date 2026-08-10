@@ -5,6 +5,10 @@ A co-op horror game for Roblox. Filipino folklore, hidden-monster gameplay.
 **Read the design doc first:** [`docs/MVP-SPEC.md`](docs/MVP-SPEC.md) — it defines the whole MVP,
 what's deliberately out of scope, the architecture, and the balance numbers.
 
+**Then read [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md)** — the spec broken into 45 sequenced chunks,
+each with its dependencies, its definition of done, and the command that verifies it. The spec says
+*what*; the build plan says *what's next*.
+
 ---
 
 ## Daily workflow
@@ -84,6 +88,7 @@ src/
 docs/
   MVP-SPEC.md              ★ the design doc — read this before writing code
                              Appendix C is a teardown of the closest competitor
+  BUILD-PLAN.md            ★ the spec as 45 ordered chunks — what to build next
 ```
 
 Each stub carries `TODO(Mx)` markers tying it to a milestone in the spec.
@@ -95,12 +100,42 @@ Each stub carries `TODO(Mx)` markers tying it to a milestone in the spec.
 | What | Command |
 |---|---|
 | Start live sync | `rojo serve` |
-| Build a place file | `rojo build -o build.rbxl` |
-| Format | `stylua src` |
-| Lint | `selene src` |
+| **The gate** — analyze, lint, format, 5 project checks, unit tests | `npm run verify` |
+| The fast gate, for mid-task | `npm run verify:fast` |
+| First-time setup / repair the toolchain | `rokit install && npm run check:toolchain` |
+| Format | `npm run fmt` |
+| Unit tests (Lune) | `npm run test:unit` |
+| Build a place file (code + empty world) | `npm run build` |
 | Reinstall Studio plugin | `rojo plugin install` |
 
-Tool versions are pinned in `rokit.toml`, so this project builds identically on any machine.
+Tool versions are pinned in `rokit.toml`, so this project builds identically on any machine. `npm` is
+here only as a task runner and to host the Claude Code hooks — there is no JavaScript in the game.
+
+`npm run check:toolchain` fetches the Roblox API type definitions into `.luau-defs/` on first run. Without
+them the analyzer reports a confident green while knowing nothing about Roblox, so it is worth running
+once after cloning.
+
+---
+
+## Working with Claude Code
+
+`CLAUDE.md` is the authority on how work is done here — the routing table, the agents, and what is
+enforced by code rather than by instruction.
+
+The short version: **`npm run verify` is the single gate**, and a set of hooks in `.claude/` makes several
+of this project's rules mechanical rather than remembered. Five are specific to this game:
+
+| Check | Refuses |
+|---|---|
+| `check:secrecy` | the Aswang's identity reaching any client |
+| `check:remotes` | a remote that isn't declared, or is fired in the wrong direction |
+| `check:config` | a balance number typed anywhere but `Config.luau` |
+| `check:scope` | anything from the spec's §3 OUT list appearing in `src/` |
+| `check:ratelimit` | an `OnServerEvent` handler with no rate limit |
+
+A sixth guard refuses script writes *inside Studio*, because Rojo would overwrite them on the next sync.
+
+Run `npm run check:guards` to execute the harness's own 22 test suites.
 
 ---
 
@@ -117,10 +152,11 @@ distance, line of sight, cooldown, and phase, then decides. See spec §6.2.
 
 ## Where to start
 
-**Milestone M1 — the round skeleton.** `RoundService.luau` already has the state machine
-wired and broadcasting phase changes. Press Play in Studio with `Config.Debug.SoloTesting = true`
-and watch the phases cycle in the output. Then build M2 (roles + kill) on top.
+**Chunk C01 in [`docs/BUILD-PLAN.md`](docs/BUILD-PLAN.md)** — finishing the round state machine.
+`RoundService.luau` already has the state machine wired and broadcasting phase changes; what's left is
+the §6.4 edge cases and the client snapshot. Press Play in Studio with `Config.Debug.SoloTesting = true`
+and watch the phases cycle in the output.
 
-The gate that matters is **M5: play it with 6 real humans before building any art or UI.**
+The gate that matters is **C19 / M5: play it with 6 real humans before building any art or UI.**
 If they don't want a 6th round, change the design then — that's the cheapest moment in the
 whole project to be wrong.
