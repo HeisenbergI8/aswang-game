@@ -21,13 +21,16 @@ local SERVICE_ORDER = {
 	"AnalyticsService",
 	"AntiCheatService",
 	"ProgressionService",
+	"BadgeService",
 	"MonetizationService",
+	"CommunityService",
 	-- Gameplay
 	"RoleService",
 	"TaskService",
 	"MonsterService",
 	"ItemService",
 	"GhostService",
+	"TrialService",
 	-- The state machine drives everything, so it starts last
 	"RoundService",
 }

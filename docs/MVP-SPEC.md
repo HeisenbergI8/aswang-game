@@ -54,9 +54,14 @@ This is your **single source of truth for v1**. Rules:
 - Win/lose end screen with the reveal
 - Quick-chat wheel (non-verbal communication)
 - Progression: XP, level, soft currency, daily reward, ~6 unlockable cosmetics
-- Monetization: 3 gamepasses, 2 dev products, private servers
+- Monetization: 3 gamepasses, 2 dev products, private servers — **live on launch day, not "later"**
 - Mobile-first UI + performance budget
 - Analytics events + basic anti-exploit
+- **Solo Trial** — a 90-second single-player practice run (doubles as tutorial *and* low-population fallback) — see §9.1
+- **5 funnel badges** mirroring the retention funnel — see Appendix B
+- **Community capture** — Roblox group + social links + a group-join reward — see §9.2
+
+> The last three were added after tearing down a competitor that got **2.5M visits and earned $0**. See **Appendix C**. They are not nice-to-haves; each one plugs a hole that provably killed a game with this exact theme.
 
 ### ❌ OUT (v2+, write them in ROADMAP.md and stop thinking about them)
 
@@ -403,24 +408,79 @@ Mitigations, all of which belong in the MVP:
 4. **Launch at a scheduled time to a concentrated audience.** Announce "we play at 7PM" to your TikTok following. Concentration beats trickle. A steady 20 players at one hour is worth more than 200 spread across a day.
 5. **Track "% of joins that reached an ACTIVE round."** If it's low, players are bouncing off an empty lobby and your retention numbers are lying to you.
 
+### 9.1 Solo Trial — borrowed from the competitor's one real strength
+
+Takbo Aswang was PvE, so it **always worked with one player**. Yours does not — below 3 players there is no game at all. When your traffic arrives in TikTok waves, anyone who lands during a dead hour currently gets *nothing*, and they never come back.
+
+**The fix — a Solo Trial in the lobby.** A ~90-second single-player run in a corner of the map:
+
+- Complete two tasks to learn the interaction.
+- A scripted Aswang transforms and chases you. You learn the tell, and you learn to throw salt.
+- Ends with: *"Now do it when the monster is one of your friends."* → drops you into the lobby queue.
+
+It does three jobs at once:
+
+| Job | Why it matters |
+|---|---|
+| **Tutorial** | Teaches tasks + the transform tell + salt, by doing — fixes the FTUE hole in §10 |
+| **Cold-start fallback** | Below `MinPlayers`, players have something real to do instead of staring at a countdown |
+| **Retention insurance** | A player arriving at 3am still experiences the game instead of bouncing forever |
+
+**This does not change the heart of the game.** The multiplayer social loop is still the whole point; the Trial exists only to get people *into* it. Do not let it grow into a PvE campaign — that is exactly the trap that killed the competitor.
+
+### 9.2 Community capture — the hole that cost them everything
+
+Takbo Aswang had **1.43M unique players, zero social links, and no group.** All of that traffic passed through and left no way to ever reach those people again. When they shipped updates, they had nobody to tell.
+
+**Build the funnel from traffic → owned audience on day one:**
+
+- A **Roblox group** for the game, linked on the store page. Give a small in-game reward for joining (a cosmetic, a coin bonus) — group members can be notified of updates for free.
+- **Social links** on the store page: TikTok, Discord, YouTube. They cost nothing and they were absent from a game with 2.5M visits.
+- An in-lobby **"Join the group / follow the TikTok"** panel with the reward attached.
+
+Every player who joins your group or follows the TikTok is a player you can **re-activate on every update, for free, forever.** That is the difference between a game that spikes once and a game that compounds.
+
 ---
 
-## 10. First-time user experience (FTUE)
+## 10. First-time user experience (FTUE) — where the competitor actually died
 
-Day-1 retention is set almost entirely in the first five minutes.
+This is no longer a matter of opinion. Takbo Aswang's public badge counts give the exact funnel:
 
-- **Player must be in a live round within ~90 seconds of joining.** Guard this number.
-- **Teach by doing, not by reading.** No wall of text. A first-round contextual hint: "Hold to complete the task." A one-line role card at round start.
-- **Teach the folklore.** Do not assume players know salt stops an aswang. When they first pick up salt: *"Salt burns the aswang — throw it to reveal and stun."* One line, at the moment it's needed.
+| Stage | Players | Conversion |
+|---|---|---|
+| Entered the game | **1,429,383** | — |
+| Completed their **first objective** | **287,147** | **20.1%** |
+| Survived **one round** | **62,206** | **4.4%** of joiners |
+
+**Roughly 4 out of 5 people who opened that game never finished a single task.** Not "didn't come back" — never completed one objective, ever. The theme delivered 1.4M people to the door and the first five minutes threw away 80% of them.
+
+**That is the failure to design against.** Everything below is aimed at that one number.
+
+### Hard rules
+
+- **Player must be doing something meaningful within 60 seconds of joining** — either a live round or the Solo Trial (§9.1). Never a countdown on an empty lobby.
+- **Guarantee the first objective.** A brand-new player's first round spawns a task near them with a clear waypoint. Do not let their first experience be wandering a dark map with no idea what to do — that is precisely what 1.1M people quit over.
+- **Teach by doing, not by reading.** No wall of text. Contextual one-liners at the moment they're needed: "Hold to complete the task."
+- **Teach the folklore.** Do not assume players know salt stops an aswang. On first pickup: *"Salt burns the aswang — throw it to reveal and stun."*
 - Every second of non-gameplay costs you players. No splash screens, no long cutscenes.
+
+### The gate — treat this as a launch blocker
+
+> **If fewer than 50% of joiners complete a first objective, stop everything and fix the FTUE.** Not the art, not the shop, not marketing. Their number was 20%. Yours must clear 50%, and you will know within a day of launch because the badge tells you.
 
 ---
 
 ## 11. Risks & mitigations
 
+Rows marked **⚑** are confirmed kills — they are what actually destroyed Takbo Aswang (Appendix C), not hypotheticals.
+
 | Risk | Severity | Mitigation |
 |---|---|---|
-| Empty servers (cold start) | 🔴 Critical | §9 — small servers, low minimum, scheduled launch to your audience |
+| **⚑ FTUE drop-off — players quit before their first objective** | 🔴 Critical | §10 — guaranteed first task, Solo Trial, 50% badge gate. *Their number was 20%.* |
+| **⚑ Traffic arrives and is never captured** | 🔴 Critical | §9.2 — group + social links + join reward, live at launch. *They had 1.43M players and no way to reach any of them.* |
+| **⚑ Monetization never ships** | 🟠 High | Private servers + 1 gamepass are a launch blocker (§13). *They monetized 2.5M visits at exactly $0.* |
+| **⚑ Content runs out** | 🔴 Critical | Randomized tasks + human monster (§4.4). Never add a "campaign." *Their 7 hand-built zones were consumed and that was that.* |
+| Empty servers (cold start) | 🔴 Critical | §9 — small servers, low minimum, Solo Trial fallback, scheduled launch |
 | Asymmetric balance is hard | 🔴 High | Config-driven numbers, 3+ structured playtests before launch, tune on data |
 | Exploiters revealing the Aswang | 🔴 High | Strict server authority, role never leaves server, rate limits |
 | Players can't communicate | 🟠 High | Quick-chat wheel (§4.5) — do not cut it |
@@ -445,15 +505,18 @@ Each milestone should end in something **playable**. Never build two systems dee
 | **M3** | Tasks + win | 5-of-12 randomization, 4 task types, global bar, escape gate, both win conditions fire. |
 | **M4** | Salt + ghosts | Salt stuns/reveals. Dead players become contributing ghosts with separate chat. |
 | **M5** | **First playtest** | 6 real humans, 5 rounds. **Is it fun?** Write down what they said. |
-| **M6** | UI + quick chat + mobile | Full HUD, radial wheel, tested on an actual phone at 30fps |
-| **M7** | Map art + audio + lighting | Barrio dressed, fog/lighting pass, ambient + stingers. The atmosphere pass. |
-| **M8** | Progression + data | XP, levels, coins, daily streak, ProfileStore saving with migration |
-| **M9** | Monetization | 3 gamepasses, 2 dev products, private servers enabled, ProcessReceipt correct & idempotent |
-| **M10** | Analytics + anti-cheat | Events firing, funnel visible, rate limits on every remote |
-| **M11** | **Playtest #2 + balance** | 8 players, tune Config until neither side wins >60% |
-| **M12** | Launch prep | §13 checklist complete |
+| **M6** | **Solo Trial + FTUE** | 90-second practice run works with 1 player. New player reaches a first objective in under 60s. |
+| **M7** | UI + quick chat + mobile | Full HUD, radial wheel, tested on an actual phone at 30fps |
+| **M8** | Map art + audio + lighting | Barrio dressed, fog/lighting pass, ambient + stingers. The atmosphere pass. |
+| **M9** | Progression + data + badges | XP, levels, coins, daily streak, ProfileStore with migration, 5 funnel badges awarding |
+| **M10** | Monetization + community | 3 gamepasses, 2 dev products, private servers ON, group + social links + join reward |
+| **M11** | Analytics + anti-cheat | Events firing, funnel visible, rate limits on every remote |
+| **M12** | **Playtest #2 + balance** | 8 players, tune Config until neither side wins >60% |
+| **M13** | Launch prep | §13 checklist complete |
 
 > **M5 is the real gate.** If 6 people don't want a 6th round, no amount of art, monetization, or marketing will save it — **change the design then, not after launch.** This is the cheapest moment in the entire project to be wrong.
+
+> **M6 is the second gate, and it's the one the competitor failed.** They had a game people wanted to play and lost 80% of them before the first objective. Do not skip past M6 because the multiplayer already "works for you" — you already know how to play it. New players don't.
 
 ---
 
@@ -462,8 +525,16 @@ Each milestone should end in something **playable**. Never build two systems dee
 **Store page (this is 80% of whether anyone clicks):**
 - [ ] **Icon** — readable at thumbnail size, one clear focal image, high contrast
 - [ ] **Thumbnails** — show the transform moment and a group of survivors; faces/reactions outperform scenery
-- [ ] **Title with searchable keywords** — include both "Aswang" (Filipino search) and an English hook
+- [ ] **Title with searchable keywords** — include both "Aswang" (Filipino search) and an English hook. *Copy the competitor's bracket-tagging pattern — `Takbo Aswang [Pinoy Horror: Mount Luntian]` stuffs "Pinoy," "Horror," and the location into one searchable line. That part of their execution worked: 2.5M visits.*
+- [ ] **Description leads with the folklore roster.** Theirs named Aswang, Tikbalang, and Tiyanak up front and used emoji-bulleted feature lists. It got the clicks — the game behind it is what failed.
 - [ ] **Description** with keywords, how to play, and update promise
+
+**🚨 Launch blockers — the competitor shipped without these and earned $0 on 2.5M visits:**
+- [ ] **Private servers ENABLED** (they had `createVipServersAllowed: false` — the single best earner for co-op horror, switched off)
+- [ ] **At least 1 gamepass live and purchasable** (they had zero, on 1.43M unique players)
+- [ ] **Roblox group created, linked, with a join reward** (they had no group)
+- [ ] **Social links on the store page** — TikTok, Discord (they had none)
+- [ ] **All 5 funnel badges live and awarding** — verify each fires before launch, or you fly blind
 
 **Technical:**
 - [ ] Tested on Android phone, iPhone, and PC
@@ -514,6 +585,115 @@ Each milestone should end in something **playable**. Never build two systems dee
 
 ## Appendix B — Analytics events to emit from day one
 
-`player_joined` · `round_started` (playerCount) · `role_assigned` (role) · `task_completed` (type, secondsIntoRound) · `player_killed` (secondsIntoRound, wasIsolated) · `transform_witnessed` · `salt_used` (hit/miss) · `round_ended` (winner, duration, survivorsAlive) · `player_left` (phase, secondsInSession) · `shop_opened` · `purchase_completed` (productId) · `daily_claimed` (streak)
+`player_joined` · `round_started` (playerCount) · `role_assigned` (role) · `task_completed` (type, secondsIntoRound) · `player_killed` (secondsIntoRound, wasIsolated) · `transform_witnessed` · `salt_used` (hit/miss) · `round_ended` (winner, duration, survivorsAlive) · `player_left` (phase, secondsInSession) · `shop_opened` · `purchase_completed` (productId) · `daily_claimed` (streak) · `trial_started` · `trial_completed` · `group_join_reward_claimed`
 
 **The funnel that matters most:** `joined → reached an ACTIVE round → completed a round → returned on day 2`.
+
+### The 5 funnel badges (ship all of these)
+
+Badges are permanent, free, and their award counts are **publicly readable via the Roblox API** — which is exactly how the competitor's failure was diagnosed. Mirror your funnel in badges and you get a durable, tamper-proof retention dashboard for free.
+
+| Badge | Awarded when | Reads as |
+|---|---|---|
+| `Welcome` | First join | Denominator — total unique players |
+| `First Task` | First objective completed **ever** | **The number that killed them (20.1%). Target >50%.** |
+| `First Round` | Survived or lost a full round | Did they get the actual game? |
+| `First Blood` | First round as the Aswang | Are people reaching the fun role? |
+| `Balik-Balik` ("came back") | Played on a second, separate day | **Day-2 retention, measured directly** |
+
+Two caveats: your competitors can read these too, and badge counts are unique-player lifetime totals, not daily rates — so use them as a coarse funnel, and use in-game analytics for anything time-sensitive.
+
+---
+
+## Appendix C — Competitive teardown: *Takbo Aswang [Pinoy Horror: Mount Luntian]*
+
+The closest existing game to ours by theme. Studied so we inherit its audience validation without
+inheriting its mistakes. **All figures pulled from public Roblox APIs, August 2026.**
+
+`roblox.com/games/111418440586995` · universe `7202870472` · creator `Nasraula`
+
+### C.1 The numbers
+
+| Metric | Value |
+|---|---|
+| Created → last updated | Feb 2025 → **June 2026** (16 months of active development) |
+| Visits | **2,525,750** |
+| Unique players (Welcome badge) | **1,429,383** |
+| Favourites | **190,427** |
+| Likes | **448 👍 / 242 👎 → 65%** |
+| Gamepasses | **0** |
+| Private servers | **Disabled** |
+| Social links / group | **None** |
+| Max players | 20 |
+| **Concurrent players** | **0** |
+| **Live servers** | **0** |
+
+### C.2 The funnel — this is the whole story
+
+| Stage | Players | % of joiners |
+|---|---|---|
+| Entered the game | 1,429,383 | 100% |
+| Completed **first objective** | 287,147 | **20.1%** |
+| Survived **one round** | 62,206 | **4.4%** |
+
+**79.9% of players never completed a single objective.** The theme delivered 1.4 million people
+to the door; the first five minutes threw away four out of five of them. Visits ÷ unique players
+= **1.77 sessions per player** — the overwhelming majority played once and never returned.
+
+### C.3 What they got right — adopt these
+
+| Strength | Evidence | How we adopt it |
+|---|---|---|
+| **The theme sells** | 2.5M visits, 190K favourites, on a game that plays badly | Validation that Filipino folklore horror pulls. We do not need to gamble on the theme. |
+| **Store-page keyword stuffing** | `Takbo Aswang [Pinoy Horror: Mount Luntian]` — Tagalog verb + bracket tags | Copy the pattern in our title (§13) |
+| **Folklore-forward description** | Names Aswang, Tikbalang, Tiyanak up front; emoji feature bullets | Same structure. Lead with the creatures. |
+| **Evocative Filipino zone names** | Barrio, Graveyard, Bamboo Forest, Ritual Site, Church | Use this naming style for our task locations inside one map |
+| **Immediate starter kit** | "Flashlight & bolo starter kit" | Right instinct — give the player a tool in hand immediately. We give a lantern. |
+| **"Dynamic sunset-to-night"** | Their atmosphere feature | **Steal and upgrade: make it our round timer.** The sky visibly progressing toward sunrise *is* the countdown — a diegetic clock, no UI needed, and it raises tension for free. |
+| **Solo-playable** | PvE, so it worked at any population | The one structural advantage they had over us → **Solo Trial (§9.1)** |
+
+### C.4 Why they failed — five causes, five fixes
+
+**1. FTUE collapse — 80% never finished one objective.** 🔴 *The primary cause of death.*
+→ **Fix:** §10. Guaranteed first task near spawn with a waypoint, Solo Trial tutorial, and a hard
+gate: below 50% first-objective conversion, everything else stops.
+
+**2. Content exhaustion.** Seven hand-built zones, a mountain to climb, unlockable weapons — all
+consumable. Beat it once and there is no reason to return. This is why 2.5M visits became 0 CCU.
+→ **Fix:** structural, already in our design. Randomized 5-of-12 tasks and a *human* monster mean
+the content regenerates every round. **Never add a campaign.** (§4.4)
+
+**3. Zero monetization.** No gamepasses. Private servers switched off. 1.43M unique players
+converted at exactly **$0**. Sixteen months of work, no revenue path at all.
+→ **Fix:** private servers + at least one gamepass are **launch blockers** (§13). Ship them on
+day one, not "once we have players" — the players came and left while they waited.
+
+**4. Zero community capture.** No group, no Discord, no social links. 1.43M people passed through
+and not one could be reached again. Every update shipped into silence.
+→ **Fix:** §9.2 — group + social links + a join reward, live at launch.
+
+**5. Wrong server size.** 20 players in a horror game. Intimacy and paranoia both die at that
+scale, and with low CCU the servers read as empty.
+→ **Fix:** already at 8 max / 3 min (§9).
+
+### C.5 Explicitly reject — the trap that killed them
+
+Do **not** adopt any of these, no matter how tempting they look:
+
+- ❌ **Climb / escape / campaign structure** — consumable content, the root cause of their 0 CCU
+- ❌ **Zone-based progression** (7 areas) — scope death for a solo dev; took them 16 months
+- ❌ **Weapons and combat against monsters** — kills fear, and destroys the asymmetric tension
+- ❌ **NPC monsters as the threat** — the monster being a *person* is the entire heart of our game
+- ❌ **20-player servers**
+
+> **The scope-creep alarm:** if you ever find yourself building "more zones," "a mountain,"
+> "unlockable weapons," or "a campaign," you have started rebuilding Takbo Aswang. Stop and
+> re-read this appendix.
+
+### C.6 The lesson in one line
+
+> **They proved the theme works and that a game with this theme can pull 1.4 million people.
+> They also proved that pull means nothing without a first five minutes, a reason to return,
+> a way to be paid, and a way to reach your players again.**
+
+We inherit the proof. We fix the four holes.

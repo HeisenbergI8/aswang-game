@@ -2,13 +2,13 @@
 --[[
 	AudioController — Ambient bed and stingers.
 
-	Milestone: M7
+	Milestone: M8
 	Spec: docs/MVP-SPEC.md
 ]]
 
 local AudioController = {}
 
--- TODO(M7): use Roblox Creator Store audio (licensed, free to use in experiences).
+-- TODO(M8): use Roblox Creator Store audio (licensed, free to use in experiences).
 -- Audio is half of horror and costs nothing. Highest fear-per-hour in the project.
 
 function AudioController.Init() end

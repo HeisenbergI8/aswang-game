@@ -57,7 +57,7 @@ for _, name in CONTROLLER_ORDER do
 end
 
 -- Smoke test for M1: prove the round state machine is reaching the client.
--- TODO(M6): hand this off to UIController for the real HUD.
+-- TODO(M7): hand this off to UIController for the real HUD.
 Remotes.Get("PhaseChanged").OnClientEvent:Connect(function(phase: string, duration: number)
 	local label = if phase == Enums.RoundPhase.Active then "ROUND LIVE" else phase
 	print(`[Client] Phase -> {label} ({duration}s)`)

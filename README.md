@@ -71,15 +71,19 @@ src/
       TaskService.luau         5-of-12 randomized tasks (M3)
       ItemService.luau         salt: stun + reveal (M4)
       GhostService.luau        dead players stay useful (M4)
-      ProgressionService.luau  XP, coins, saving (M8)
-      MonetizationService.luau passes, products, private servers (M9)
-      AnalyticsService.luau    the funnel (M10)
-      AntiCheatService.luau    rate limits, server authority (M10)
+      TrialService.luau      ★ Solo Trial — tutorial + low-population fallback (M6)
+      ProgressionService.luau  XP, coins, saving (M9)
+      BadgeService.luau        the 5 funnel badges (M9)
+      MonetizationService.luau passes, products, private servers (M10)
+      CommunityService.luau    group reward + social links (M10)
+      AnalyticsService.luau    the funnel (M11)
+      AntiCheatService.luau    rate limits, server authority (M11)
   client/                    → StarterPlayer.StarterPlayerScripts.Client
     init.client.luau           bootstrap
-    Controllers/               UI, input, quick chat, camera FX, audio (M6–M7)
+    Controllers/               UI, input, quick chat, camera FX, audio (M7–M8)
 docs/
   MVP-SPEC.md              ★ the design doc — read this before writing code
+                             Appendix C is a teardown of the closest competitor
 ```
 
 Each stub carries `TODO(Mx)` markers tying it to a milestone in the spec.

@@ -68,6 +68,33 @@ local Config = {
 		XPPerLevel = 500,
 	},
 
+	-- The Solo Trial: tutorial + low-population fallback. See spec §9.1.
+	-- Exists because the closest competitor lost 79.9% of players before their
+	-- first objective (Appendix C). Must never grow into a PvE campaign.
+	Trial = {
+		Enabled = true,
+		Duration = 90,
+		TasksToComplete = 2,
+		ScriptedChaseAt = 55, -- seconds in: the Aswang reveals itself
+		OfferBelowPlayerCount = 3, -- == Round.MinPlayers
+	},
+
+	Community = {
+		GroupId = 0, -- TODO(M10): set once the Roblox group exists
+		GroupJoinRewardCoins = 250,
+	},
+
+	-- Award thresholds mirror the public funnel we can read back via the API.
+	Badges = {
+		Welcome = 0, -- TODO(M9): fill in badge IDs after creating them
+		FirstTask = 0,
+		FirstRound = 0,
+		FirstBlood = 0,
+		BalikBalik = 0,
+		-- LAUNCH GATE: FirstTask / Welcome must exceed this or FTUE is broken.
+		FirstTaskConversionGate = 0.50,
+	},
+
 	Performance = {
 		-- Mobile is ~60% of players. Many dynamic lights is the #1 mobile FPS killer.
 		MaxVisibleLights = 8,
