@@ -23,6 +23,10 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
 local Remotes = require(Shared.Remotes)
+-- One direction only. RoleService must NEVER require RoundService back: a require cycle errors at load,
+-- init.server.luau swallows it into a single warn, and the server sits in IDLE forever looking exactly
+-- like "nobody has joined yet".
+local RoleService = require(script.Parent.RoleService)
 local RoundTransitions = require(Shared.pure.RoundTransitions)
 local Types = require(Shared.Types)
 
@@ -108,6 +112,28 @@ local function setAllPlayerStates(newState: PlayerState)
 	end
 end
 
+--[[
+	The roster dealt into this round, SORTED.
+
+	The sort is not cosmetic. `RoleDraw.draw` is only reproducible from a seed if its candidate list
+	arrives in a stable order, and `Players:GetPlayers()` makes no such promise. Without it the draw is
+	still fair and still secret — but `tests/role-draw.test.luau` stops describing the game, because the
+	property it proves ("same stream, same Aswang") would no longer hold at the call site.
+]]
+local function dealtInUserIds(): { number }
+	local userIds = {}
+
+	for userId, playerState in state.PlayerStates do
+		if playerState == Enums.PlayerState.Alive then
+			table.insert(userIds, userId)
+		end
+	end
+
+	table.sort(userIds)
+
+	return userIds
+end
+
 --------------------------------------------------------------------------------
 -- The client's view
 --------------------------------------------------------------------------------
@@ -180,12 +206,16 @@ local function enterIdle()
 	state.AswangUserId = nil
 	state.TasksCompleted = 0
 	state.GateOpen = false
+	-- The live assignments go; RoleService's HISTORY deliberately survives, because it is the whole
+	-- anti-repeat mechanism and a server that reset it every lobby would have no memory at all.
+	RoleService.ClearRoles()
 	-- Spectator status lifts here: whoever is on the server is a candidate for the next round.
 	setAllPlayerStates(Enums.PlayerState.Lobby)
 	setPhase(Enums.RoundPhase.Idle)
 end
 
 local function enterIntermission()
+	RoleService.ClearRoles()
 	setAllPlayerStates(Enums.PlayerState.Lobby)
 	setPhase(Enums.RoundPhase.Intermission, Config.Round.Intermission)
 end
@@ -195,8 +225,13 @@ local function enterStarting()
 	-- Everyone present when the round is drawn is dealt in. Anyone arriving from here until the
 	-- next INTERMISSION becomes a SPECTATOR in onPlayerAdded.
 	setAllPlayerStates(Enums.PlayerState.Alive)
+
+	-- BEFORE setPhase, deliberately. setPhase fires PhaseChanged and pushes a snapshot to every
+	-- client; drawing first means no subscriber can observe a STARTING round that has no Aswang yet.
+	-- The snapshot carries no role either way — this is about services, not clients.
+	state.AswangUserId = RoleService.AssignRoles(dealtInUserIds())
+
 	setPhase(Enums.RoundPhase.Starting, Config.Round.StartingDelay)
-	-- TODO(C03): RoleService.AssignRoles()
 	-- TODO(C07): TaskService.SelectTasksForRound()
 end
 

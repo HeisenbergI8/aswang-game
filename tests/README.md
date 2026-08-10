@@ -46,6 +46,29 @@ output; it does not parse a format, so there is nothing to keep in sync.
 ## Growing the pure layer
 
 When a piece of gameplay logic is worth testing — role-weighting for the anti-repeat draw, the 5-of-12
-task selection, XP curves — write it as a pure function taking plain tables, put it in
-`src/shared/pure/`, and have the service call it. The Roblox-shaped wrapper stays thin and untestable;
-the decision it makes becomes provable here.
+task selection, XP curves — write it as a pure function taking plain tables, and have the service call
+it. The Roblox-shaped wrapper stays thin and untestable; the decision it makes becomes provable here.
+
+### There are TWO pure locations, and secrecy picks between them
+
+Lune resolves requires by **file path** and knows nothing about Rojo, so both are equally testable —
+`require("../src/shared/pure/X")` and `require("../src/server/pure/X")` both just work. The choice is
+about replication, not about tests.
+
+| | `src/shared/pure/` | `src/server/pure/` |
+| --- | --- | --- |
+| Reaches the client | **yes** — requirable *and callable* by any LocalScript | no — ServerScriptService does not replicate |
+| `check:config` governs it | no (the check covers `src/(server\|client)/`) | **yes** — no tunable number may be typed there |
+| Use it for | arithmetic whose inputs are already public | anything whose **inputs, seed or output** are secret |
+
+`pure/TokenBucket.luau` is shared: `Config.AntiCheat.Budgets` already replicates, so the module
+publishes nothing new, and knowing the algorithm buys a client nothing because the buckets live on the
+server.
+
+`server/pure/RoleDraw.luau` is not. A published algorithm is not a leak, but a **reproducible draw** is:
+algorithm + inputs + seed = this round's Aswang, known before the round starts, with no remote to
+intercept and nothing for `check:secrecy` to see. It is the only leak in this game that leaves no trace
+on the wire.
+
+Because `check:config` governs `src/server/`, a module there takes its numbers as **parameters** rather
+than reading Config directly — which is the right shape anyway, since those numbers are what M12 tunes.
