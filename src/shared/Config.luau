@@ -16,6 +16,10 @@ local Config = {
 		StartingDelay = 4, -- role assignment + teleport fade
 		MinPlayers = 3, -- MUST be playable at this count (see spec §9 cold start)
 		MaxPlayers = 8,
+		-- How often the server pushes a RoundSnapshot to each client. This is a network cost paid
+		-- per player per tick, and 60% of players are on a phone — raise it if the HUD stutters,
+		-- lower it only with the mobile budget in mind.
+		SnapshotInterval = 0.5,
 	},
 
 	Roles = {

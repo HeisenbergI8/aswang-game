@@ -117,7 +117,8 @@ The remaining §6.4 edge cases, and the snapshot the whole client will read.
 - Player count drops below `MinPlayers` mid-round → finish the round, *then* `IDLE`. Today `step()` only
   checks player count in `INTERMISSION` and `ENDING`; `ACTIVE` ignores it, which is correct behaviour and
   currently accidental — make it deliberate and comment it.
-- `game:BindToClose()` hook, empty for now, with the flush point marked for C40.
+- `game:BindToClose()` hook, empty for now, with the flush point marked for C31 (**not** C40 — C40 is
+  analytics; C31 is the chunk that says "save on `BindToClose` (the hook from C01)" and owns profiles).
 - Broadcast `RoundSnapshot` (`Types.ClientRoundSnapshot`) on a timer — phase, seconds left, task count,
   gate state, alive count. **No role field, ever.**
 - Extract the transition table to `src/shared/pure/RoundTransitions.luau` — `(phase, expired,
@@ -158,6 +159,26 @@ The one piece of state the whole game rests on. Plan-backed — use `/build`.
 - Round history persists across rounds in-memory (survives to disk at C40, not before).
 - The 3-second private Aswang intro.
 
+> ⚠️ **`src/shared/pure/` SHIPS ITS SOURCE TO EVERY CLIENT.** `default.project.json` maps `src/shared`
+> wholesale into `ReplicatedStorage`, so `RoleDraw.luau` is readable by any exploiter. That is fine —
+> a published algorithm is not a leak. **A reproducible one is.** Two rules follow, and they are the
+> whole security of this chunk:
+>
+> - Seed the draw from **server-only entropy**. If the seed is derivable from anything a client can
+>   observe — round number, player list, a timestamp — an exploiter replays the draw locally and knows
+>   the Aswang *before the round starts*, with no remote to intercept and nothing for `check:secrecy`
+>   to see.
+> - The **anti-repeat history must never replicate** — not because it is secret (every past round's
+>   Aswang was already revealed to everyone by `RoundEnded`, per §4.8) but because it is a **draw
+>   input**. Algorithm + inputs + seed = this round's assignment, and every input the client already
+>   holds shrinks the search space for the seed it doesn't.
+>
+> Concretely: `Random.new()` with no argument is fine. `Random.new(state.RoundNumber)` and
+> `Random.new(os.time())` are fatal — both are client-observable.
+>
+> If either is awkward, put the module in `src/server/pure/` and point the test at that path instead.
+> Testability is the reason `pure/` exists; `Shared` is not.
+
 **Done** roles assigned; a player who was Aswang last round is measurably less likely to draw it again;
 nothing about the assignment is readable from another client.
 **Verify** `lune run tests/role-draw.test.luau` — over 10,000 seeded draws, back-to-back Aswang rate is
@@ -178,6 +199,24 @@ thing in this game that legitimately reveals the Aswang.
   particle emitter. **No custom mesh** (§4.3 — this is why the mechanic is cheap).
 - `+25%` walkspeed while transformed, server-set.
 - Forced revert at `MaxTransformTime`, 1.0s revert animation.
+
+> ⚠️ **Carried over from C01 — `SPECTATOR` is bookkeeping with nothing behind it.** C01 marks a
+> mid-round joiner `SPECTATOR` and excludes them from the alive count. It does **not** give them a
+> spectator's *body*: they spawn normally, walk the Barrio, and collide with everything. Harmless
+> until this chunk, at which point an alt account joins mid-round and watches the transform from ten
+> studs away while being uncounted and — once C05 validates "both alive" — unkillable.
+>
+> Add the containment half here, before the kill exists: no character for `SPECTATOR`, or an observer
+> camera and no collision. Gate on `RoundService.GetPlayerState(player) == Enums.PlayerState.Alive` —
+> an **allowlist**, never `~= SPECTATOR`. `PlayerState` has four values, so a denylist also admits
+> `LOBBY` and `GHOST`; C15 makes `GHOST` real and a ghost must not be killable. (Secondary reason:
+> `GetPlayerState` defaults unknown UserIds to `LOBBY`. After C01's `Start()` ordering no *connected*
+> player should be unknown, so this one is belt-and-braces rather than the reachable case.)
+>
+> **Verify the premise in Studio before building the fix.** What is established is that nothing in
+> `src/` prevents a spectator spawning — no `CharacterAutoLoads`, `LoadCharacter` or teleport logic
+> exists anywhere in the tree. The place file is gitignored, so a `SpawnLocation` or a property set in
+> Studio could already handle this and no check in the repo would see it.
 
 **Done** any player with line of sight sees the transform; the Aswang cannot stay transformed past 8s.
 **Verify** playtester: two clients in Studio, one transforms, screenshot from the *other* client's
@@ -336,6 +375,37 @@ The counterplay. Without it the game is just losing (§4.6).
 - **Ghost-only chat, a genuinely separate channel.** A ghost naming the Aswang in a channel the living
   can read ends every round instantly. Enforce server-side — a client-side filter is not a filter.
 - Ghosts cannot be seen or heard by the living.
+
+> ⚠️ **Two things C01 left for this chunk to answer.**
+>
+> **1. `AlivePlayerCount` becomes a death oracle the moment a kill sets `GHOST`.** The snapshot carries
+> it to every client every 500ms. An executor recording replicated character positions timestamps each
+> kill from the decrement, then asks who was within `KillRange` (8 studs) of the victim's last position
+> at that instant. In the open that is often a single candidate — the Aswang, without ever witnessing a
+> transform; in a group it **narrows the field**, which is damaging enough on its own. Don't test it in
+> a crowded room, see three candidates and conclude the warning was hype.
+> **Decide whether death is public.** If it is (a corpse everyone can see, a broadcast), this field is
+> redundant and should be dropped rather than kept as a second, lower-latency channel. If it is not,
+> the count must not fall until the body is discoverable.
+>
+> **2. Rejoin currently launders a survivor into an unkillable body.** C01's `onPlayerAdded` marks any
+> mid-round arrival `SPECTATOR`, including someone who was `ALIVE` sixty seconds ago and disconnected.
+> They never return to `ALIVE`, so post-C05 they cannot be killed — alt-F4 on hearing the transform is
+> a hard counter to the entire monster. Resolve a returning dealt-in player to `GHOST` here: correct
+> fiction and the fix. Three things that prescription needs to be complete:
+>
+> - **Populate the dealt-in set in `enterStarting`**, beside `setAllPlayerStates(Alive)`, and clear it
+>   in `enterIntermission`/`enterIdle` and in `Init()`. It must be its **own table** — it cannot live
+>   inside `PlayerStates`, because `setAllPlayerStates` opens with `table.clear`.
+> - **`GHOST`-on-rejoin makes quitting less profitable, not unprofitable.** A ghost still gets ghost
+>   chat, `RequestGhostSpook` and 0.25× task contribution, so the quitter lands with the full ghost
+>   feature set having never been caught. Ship it anyway — it is strictly better than today — but
+>   record a disconnect during `ACTIVE` as a **death for scoring and XP**, or it resurfaces at C32 as
+>   XP numbers nobody can explain.
+> - **C11 must not double-handle the count.** A disconnect already deletes the `PlayerStates` entry, so
+>   `AlivePlayerCount` drops immediately and "survivors ≤ 2" already treats a quitter as dead whether
+>   or not they return. `GHOST`-on-rejoin makes the returning body consistent with that; it does not
+>   change it. (The Aswang has no rejoin case — `onPlayerRemoving` aborts the round on a match.)
 
 **Done** death transitions cleanly; ghosts see ghosts; no ghost message reaches a living player.
 **Verify** playtester: three clients, one dies, ghost sends a message, screenshot of the two living
@@ -735,6 +805,11 @@ C02 built the mechanism; this chunk applies it everywhere and turns logging into
 - **A full re-read of every path the role could leak through** — attributes, tags, sounds played to one
   player, Highlights, backpack contents, speed multipliers. §6.2's *derived hint* problem: none of these
   contain the word "role" and every one is readable by any client.
+- **Give `check:secrecy` a field allowlist for the two reveal remotes.** Measured at C01: `RoundEnded`
+  and `RoleAssigned` are on `REVEAL_ALLOWLIST`, so the scanner skips those calls entirely rather than
+  inspecting what is *in* the payload — and Luau accepts an **extra** field on an annotated table
+  without complaint (it catches wrong types and missing fields only). So `KillerName = killer.Name`
+  added to the reveal passes both the typechecker and the check. Pin the permitted field names.
 
 **Done** `check:ratelimit` and `check:secrecy` clean with no new waivers; `exploit-auditor` finds no
 role-leak path.
@@ -872,6 +947,15 @@ Each is a decision worth proving, and each makes its chunk verifiable from a ter
 | `pure/ProfileMigration.luau` | C31 | `tests/profile-migration.test.luau` |
 | `pure/XPCurve.luau` | C32 | `tests/xp-curve.test.luau` |
 | `pure/DailyStreak.luau` | C33 | `tests/daily-streak.test.luau` |
+
+⚠️ Everything in `src/shared/pure/` is **requirable and callable by any client** — `src/shared` maps
+wholesale into `ReplicatedStorage`, so a LocalScript can `require()` the module and run it. (Callable,
+not merely readable: reading `.Source` needs plugin security, and assuming that protects you is the
+mistake.) Harmless for six of these eight, and harmless for a reason worth knowing — `Config.luau` is
+itself replicated, so `KillValidation` and `TokenBucket` publish nothing that `Config.Monster.KillRange`
+already hands over. Logic is not secret. **Inputs and seeds are.** For `RoleDraw` that is the security of
+the whole game (see C03); for `TaskSelection` a client-derivable seed is a pacing advantage — an
+exploiter who knows which 5 of 12 spawn can pre-position.
 
 ### Chunks where `exploit-auditor` is mandatory
 

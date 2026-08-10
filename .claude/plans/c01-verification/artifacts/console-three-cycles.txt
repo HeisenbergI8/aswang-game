@@ -1,0 +1,82 @@
+C01 — round state machine, behavioural verification
+Captured 2026-08-10 from Studio "aswang-game" (id 7107daa3-2aac-4437-a1cf-546ecae82ce7)
+Rojo live-synced on localhost:34872. Solo session, one player (Demiurgos_18).
+
+Temporary Config values used to make cycles observable (461s -> 38s per cycle),
+reverted immediately after this capture:
+  Round.Intermission = 8   (committed: 25)
+  Round.Duration     = 20  (committed: 420)
+  Round.EndScreen    = 6   (committed: 12)
+  Debug.SoloTesting  = true  (committed: false)  -- lets one player reach MinPlayers
+  Debug.VerboseLogging = true (committed: false) -- enables the [RoundService] lines
+
+WHAT THIS ESTABLISHES
+  1. Phase order   IDLE -> INTERMISSION -> STARTING -> ACTIVE -> ENDING -> INTERMISSION
+                   Three consecutive cycles, no skipped phase, no repeated phase.
+  2. RoundNumber   increments exactly ONCE per cycle, at STARTING: #1, #2, #3.
+                   Not once per phase, which was the failure mode being checked.
+  3. Snapshot      RoundSnapshot reaches the client throughout; AlivePlayerCount goes
+                   0 -> 1 at STARTING and back to 0 at the following INTERMISSION.
+  4. PlayerState   YourState reads ALIVE for the whole round and LOBBY between rounds.
+                   This field is populated server-side by RoundService.GetPlayerState(),
+                   so it is the reliable channel for that call. (A direct execute_luau
+                   probe is NOT: datamodel_type="Server" runs with its own module
+                   require-cache and returns a fresh un-Init()'d RoundService reading
+                   IDLE/LOBBY while the live service is in ACTIVE.)
+
+NOT COVERED HERE
+  - Mid-round join -> SPECTATOR        (needs a second client joining during ACTIVE)
+  - Leave during ACTIVE -> round finishes rather than ending early
+    The transition table itself is proven exhaustively for both by
+    tests/round-transitions.test.luau; what is untested is the Roblox wiring around it.
+
+--------------------------------------------------------------------------------
+SERVER CONSOLE
+--------------------------------------------------------------------------------
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 13 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Client] Ready. 5 controllers loaded.
+[Client] Snapshot — INTERMISSION round #0 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+
+--- cycle 1 ---
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (19s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #1 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+
+--- cycle 2 ---
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #2 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #2 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (19s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #2 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #2 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+
+--- cycle 3 ---
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #3 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #3 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (19s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #3 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #3 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)

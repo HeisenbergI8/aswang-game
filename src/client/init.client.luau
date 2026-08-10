@@ -12,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Enums = require(Shared.Enums)
 local Remotes = require(Shared.Remotes)
+local Types = require(Shared.Types)
 
 local CONTROLLER_ORDER = {
 	"AudioController",
@@ -57,10 +58,29 @@ for _, name in CONTROLLER_ORDER do
 end
 
 -- Smoke test for M1: prove the round state machine is reaching the client.
--- TODO(M7): hand this off to UIController for the real HUD.
+-- TODO(C18): hand this off to UIController for the real HUD.
 Remotes.Get("PhaseChanged").OnClientEvent:Connect(function(phase: string, duration: number)
 	local label = if phase == Enums.RoundPhase.Active then "ROUND LIVE" else phase
 	print(`[Client] Phase -> {label} ({duration}s)`)
+end)
+
+-- The snapshot arrives several times a second, so log only when something a player would notice has
+-- actually changed. A per-tick print buries every other line in the output window, which is where
+-- you will be looking when something breaks.
+local lastSnapshotLine: string? = nil
+
+Remotes.Get("RoundSnapshot").OnClientEvent:Connect(function(snapshot: Types.ClientRoundSnapshot)
+	local gate = if snapshot.GateOpen then "OPEN" else "shut"
+	local tasks = `{snapshot.TasksCompleted}/{snapshot.TasksRequired}`
+	local line = `{snapshot.Phase} round #{snapshot.RoundNumber} · tasks {tasks} · gate {gate}`
+		.. ` · alive {snapshot.AlivePlayerCount} · you: {snapshot.YourState}`
+
+	if line == lastSnapshotLine then
+		return
+	end
+
+	lastSnapshotLine = line
+	print(`[Client] Snapshot — {line} ({math.floor(snapshot.SecondsRemaining)}s left)`)
 end)
 
 print(`[Client] Ready. {#CONTROLLER_ORDER} controllers loaded.`)

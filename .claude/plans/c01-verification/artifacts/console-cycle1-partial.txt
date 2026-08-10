@@ -1,0 +1,52 @@
+C01 behavioural verification — server console excerpt
+Captured via mcp__Roblox_Studio__get_console_output, Studio id 7107daa3-2aac-4437-a1cf-546ecae82ce7 ("aswang-game")
+Config at time of capture: Round.Intermission=25 (default), Round.Duration=420 (default), Round.EndScreen=12 (default)
+  Debug.SoloTesting=true, Debug.VerboseLogging=true (both pre-set by the user before this session; NOT
+  changed by this agent — the requested shortened Round timings (8/20/6) could NOT be set because the
+  PreToolUse write guard blocks the playtester agent from editing any file under src/. See report body.)
+
+--- RAW CONSOLE (chronological, deduplicated by the client's own "log only on change" behaviour) ---
+[RoundService] -> INTERMISSION (25s)
+[Bootstrap] Ready. 13 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Client] Ready. 5 controllers loaded.
+[Client] Snapshot — INTERMISSION round #0 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (24s left)
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (420s)
+[Client] Phase -> ROUND LIVE (420s)
+[Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (419s left)
+--- end of observed console; this was still current at Play-stop, ~162s into the 420s ACTIVE window ---
+
+--- execute_luau probes against datamodel_type="Server" ---
+Probe 1 (immediately after the STARTING->ACTIVE transition above):
+  code: `local RS = require(...RoundService); for _,p in game.Players:GetPlayers() do print(p.Name, RS.GetPlayerState(p)) end; print("Phase:", RS.GetPhase(), "IsActive:", RS.IsActive())`
+  console result: `Demiurgos_18 LOBBY` / `Phase: IDLE ... IsActive: false`
+  -- CONTRADICTS the live phase (console clearly shows ACTIVE at that moment).
+
+Probe 2 (re-run seconds later, returned value instead of print):
+  returned: "Demiurgos_18 -> LOBBY | Phase=IDLE | IsActive=false | SecondsRemaining=0"
+  -- same contradiction, reproducible.
+
+Marker persistence test (proves execute_luau calls share a VM with EACH OTHER,
+but not with the live game):
+  call A: `local RS = require(...RoundService); RS.__probeMarker = "marker-set-once"`
+  call B (separate invocation): `local RS = require(...RoundService); return tostring(RS.__probeMarker)`
+  -> call B returned "marker-set-once", proving A and B share a require-cache.
+  Yet that shared cache's RoundService.state.Phase is IDLE while the real, running
+  RoundService (the one printing "[RoundService] -> ACTIVE (420s)" to console) is in ACTIVE.
+  Conclusion: execute_luau(datamodel_type="Server") executes in a script/actor context whose
+  module require-cache is DISTINCT from the live ServerScriptService.Server script's cache,
+  even though both see the same Instance tree (Players, Workspace, etc. matched correctly —
+  "Demiurgos_18" is the real connected player). This is a Studio-MCP tooling caveat, not a
+  RoundService bug. See report body for the substitute evidence used instead.
+
+wall-clock cross-check (proves ACTIVE had not finished — this was a genuine partial capture,
+not a truncated one):
+  date (bash) at T:            Mon Aug 10 20:27:48 PST 2026
+  date (bash) ~68s later:      Mon Aug 10 20:28:56 PST 2026
+  os.clock() via execute_luau at first ACTIVE check:  990.1369352499896
+  os.clock() via execute_luau ~68s later:             1152.431833541661   (delta 162.3s)
+  Round.Duration is 420s, so only ~162s of the 420s ACTIVE window had elapsed — ENDING and the
+  second INTERMISSION genuinely had not happened yet.

@@ -54,6 +54,31 @@ export type ActiveTask = {
 	Completed: boolean,
 }
 
+--[[
+	The reveal, sent on RoundEnded when the round is over (spec §4.8 — the reveal is the point).
+
+	KNOW WHAT THIS TYPE DOES AND DOES NOT BUY — measured against this repo's own analyzer, not assumed:
+
+	  · a field of the WRONG TYPE      → caught  ("Property 'Result' is not compatible")
+	  · a MISSING field                → caught  ("...missing field 'RoundNumber'")
+	  · an EXTRA field                 → NOT CAUGHT. Silently accepted.
+
+	That last line is the one that matters, because an extra field is exactly the leak shape: adding
+	`KillerName = killer.Name` beside `Result` is the natural way to build a richer end screen, and it
+	would reach eight clients with `npm run verify` green. Nothing catches it — `Remotes.Get` returns a
+	plain RemoteEvent so `FireAllClients` takes `...any`, and `RoundEnded` sits on `check-secrecy.mjs`'s
+	REVEAL_ALLOWLIST, so the scanner skips the entire call rather than inspecting its fields.
+
+	So this type is documentation plus two thirds of a guard. It is worth having and it is NOT a reason
+	to relax: **whatever you add to the reveal, re-read it as though the round were still running.**
+	The enforceable version is a field allowlist inside `check-secrecy.mjs` for the two reveal remotes.
+]]
+export type RoundEndedPayload = {
+	Result: RoundResult,
+	AswangUserId: number?, -- safe ONLY here: the round is over
+	RoundNumber: number,
+}
+
 -- SERVER ONLY. Never send this table to a client.
 export type RoundState = {
 	Phase: RoundPhase,

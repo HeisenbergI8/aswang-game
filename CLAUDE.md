@@ -154,6 +154,25 @@ it as a **pure function over plain tables** in `src/shared/pure/`, and have the 
 Roblox-shaped wrapper stays thin and untestable; the decision becomes the best-verified thing in the
 repo, and a plan step can be gated on `lune run tests/<x>.test.luau` instead of on a grep.
 
+Pure modules also **must not** `require(script.Parent.X)` — Lune has no `script`, so a pure module that
+reaches for `Types` or `Enums` stops being runnable from a terminal and the whole point is lost.
+Re-declare the literal union locally; Luau unions are structural, so the local type and `Types.RoundPhase`
+are the same type and pass to each other without a cast.
+
+**`src/shared/pure/` is requirable and callable by any client** — `default.project.json` maps
+`src/shared` wholesale into `ReplicatedStorage`, so a LocalScript can `require()` the module and *run*
+it. Callable, not merely readable: reading `.Source` needs plugin security, and relying on that is the
+mistake. For a transition table or an XP curve this costs nothing — `Config.luau` is replicated too, so
+those modules publish nothing already public. Logic is not secret.
+
+**Inputs and seeds are.** A published algorithm is not a leak, but one whose **inputs a client can
+supply** is: it replays the draw locally and knows the Aswang before the round starts, with no remote to
+intercept and nothing for `check:secrecy` to see. `Random.new()` with no argument is fine;
+`Random.new(roundNumber)` and `Random.new(os.time())` are fatal, and `os.time()` is client-observable to
+the second. Seed from server-only entropy and keep draw inputs off the wire, or put the module in
+`src/server/pure/` and point the test at that path — Lune resolves by file path and cares nothing for
+Rojo. Testability is why `pure/` exists; `Shared` is not.
+
 Anything touching the DataModel is verified by the `playtester` driving real Studio instead.
 
 ## Working Pipeline
@@ -200,6 +219,34 @@ stated cannot be challenged. Skipping the announcement is the actual failure mod
 **Run the reviewers concurrently — this is the default, not an optimisation.** Launch them in one message
 with `run_in_background: true`. They share no data: the playtester drives the running place, the auditors
 read the diff. Sequencing them only adds the slower one's wall clock to the faster one's.
+
+**Finish editing before you trigger them.** A review pass costs 5–8 minutes of wall clock; `review-gate.mjs`
+fires on every turn that touches a tracked `.luau` file and goes green. So applying an auditor's
+recommended fixes *in a later turn* buys a second full review round — for this repo's real numbers, ~8
+minutes to re-audit six lines. Do the work, self-review, apply what you already know needs applying, run
+`verify`, and **only then** launch the reviewers. Where an auditor's finding is genuinely new, batch every
+resulting fix into a single turn rather than trickling them out.
+
+**The playtester cannot edit `Config.luau` — set debug values yourself, before launching it.**
+`guard-agent-write.mjs` scopes its writes to `.claude/plans/` and `tests/`, so asking it to shorten
+`Round.Duration` for a fast cycle is asking for something it will correctly refuse twice and then report.
+A round cycle is 461s at committed values; drop `Intermission/Duration/EndScreen` to 8/20/6 and set
+`Debug.SoloTesting`/`VerboseLogging` yourself first, then revert all five and confirm with
+`git diff src/shared/Config.luau` that only intended changes survive. `verify` goes red while they are
+set — `tests/config.test.luau` asserts `SoloTesting == false` — which is the test working, and
+`guard-commit.mjs` refuses a red tree anyway, so the values cannot reach history.
+
+**`execute_luau` cannot read a live service's state.** With `datamodel_type: "Server"` it runs with its
+own module require-cache: `require(…RoundService)` there returns a fresh, un-`Init()`'d copy reading
+`IDLE`, while the real service is in `ACTIVE`. It sees the same Instance tree, so it looks like it
+worked. Read server state through a field the server already publishes — `RoundSnapshot`'s `YourState`
+is populated by calling `GetPlayerState()`, so the console line proves the call.
+
+**Launch all three in the same message as each other, first time.** Naming two and adding the playtester
+after the gate objects costs a whole extra round trip. The one case for omitting an agent is a
+*precondition you have checked this turn* — e.g. the playtester cannot verify anything when `rojo serve`
+is down or Studio is not connected, and re-running it just reproduces the same refusal. Check
+(`ReplicatedStorage` empty in `search_game_tree` means Rojo never synced), then say why in one line.
 
 The ordering that *is* real: they all run **after** implementation, and an auditor with no
 `implementation-log.md` to read has nothing to trace.
