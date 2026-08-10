@@ -1,0 +1,40 @@
+{
+  "name": "aswang-game",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Task runner for the ASWANG harness. Not a JS project — node is here because the Claude Code hooks are node scripts, and npm gives every gate one name that hooks, agents and plan Verify lines can all call.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "sourcemap": "rojo sourcemap default.project.json --output sourcemap.json",
+    "analyze": "node .claude/scripts/check-analyze.mjs",
+    "lint": "selene src",
+    "fmt": "stylua src tests",
+    "fmt:check": "stylua --check src tests",
+    "build": "rojo build default.project.json --output build/aswang.rbxl",
+
+    "check:toolchain": "node .claude/scripts/check-toolchain.mjs",
+    "check:remotes": "node .claude/scripts/check-remotes.mjs",
+    "check:secrecy": "node .claude/scripts/check-secrecy.mjs",
+    "check:config": "node .claude/scripts/check-config.mjs",
+    "check:scope": "node .claude/scripts/check-scope.mjs",
+    "check:ratelimit": "node .claude/scripts/check-ratelimit.mjs",
+    "test:unit": "node .claude/scripts/run-luau-tests.mjs",
+
+    "verify:fast": "npm run --silent analyze && npm run --silent check:remotes && npm run --silent check:secrecy && npm run --silent verify:harness:fast",
+    "verify": "npm run --silent analyze && npm run --silent lint && npm run --silent fmt:check && npm run --silent check:remotes && npm run --silent check:secrecy && npm run --silent check:config && npm run --silent check:scope && npm run --silent check:ratelimit && npm run --silent test:unit && npm run --silent verify:harness",
+
+    "verify:harness": "node .claude/scripts/harness-selftest.mjs && node .claude/scripts/lessons.mjs audit && node .claude/scripts/hook-heartbeat.mjs && node .claude/scripts/candidates.mjs status",
+    "verify:harness:fast": "node .claude/scripts/check-toolchain.mjs --quiet",
+    "check:guards": "node .claude/scripts/harness-selftest.mjs --force",
+
+    "verify:plan": "node .claude/scripts/verify-plan.mjs",
+    "goal": "node .claude/scripts/goal-check.mjs",
+    "preflight": "node .claude/scripts/preflight.mjs",
+    "candidates": "node .claude/scripts/candidates.mjs list",
+    "lessons": "node .claude/scripts/lessons.mjs list",
+    "run:status": "node .claude/scripts/run-state.mjs status"
+  }
+}

@@ -1,0 +1,17 @@
+# Harness runtime state. `.claude/` itself is TRACKED here — the agents, skills, scripts and lessons
+# are the project's process, and an untracked harness has no history and cannot be reviewed in a diff.
+# What follows is the state those scripts write at runtime, which is not source.
+
+.run/
+.candidates.jsonl
+.hook-heartbeat.jsonl
+.hook-heartbeat.json
+.run-ledger.json
+.loop-state.json
+.verify-state.json
+.claim-state.json
+.review-state.json
+.lessons-state.json
+.analyze-state.json
+.harness-selftest.json
+.DS_Store

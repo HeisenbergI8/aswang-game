@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "deny": [
+      "Bash(sudo:*)",
+      "Bash(git clean:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(mkfs:*)",
+      "Bash(shutdown:*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)"
+    ],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "autoMode": {
+    "hard_deny": [
+      "$defaults",
+      "Deleting, moving, or overwriting any file outside the current repository — including anything under the home directory, Desktop, Documents, or another project. There is no task for which this is correct; ask the user to do it themselves.",
+      "git clean, git reset --hard, git checkout -- ., or git restore . — these destroy uncommitted work and untracked files with no way back.",
+      "Deleting a .rbxl or .rbxlx place file. Place files are gitignored and hold the MAP, which Git cannot restore.",
+      "Recursive deletion of a directory the user did not explicitly name in this conversation."
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/lessons.mjs", "inject"],
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/candidates.mjs", "record"],
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/build-trigger.mjs"],
+            "statusMessage": "Task loop: reading /build",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/guard-agent-write.mjs"],
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/guard-destructive.mjs"],
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/guard-commit.mjs"],
+            "statusMessage": "Checking the commit",
+            "timeout": 120
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__Roblox_Studio__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/guard-studio-sync.mjs"],
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/gate-luau-analyze.mjs"],
+            "statusMessage": "Analyzing the edit",
+            "timeout": 120
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/loop-breaker.mjs"],
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/record-activity.mjs"],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/loop-breaker.mjs"],
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/record-activity.mjs"],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/verify-gate.mjs"],
+            "statusMessage": "Verifying subagent work",
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/candidates.mjs", "finding"],
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/record-activity.mjs"],
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/claim-check.mjs"],
+            "statusMessage": "Checking claims against what ran",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/verify-gate.mjs"],
+            "statusMessage": "Verifying before finishing",
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/review-gate.mjs"],
+            "statusMessage": "Checking whether the reviewers ran",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/lessons.mjs", "nudge"],
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/candidates.mjs", "reflect"],
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/task-driver.mjs"],
+            "statusMessage": "Task loop: deciding whether to continue",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "note": "Diagnostics allowed to fail. Keyed on file+kind+message, never on line, so unrelated edits do not force a re-bless. Shrinking this list is progress; growing it needs a reason in the commit. Re-bless with `node .claude/scripts/check-analyze.mjs --update` — which refuses to run under an agent.",
+  "blessedAt": "2026-08-10",
+  "known": []
+}
