@@ -5,40 +5,45 @@
 	Using string literals (not numbers) so they're readable in logs and analytics.
 ]]
 
+-- The `:: Types.X` casts are load-bearing under --!strict. Without them every field
+-- infers as plain `string`, and passing one to a parameter typed as the literal union
+-- fails to typecheck — which is how the scaffold shipped six analyze errors.
+local Types = require(script.Parent.Types)
+
 local Enums = {}
 
 Enums.RoundPhase = table.freeze({
-	Idle = "IDLE",
-	Intermission = "INTERMISSION",
-	Starting = "STARTING",
-	Active = "ACTIVE",
-	Ending = "ENDING",
+	Idle = "IDLE" :: Types.RoundPhase,
+	Intermission = "INTERMISSION" :: Types.RoundPhase,
+	Starting = "STARTING" :: Types.RoundPhase,
+	Active = "ACTIVE" :: Types.RoundPhase,
+	Ending = "ENDING" :: Types.RoundPhase,
 })
 
 Enums.Role = table.freeze({
-	Survivor = "SURVIVOR",
-	Aswang = "ASWANG",
+	Survivor = "SURVIVOR" :: Types.Role,
+	Aswang = "ASWANG" :: Types.Role,
 })
 
 Enums.PlayerState = table.freeze({
-	Lobby = "LOBBY",
-	Alive = "ALIVE",
-	Ghost = "GHOST",
-	Spectator = "SPECTATOR", -- joined mid-round
+	Lobby = "LOBBY" :: Types.PlayerState,
+	Alive = "ALIVE" :: Types.PlayerState,
+	Ghost = "GHOST" :: Types.PlayerState,
+	Spectator = "SPECTATOR" :: Types.PlayerState, -- joined mid-round
 })
 
 Enums.TaskType = table.freeze({
-	Hold = "HOLD",
-	Timing = "TIMING",
-	Fetch = "FETCH",
-	TwoPerson = "TWO_PERSON",
+	Hold = "HOLD" :: Types.TaskType,
+	Timing = "TIMING" :: Types.TaskType,
+	Fetch = "FETCH" :: Types.TaskType,
+	TwoPerson = "TWO_PERSON" :: Types.TaskType,
 })
 
 Enums.RoundResult = table.freeze({
-	SurvivorsEscaped = "SURVIVORS_ESCAPED",
-	AswangWins = "ASWANG_WINS",
-	Timeout = "TIMEOUT",
-	Aborted = "ABORTED", -- e.g. the Aswang disconnected
+	SurvivorsEscaped = "SURVIVORS_ESCAPED" :: Types.RoundResult,
+	AswangWins = "ASWANG_WINS" :: Types.RoundResult,
+	Timeout = "TIMEOUT" :: Types.RoundResult,
+	Aborted = "ABORTED" :: Types.RoundResult, -- e.g. the Aswang disconnected
 })
 
 return Enums

@@ -75,7 +75,9 @@ end
 for _, name in SERVICE_ORDER do
 	local service = loaded[name]
 	if service and type(service.Start) == "function" then
-		local startOk, err = pcall(service.Start)
+		-- `:: any` because pcall over a `() -> ()` is typed as returning only the boolean,
+		-- so binding `err` is an arity error under --!strict.
+		local startOk, err = pcall(service.Start :: any)
 		if not startOk then
 			warn(`[Bootstrap] {name}.Start() errored: {err}`)
 		end

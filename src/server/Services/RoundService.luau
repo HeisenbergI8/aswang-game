@@ -205,7 +205,7 @@ function RoundService.Start()
 	task.spawn(function()
 		while true do
 			step()
-			task.wait(0.25)
+			task.wait(0.25) -- config-ok: scheduler tick, not a balance knob
 		end
 	end)
 end
