@@ -48,10 +48,31 @@ local function onTransformed(payload: Types.MonsterTransformedPayload)
 	-- TODO(M7): shake the camera and swell the heartbeat when this fires within TransformAudioRange.
 end
 
+--[[
+	The client's reaction to a kill (C05). Deliberately almost nothing, on the same test the transform
+	reaction is held to: the corpse is a real anchored model in the workspace and replicates by itself,
+	so if this file were deleted a player would still walk around a corner and find a body.
+
+	IT DOES NOT GUESS THE KILLER, and it must never start. The payload does not name one, and the
+	nearest-player inference a client COULD compute is exactly the accusation the game asks a human to
+	make out loud through the quick-chat wheel (§4.5). Computing it here would hand every player a
+	perfect answer and delete the social half of the game — and it would look like a feature in review.
+]]
+local function onPlayerKilled(payload: Types.PlayerKilledPayload)
+	local isMine = payload.VictimUserId == Players.LocalPlayer.UserId
+
+	print(`[Client] Kill witnessed{if isMine then " (you died)" else ""}`)
+
+	-- TODO(M7): a low thud and a brief vignette when payload.Position is within
+	-- Config.Monster.TransformAudioRange of the camera. Distance-gated on THIS side is fine — the
+	-- position is already here, so gating buys atmosphere, not secrecy.
+end
+
 function CameraFXController.Init() end
 
 function CameraFXController.Start()
 	Remotes.Get("MonsterTransformed").OnClientEvent:Connect(onTransformed)
+	Remotes.Get("PlayerKilled").OnClientEvent:Connect(onPlayerKilled)
 end
 
 return CameraFXController

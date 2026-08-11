@@ -16,6 +16,33 @@ local Config = {
 		StartingDelay = 4, -- role assignment + teleport fade
 		MinPlayers = 3, -- MUST be playable at this count (see spec §9 cold start)
 		MaxPlayers = 8,
+
+		--[[
+			§4.8: "Aswang wins when living survivors ≤ 2". THE NUMBER IS NOT THE WHOLE RULE.
+
+			Read literally against MinPlayers = 3, this fires on tick one of every minimum-size round:
+			three players is one Aswang and two survivors, and two is already ≤ 2. `pure/WinConditions`
+			(Phase 5) clamps the effective threshold by how many survivors were DEALT IN, which is what
+			makes the rule mean "two thirds of them are dead" instead of "the round is small".
+
+			So this knob is the ceiling on the threshold, not the threshold itself. Tune it at M12
+			against 6–8 player rounds, which is the size it actually governs.
+		]]
+		AswangWinSurvivorThreshold = 2,
+
+		--[[
+			The floor between one player-triggered respawn and the next.
+
+			`Humanoid.Died` is a state-machine trigger that ANY client can fire at will — the stock
+			Escape → Reset button is enough — and outside a round it costs the server a full character
+			rebuild plus appearance fetch, replicated to everyone. It is not a remote, so AntiCheat
+			never sees it and `check:ratelimit` structurally cannot cover it. Eight clients looping
+			reset would otherwise sustain eight rig builds a second for the whole lobby.
+
+			Must stay well under `Intermission` so that a player who dies in the lobby always has a
+			body back before STARTING deals them in. tests/config.test.luau pins that.
+		]]
+		RespawnCooldown = 3,
 		-- How often the server pushes a RoundSnapshot to each client. This is a network cost paid
 		-- per player per tick, and 60% of players are on a phone — raise it if the HUD stutters,
 		-- lower it only with the mobile budget in mind.
@@ -57,6 +84,10 @@ local Config = {
 		TransformedSpeedMult = 1.25,
 		TransformAudioRange = 40, -- how far the transform sound carries
 		CorpseDuration = 45,
+		-- How long the corpse takes to fade once CorpseDuration is up. Long enough that a survivor
+		-- walking in on the tail of it still registers a body was there; short enough that it is not a
+		-- second, softer corpse with its own lifetime. §4.9: a fade, not a gore effect.
+		CorpseFadeTime = 1.5,
 
 		--[[
 			The transform's LOOK (§4.3). No custom mesh — avatar scale, a colour and material shift,
@@ -83,6 +114,16 @@ local Config = {
 		TimingAttempts = 3,
 		FetchTime = 25,
 		TwoPersonTime = 12,
+
+		--[[
+			The minimum distance between two SELECTED task points (§4.4, "spread"). C07's draw honours it
+			when the pool carries positions and ignores it when it does not.
+
+			It must exceed Monster.KillRange or the spread does nothing that matters: two task points
+			closer together than the Aswang's reach are one ambush spot, and §4.4's whole purpose is to
+			stop players (and the monster) memorising a route. tests/config.test.luau pins that.
+		]]
+		MinSpacingStuds = 20,
 	},
 
 	Salt = {

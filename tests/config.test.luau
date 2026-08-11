@@ -184,8 +184,61 @@ check(
 	`Duration={Config.Round.Duration}s — a testing value left in?`
 )
 
+--------------------------------------------------------------------------------
+-- C05 / C06 / C07 (this plan)
+--------------------------------------------------------------------------------
+
+-- Spec §4.8. On a FULL server the attrition rule must still be a rule: a threshold at or above the
+-- survivor count of an 8-player round would mean the Aswang wins before killing anybody. The
+-- MinPlayers end of the range is NOT pinned here on purpose — at 3 players the literal rule is
+-- degenerate no matter what this number is, and pure/WinConditions' dealt-in clamp is what handles it.
+check(
+	"the attrition win is reachable but not free on a full server",
+	Config.Round.AswangWinSurvivorThreshold >= 1
+		and Config.Round.AswangWinSurvivorThreshold
+			< Config.Round.MaxPlayers - Config.Roles.AswangCount,
+	`threshold={Config.Round.AswangWinSurvivorThreshold}, survivors on a full server={Config.Round.MaxPlayers - Config.Roles.AswangCount}`
+)
+
+-- Spec §4.3 step 4: the corpse "remains for 45s, then fades". A fade longer than the lifetime means
+-- the body is translucent for its whole existence and never reads as a body at all.
+check(
+	"the corpse fades inside its own lifetime",
+	Config.Monster.CorpseFadeTime < Config.Monster.CorpseDuration,
+	`CorpseFadeTime={Config.Monster.CorpseFadeTime}, CorpseDuration={Config.Monster.CorpseDuration}`
+)
+
+-- Spec §4.3 step 5. The corpse is the evidence, and the cooldown is how long until there could be a
+-- second one. If a body faded before the Aswang could kill again, the map would never show two at
+-- once — and "bodies are piling up" is the pressure that makes survivors group and finish tasks.
+check(
+	"a body outlives the cooldown, so two kills can be evidence at once",
+	Config.Monster.CorpseDuration > Config.Monster.KillCooldown,
+	`CorpseDuration={Config.Monster.CorpseDuration}, KillCooldown={Config.Monster.KillCooldown}`
+)
+
+-- Spec §4.4. Two selected task points within kill range of each other are one location wearing two
+-- hats: the Aswang covers both from a standstill and the "spread" in the draw buys nothing.
+check(
+	"selected task points are spread further apart than the Aswang can reach",
+	Config.Tasks.MinSpacingStuds > Config.Monster.KillRange,
+	`MinSpacingStuds={Config.Tasks.MinSpacingStuds}, KillRange={Config.Monster.KillRange}`
+)
+
+-- The respawn cooldown throttles a CLIENT-CONTROLLED trigger (Humanoid.Died, reachable from the stock
+-- reset button), so it must be positive or the throttle does not exist. It must also stay well under
+-- Intermission, or a player who dies in the lobby is still bodiless when STARTING deals them in —
+-- which would hand them a round as an ALIVE player with no character, the exact shape of the bug the
+-- death watcher was written to fix.
+check(
+	"a lobby death always recovers well before the next round starts",
+	Config.Round.RespawnCooldown > 0
+		and Config.Round.RespawnCooldown * 2 < Config.Round.Intermission,
+	`RespawnCooldown={Config.Round.RespawnCooldown}, Intermission={Config.Round.Intermission}`
+)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end
 
-print("  PASS  config: 21 balance invariants")
+print("  PASS  config: 26 balance invariants")

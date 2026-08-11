@@ -27,8 +27,10 @@ local Remotes = require(Shared.Remotes)
 -- init.server.luau swallows it into a single warn, and the server sits in IDLE forever looking exactly
 -- like "nobody has joined yet".
 local RoleService = require(script.Parent.RoleService)
+local PlayerBody = require(Shared.pure.PlayerBody)
 local RoundTransitions = require(Shared.pure.RoundTransitions)
 local Types = require(Shared.Types)
+local WinConditions = require(Shared.pure.WinConditions)
 
 type RoundPhase = Types.RoundPhase
 type PlayerState = Types.PlayerState
@@ -43,6 +45,9 @@ local state = {
 	AswangUserId = nil :: number?,
 	TasksCompleted = 0,
 	GateOpen = false,
+	-- How many SURVIVORS were dealt into this round, snapshotted at STARTING. A snapshot rather than a
+	-- live count on purpose: see enterStarting.
+	DealtInSurvivors = 0,
 	-- Keyed by UserId. LOBBY between rounds, ALIVE for everyone dealt into a round, SPECTATOR for
 	-- anyone who joined after it started (spec §6.4), GHOST once C15 lands.
 	PlayerStates = {} :: { [number]: PlayerState },
@@ -78,6 +83,274 @@ function RoundService.GetPlayerState(player: Player): PlayerState
 	return state.PlayerStates[player.UserId] or Enums.PlayerState.Lobby
 end
 
+--[[
+	THE BODY RULE, applied. C04's carried-over warning from C01 (BUILD-PLAN lines ~203–219).
+
+	`Players.CharacterAutoLoads` is a SERVICE-level property, not a per-player one, so containment
+	cannot be expressed by "do not auto-load for this player". Turning it off globally and loading
+	explicitly is the only shape that admits a per-player rule at all, and it has the side benefit of
+	putting every spawn in this game through one function that a reader can find.
+
+	SIX CALL SITES, all in this file. The count is spelled out because this comment claimed three for
+	two rounds after it had stopped being true, and stale comments about who touches a player's body
+	have already caused two real bugs on this surface:
+
+	  · onPlayerAdded            — on join, and via Start()'s backfill
+	  · setAllPlayerStates       — every wholesale state change, after the table is fully written
+	  · MarkKilled               — a death, which clears the body for a GHOST
+	  · watchForDeath, twice     — the immediate respawn, and the DEFERRED one inside task.delay
+	  · itself                   — the post-yield re-apply, when the state changed during a load
+
+	The deferred one is the load-bearing one for the respawn throttle: the body is destroyed before the
+	cooldown is consulted, so the player is left at `Character == nil`, a state this function repairs.
+	An earlier version returned before the destroy and stranded them permanently.
+
+	THE `Character == nil` GUARD IS LOAD BEARING, and not for the reason you would guess. A second
+	`LoadCharacter()` on a player who already has one does NOT error — probed live in Studio, see
+	`artifacts/spectator-premise.md`. It respawns them. Without the guard, every setAllPlayerStates
+	call teleports every already-embodied player back to the SpawnLocation, including LOBBY→LOBBY
+	transitions that changed nothing.
+]]
+--[[
+	UserIds with a LoadCharacterAsync in flight.
+
+	The async deviation below costs one guarantee the plan's synchronous version had for free:
+	applyBodyRule is no longer idempotent on its own. `Start()`'s backfill loop calls onPlayerAdded for
+	players who joined in the connect window — and its comment promises that repeat is safe — but two
+	calls in the same frame both see `Character == nil`, because the first load has not landed yet, and
+	both fire. This table is what keeps that promise true.
+]]
+local pendingLoads: { [number]: boolean } = {}
+
+-- Last player-triggered respawn per UserId, for the cooldown in watchForDeath. Separate from
+-- `pendingLoads` on purpose: that one bounds concurrency, this one bounds rate, and conflating them
+-- would let a client alternate faster than either intends.
+local lastRespawnAt: { [number]: number } = {}
+
+local function applyBodyRule(player: Player)
+	local allowed = PlayerBody.mayHaveBody(RoundService.GetPlayerState(player))
+
+	if allowed then
+		if player.Character == nil and not pendingLoads[player.UserId] then
+			--[[
+				DEVIATION FROM THE PLAN, forced by the analyzer: `LoadCharacter` is deprecated in
+				favour of `LoadCharacterAsync`, and `analyze-baseline.json` is empty — this repo
+				blesses no diagnostics, so the deprecated call cannot land.
+
+				The Async form YIELDS, and this function must not. `enterStarting` calls
+				setAllPlayerStates and then reads `dealtInUserIds()` before `setPhase`, deliberately,
+				so that no subscriber sees a STARTING round without an Aswang. A yield inside the
+				loop would put the role draw on the far side of every player's character load, and a
+				player leaving during that window would change the roster mid-transition.
+
+				task.spawn keeps the caller synchronous and the transition ordering exactly as C01
+				built it. The pcall is for the player who disconnects between the state write and the
+				load, which throws.
+			]]
+			pendingLoads[player.UserId] = true
+
+			task.spawn(function()
+				local ok, err = pcall(function()
+					player:LoadCharacterAsync()
+				end)
+
+				pendingLoads[player.UserId] = nil
+
+				if not ok then
+					if Config.Debug.VerboseLogging then
+						warn(`[RoundService] LoadCharacterAsync failed for {player.Name}: {err}`)
+					end
+
+					--[[
+						RE-ARM. A failed load used to warn and give up, and during ACTIVE this is the ONLY
+						path that can put a body back: MarkKilled and onPlayerAdded both reach
+						applyBodyRule on their DENY branches, and setAllPlayerStates does not run inside
+						a round. So one throw left a player ALIVE with no character for the rest of the
+						round — and MonsterService returns early on `targetCharacter == nil`, making them
+						unkillable while still counted by livingSurvivorCount(). An unkillable survivor
+						puts §4.8's attrition win out of reach and the round runs to Timeout.
+
+						That is the round-1 bug's shape — a body state nothing repairs — reached by a
+						different route, which is why "eventually applied" has to be a property of this
+						function rather than of any one caller.
+
+						Guarded on the player still being here, and on the rule still wanting a body, so
+						a departed or now-SPECTATOR player does not get retried forever.
+					]]
+					task.delay(Config.Round.RespawnCooldown, function()
+						if player.Parent == nil then
+							return
+						end
+
+						if
+							PlayerBody.mayHaveBody(RoundService.GetPlayerState(player))
+							and player.Character == nil
+						then
+							applyBodyRule(player)
+						end
+					end)
+
+					return
+				end
+
+				--[[
+					RE-APPLY, because the state can have changed while we yielded. A player who was
+					LOBBY when the load started and SPECTATOR when it finished would otherwise keep the
+					body this rule exists to deny them — the exact C04 hole, reopened by the async call.
+					The recursion terminates: this branch only runs when the rule now says `false`.
+				]]
+				if not PlayerBody.mayHaveBody(RoundService.GetPlayerState(player)) then
+					applyBodyRule(player)
+				end
+			end)
+		end
+
+		return
+	end
+
+	--[[
+		DETACH, THEN DESTROY, AND ONLY WHAT WE STILL OWN.
+
+		Step 4.2 takes a killed player's character AWAY from the player (`player.Character = nil`) and
+		keeps it in the workspace as the corpse. By the time MarkKilled reaches here, `player.Character`
+		is already nil, so this branch finds nothing and the corpse survives. That ordering is the whole
+		reason MarkKilled hands the body to MonsterService before it changes the state.
+	]]
+	local character = player.Character
+
+	player.Character = nil
+
+	if character ~= nil then
+		character:Destroy()
+	end
+end
+
+--[[
+	A DEATH THIS SERVICE DID NOT CAUSE. The other half of owning every character load.
+
+	Turning `CharacterAutoLoads` off made RoundService the only thing that can put a body in the world,
+	and the first version of that wired only three call sites — join, phase change, and MarkKilled.
+	None of them is a death. So a player who died any other way stayed a corpse for the rest of the
+	SERVER SESSION: no respawn, and still `ALIVE` in PlayerStates, so livingSurvivorCount kept counting
+	them and §4.8's attrition win could never reach its threshold. Measured live before this fix —
+	64 seconds and three rounds with `health=0 state=Dead` and `alive 1 · you: ALIVE` in every snapshot
+	(`artifacts/console-finding2-no-respawn.txt`). Reachable by accident, from the default reset button.
+
+	THE KILL PATH NEVER REACHES HERE, by construction. `makeCorpse` DETACHES the victim's character
+	(`player.Character = nil`) and anchors it; it never kills the Humanoid, because §4.9 wants a body
+	that lies there rather than a death animation. So `player.Character ~= character` on that path and
+	the first guard returns. What reaches this line is a reset, a fall out of the world, and whatever
+	C14's salt does to someone standing in a bad place.
+
+	A ROUND DEATH IS A DEATH, which also closes reset-to-escape: without this, an Aswang cornering a
+	survivor could be beaten by Escape → Reset, which teleports the victim to spawn for free. Dying in
+	ACTIVE routes through MarkKilled and makes them a GHOST — uncounted, bodiless and unkillable, the
+	same as being killed, minus the corpse and the broadcast because nobody killed them.
+]]
+local function watchForDeath(player: Player, character: Model)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+	if humanoid == nil then
+		return
+	end
+
+	humanoid.Died:Connect(function()
+		-- Already taken from the player — this is the corpse, and MonsterService owns it now.
+		if player.Character ~= character then
+			return
+		end
+
+		if
+			state.Phase == Enums.RoundPhase.Active
+			and RoundService.GetPlayerState(player) == Enums.PlayerState.Alive
+		then
+			-- MarkKilled applies the body rule, which clears the dead body, and runs the win check.
+			RoundService.MarkKilled(player)
+
+			return
+		end
+
+		--[[
+			Not a round death: the lobby, or STARTING before the round is live. Give the body back.
+			Explicitly rather than by falling through to applyBodyRule — that function's load branch is
+			gated on `Character == nil`, and the dead character is still attached, so it would decline
+			to act and the player would stay dead.
+
+			RATE LIMITED, because this is a client-controlled trigger and the work is not cheap.
+			`Humanoid.Died` is reachable from the stock reset button as fast as a player can press it,
+			and each pass costs a full rig build, an appearance fetch and a replication to every client.
+			It is not a remote, so AntiCheatService never sees it and check:ratelimit cannot cover it —
+			this is the only place the limit can live. `pendingLoads` bounds CONCURRENCY to one per
+			player and bounds nothing about rate, which is a different property.
+		]]
+		--[[
+			DETACH FIRST, ALWAYS. THROTTLE ONLY THE LOAD, AND DEFER IT RATHER THAN DROPPING IT.
+
+			The first version of this rate limit returned ABOVE these two lines, and that reintroduced
+			the exact bug this whole watcher exists to prevent — in a worse form. The comment fourteen
+			lines up already spelled out why: applyBodyRule's load branch is gated on
+			`Character == nil`, so a DEAD character left attached is never repaired by any later phase
+			change. Not for three seconds — for the rest of the server session.
+
+			Reproduced live before this fix (`artifacts/console-throttle-strand-repro.txt`): reset, wait
+			for the respawn, reset again 0.6s later, and the player holds a dead body through multiple
+			full round cycles while every snapshot still reports them ALIVE — dealt into later rounds
+			and, worst of all, still eligible for the Aswang draw. Drawn in that state they are an
+			immobile monster who can never reach anyone, and because `MarkKilled` never fires, NEITHER
+			of the two round-abort paths runs.
+
+			So: the body always goes, which leaves `Character == nil` — a state the body rule can and
+			will repair. The cooldown then bounds only the expensive half, the `LoadCharacterAsync` rig
+			build, which is all it was ever meant to bound.
+		]]
+		player.Character = nil
+		character:Destroy()
+
+		local now = os.clock()
+		local previous = lastRespawnAt[player.UserId]
+		local remaining = if previous ~= nil
+			then Config.Round.RespawnCooldown - (now - previous)
+			else 0
+
+		if remaining > 0 then
+			--[[
+				DEFERRED, NOT DROPPED.
+
+				MORE THAN ONE OF THESE CAN BE OUTSTANDING, and an earlier version of this comment
+				claimed otherwise. `lastRespawnAt` is stamped when the deferred FIRES, not when it is
+				scheduled, so `previous` stays stale for the whole window — and a phase change during
+				that window calls applyBodyRule through setAllPlayerStates, which loads a body without
+				stamping anything. A second death then schedules a second closure.
+
+				It is harmless: both land at roughly the same moment, the first loads, and the second is
+				absorbed by `pendingLoads` and the `Character == nil` guard. Stated accurately rather
+				than repaired, because the concurrency bound that matters already comes from those two
+				and not from this delay. Three rounds of bugs on this surface came from a comment
+				asserting an invariant the neighbouring path quietly broke; this one claims only what it
+				can keep.
+
+				`player.Parent` is the disconnect check — `Players` is the parent while they are on the
+				server, and `LoadCharacterAsync` on a departed player throws inside the pcall for nothing.
+			]]
+			task.delay(remaining, function()
+				if player.Parent == nil then
+					return
+				end
+
+				lastRespawnAt[player.UserId] = os.clock()
+
+				applyBodyRule(player)
+			end)
+
+			return
+		end
+
+		lastRespawnAt[player.UserId] = now
+
+		applyBodyRule(player)
+	end)
+end
+
 local function eligiblePlayerCount(): number
 	if Config.Debug.SoloTesting then
 		return math.max(#Players:GetPlayers(), Config.Round.MinPlayers)
@@ -95,6 +368,27 @@ local function aliveCount(): number
 	return count
 end
 
+--[[
+	Living SURVIVORS — alive, and not the Aswang. Distinct from aliveCount(), which is what the client
+	snapshot carries, and the difference is exactly one player.
+
+	Reads state.AswangUserId, which is why this cannot live in the pure module: the count is derived
+	from the secret. What crosses to WinConditions is a NUMBER, and a number is not a hint — the
+	snapshot already tells every client how many players are alive, and "one fewer than that" is
+	arithmetic anyone can do. Nothing here is broadcast.
+]]
+local function livingSurvivorCount(): number
+	local count = 0
+
+	for userId, playerState in state.PlayerStates do
+		if playerState == Enums.PlayerState.Alive and userId ~= state.AswangUserId then
+			count += 1
+		end
+	end
+
+	return count
+end
+
 --------------------------------------------------------------------------------
 -- Player bookkeeping (spec §6.4)
 --------------------------------------------------------------------------------
@@ -109,6 +403,12 @@ local function setAllPlayerStates(newState: PlayerState)
 	table.clear(state.PlayerStates)
 	for _, player in Players:GetPlayers() do
 		state.PlayerStates[player.UserId] = newState
+	end
+
+	-- After the whole table is written, not inside the loop: applyBodyRule reads GetPlayerState, and a
+	-- half-written table would answer LOBBY (the default) for everyone not yet assigned.
+	for _, player in Players:GetPlayers() do
+		applyBodyRule(player)
 	end
 end
 
@@ -206,6 +506,7 @@ local function enterIdle()
 	state.AswangUserId = nil
 	state.TasksCompleted = 0
 	state.GateOpen = false
+	state.DealtInSurvivors = 0
 	-- The live assignments go; RoleService's HISTORY deliberately survives, because it is the whole
 	-- anti-repeat mechanism and a server that reset it every lobby would have no memory at all.
 	RoleService.ClearRoles()
@@ -230,6 +531,17 @@ local function enterStarting()
 	-- client; drawing first means no subscriber can observe a STARTING round that has no Aswang yet.
 	-- The snapshot carries no role either way — this is about services, not clients.
 	state.AswangUserId = RoleService.AssignRoles(dealtInUserIds())
+
+	--[[
+		SNAPSHOTTED HERE, AFTER THE DRAW, AND NEVER UPDATED AGAIN THIS ROUND.
+
+		It has to be after the draw, because "survivors" means "dealt in and not the Aswang" and the
+		Aswang does not exist a line earlier. It has to be frozen, because §4.8's rule is about how many
+		of the people who started have died — a count that fell when somebody disconnected would let a
+		losing survivor quit and hand the Aswang the win, which is the same mistake RoundTransitions
+		refuses to make in ACTIVE (see its comment) for the same reason.
+	]]
+	state.DealtInSurvivors = livingSurvivorCount()
 
 	setPhase(Enums.RoundPhase.Starting, Config.Round.StartingDelay)
 	-- TODO(C07): TaskService.SelectTasksForRound()
@@ -290,6 +602,125 @@ function RoundService.EndRound(result: Types.RoundResult)
 	enterEnding(result)
 end
 
+--[[
+	A survivor died (C05). The ONLY writer of a death, and it lives here because this service owns
+	PlayerStates — MonsterService asks rather than writes, exactly as it asks for the phase rather than
+	reading a copy.
+
+	GHOST, NOT A FIFTH STATE. §4.7 already calls a dead survivor a ghost, and Types.PlayerState has
+	four values that this plan does not extend. Two consequences land immediately and both are wanted:
+	pure/PlayerBody says a GHOST has no body, and pure/KillValidation says a GHOST is not a valid
+	target — which is the C04 warning's "a ghost must not be killable", satisfied by construction
+	rather than by a rule someone has to remember at C15.
+
+	THE CALLER HAS ALREADY TAKEN THE BODY. MonsterService detaches the victim's character
+	(`player.Character = nil`) to make it the corpse BEFORE calling this, so applyBodyRule below finds
+	nothing to destroy. Reversing those two steps deletes the corpse in the same frame it is created,
+	and the symptom is "the corpse code does not work" — a full step away from the cause.
+
+	Guarded on ACTIVE and on the victim currently being ALIVE, so a duplicate call — two kill requests
+	landing in the same tick, a retry after a dropped packet — is a no-op rather than a second death.
+	Phase 5 hangs the win check off the end of this function, which is why that idempotence matters.
+]]
+function RoundService.MarkKilled(player: Player, causedByKill: boolean?)
+	if state.Phase ~= Enums.RoundPhase.Active then
+		return
+	end
+
+	if state.PlayerStates[player.UserId] ~= Enums.PlayerState.Alive then
+		return
+	end
+
+	state.PlayerStates[player.UserId] = Enums.PlayerState.Ghost
+
+	applyBodyRule(player)
+
+	--[[
+		THE ASWANG DIED, SO THE ROUND IS OVER. Mirrors onPlayerRemoving's abort exactly.
+
+		That handler already ends the round when the Aswang DISCONNECTS, with the comment "end cleanly
+		rather than leaving survivors wandering a monster-free map for six minutes". Routing non-kill
+		deaths through here opened a second door to that same state which walked straight past it: the
+		Aswang presses Escape → Reset, becomes a GHOST, `KillValidation` then refuses every RequestKill
+		on `KILLER_NOT_ALIVE`, and six players walk an empty Barrio for the rest of the round. Repeatable
+		every round you are drawn, without leaving the server.
+
+		A kill can never reach this branch — `TARGET_IS_ASWANG` refuses it — so in practice this fires
+		only for a reset, a fall, or whatever C14's salt does. It is written unconditionally anyway,
+		because "the monster is gone" is the thing that matters and not how it happened.
+
+		ABORTED rather than SURVIVORS_ESCAPED: they did not escape, and the round was void.
+	]]
+	if state.AswangUserId == player.UserId then
+		enterEnding(Enums.RoundResult.Aborted)
+
+		return
+	end
+
+	--[[
+		A DEATH THE ASWANG DID NOT CAUSE MUST NOT COUNT TOWARDS THE ASWANG'S WIN.
+
+		Read the comment below about disconnects: it says a disconnect must move NEITHER side of the
+		attrition comparison, because otherwise quitting becomes a way to void a round and a dropped
+		phone hands the Aswang a win. A player resetting is the same event wearing different clothes,
+		and the first version of this fix let it move one side and not the other.
+
+		The arithmetic that made it serious: at MinPlayers = 3, DealtInSurvivors is 2 and the effective
+		threshold is min(2, 2-1) = 1. ONE survivor pressing the stock reset button dropped
+		LivingSurvivors to 1, satisfied `1 <= 1`, and ended the round as ASWANG_WINS. One button, no
+		remote, no rate limit, nothing for AntiCheat to see.
+
+		Dropping the denominator alongside the numerator keeps the rule meaning what §4.8 says it
+		means — most of the people the Aswang COULD have killed are dead by its hand — and leaves a
+		self-removal costing the Aswang exactly nothing, which is the correct incentive.
+	]]
+	if causedByKill ~= true then
+		state.DealtInSurvivors = math.max(0, state.DealtInSurvivors - 1)
+	end
+
+	-- Immediately, rather than waiting up to SnapshotInterval: AlivePlayerCount and the victim's own
+	-- YourState both just changed, and the victim's HUD is the one screen guaranteed to be looked at.
+	broadcastSnapshot()
+
+	if Config.Debug.VerboseLogging then
+		-- A UserId and a count. Never a role, and never who did it — this line is read while a round is
+		-- still running, and VerboseLogging is exactly the flag a Studio playtest leaves on.
+		print(`[RoundService] Killed {player.UserId}; {aliveCount()} alive.`)
+	end
+
+	--[[
+		§4.8's attrition win (C06). AT THE END OF MarkKilled AND NOWHERE ELSE.
+
+		Not in the step() loop: polling a win condition several times a second means the round can end
+		on a tick that no player action caused, and debugging "why did it end there" starts from a
+		timestamp instead of from an event.
+
+		Not on PlayerRemoving either, and that is the deliberate one. A survivor disconnecting reduces
+		the living count exactly as a kill does, and ending the round for it would (a) hand the Aswang a
+		win every time a phone lost signal and (b) let a losing survivor void a round by quitting. Spec
+		§6.4 already answers this for the headcount — "finish the round, then return to IDLE" — and this
+		is the same answer for the same reason.
+
+		This comment used to go on to claim that "DealtInSurvivors being a frozen snapshot" meant a
+		disconnect moved NEITHER side of the comparison. That was wrong, and an audit caught it:
+		`DealtInSurvivors` is frozen, but `livingSurvivorCount()` is computed live, so a disconnect
+		dropped one side only. `onPlayerRemoving` now decrements the other side to match — see the note
+		there. Both paths that remove a survivor without a kill now move both sides together.
+
+		EndRound is guarded on ACTIVE inside this service, so this stays a request rather than a second
+		writer of the phase.
+	]]
+	if
+		WinConditions.aswangWinsByAttrition({
+			LivingSurvivors = livingSurvivorCount(),
+			DealtInSurvivors = state.DealtInSurvivors,
+			Threshold = Config.Round.AswangWinSurvivorThreshold,
+		})
+	then
+		RoundService.EndRound(Enums.RoundResult.AswangWins)
+	end
+end
+
 --------------------------------------------------------------------------------
 -- Main loop
 --------------------------------------------------------------------------------
@@ -328,11 +759,38 @@ local function onPlayerAdded(player: Player)
 		then Enums.PlayerState.Spectator
 		else Enums.PlayerState.Lobby
 
+	--[[
+		BEFORE applyBodyRule, so the very first character this player gets is already watched. Connecting
+		after would leave a window in which a death goes unnoticed, and this connection is what stops a
+		dead player being counted alive forever.
+	]]
+	player.CharacterAdded:Connect(function(character: Model)
+		watchForDeath(player, character)
+	end)
+
+	local existing = player.Character
+
+	if existing ~= nil then
+		watchForDeath(player, existing)
+	end
+
+	-- The other half of that sentence, and the half C01 left out. A SPECTATOR with a body is uncounted
+	-- AND, from C05 on, unkillable — an alt account that watches the whole round from ten studs away.
+	applyBodyRule(player)
+
 	snapshotRemote:FireClient(player, buildSnapshot(player))
 end
 
 local function onPlayerRemoving(player: Player)
+	-- Read BEFORE the key is cleared: the attrition bookkeeping below needs to know whether this player
+	-- was actually dealt into the round, and a moment later there is nothing left to ask.
+	local wasAlive = state.PlayerStates[player.UserId] == Enums.PlayerState.Alive
+
 	state.PlayerStates[player.UserId] = nil
+	-- The in-flight load (if any) will fail in its own pcall and clear this itself; dropping the key
+	-- here as well keeps the table bounded by the players actually on the server.
+	pendingLoads[player.UserId] = nil
+	lastRespawnAt[player.UserId] = nil
 
 	--[[
 		STARTING COUNTS TOO, and leaving it out was a live exploit.
@@ -359,6 +817,31 @@ local function onPlayerRemoving(player: Player)
 	-- survivors wandering a monster-free map for six minutes.
 	if state.AswangUserId == player.UserId then
 		enterEnding(Enums.RoundResult.Aborted)
+
+		return
+	end
+
+	--[[
+		A DEPARTING SURVIVOR DROPS BOTH SIDES OF THE ATTRITION COMPARISON, exactly as a reset does.
+
+		MarkKilled's comment used to assert this already held — "DealtInSurvivors being a frozen
+		snapshot is the other half of it: a disconnect moves neither side of the comparison" — and an
+		audit showed it was false. `DealtInSurvivors` is indeed frozen, but `livingSurvivorCount()` is
+		computed LIVE from `state.PlayerStates`, and the line above just set this player's key to nil.
+		So a disconnect dropped the numerator and left the denominator alone: the precise asymmetry the
+		reset fix was written to close, surviving on the neighbouring path.
+
+		It was worth real money. In an 8-player round `DealtInSurvivors` freezes at 7 and the effective
+		threshold is 2, so three alt accounts joining and quitting as ACTIVE begins turned a five-kill
+		win into a two-kill win. Five leaving made it one. Once C31's economy lands, that is a direct
+		win-rate and XP farm — and it is the same "a losing survivor quits and hands the Aswang the
+		round" outcome the note below calls unacceptable.
+
+		NO WIN CHECK HERE, deliberately, and that half of the old comment was always right: §6.4 says a
+		round that loses players FINISHES. This only keeps the ratio honest for whoever is left.
+	]]
+	if wasAlive then
+		state.DealtInSurvivors = math.max(0, state.DealtInSurvivors - 1)
 	end
 
 	-- NOTE the absence of a headcount check here. Spec §6.4: a round that drops below MinPlayers
@@ -388,6 +871,17 @@ function RoundService.Init()
 end
 
 function RoundService.Start()
+	--[[
+		BEFORE any PlayerAdded connection, and before the backfill loop below.
+
+		Roblox loads a character as soon as a player joins while this is true, so a connection made after
+		the flag is flipped can still be racing a spawn that has already been requested. Setting it here,
+		at the top of Start(), is the earliest point this service runs. Step 1.1's Studio probe confirmed
+		this flag reads `true` in this place file and that clearing it does suppress the automatic spawn
+		— see `artifacts/spectator-premise.md`.
+	]]
+	Players.CharacterAutoLoads = false
+
 	-- ORDER MATTERS. init.server.luau wraps Start() in a pcall that only warns, so anything throwing
 	-- part-way through leaves a server with whatever had been registered so far — and a server with
 	-- no tick loop, no snapshot loop and no close handler sits in IDLE forever behind one warn line,

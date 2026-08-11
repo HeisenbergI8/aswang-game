@@ -23,10 +23,31 @@
 
 	The refusal verdict is likewise never echoed back. It exists so the server can log WHY, and handing
 	a client `NOT_ASWANG` would be a free role oracle for anyone willing to spam the remote.
+
+	`PlayerKilled` (C05) carries a victim and a position, and NOTHING ELSE — no killer, no name, no
+	direction, no distance, no "you were seen". Three things about that are worth knowing before anyone
+	adds a field:
+
+	  · A killer field here IS now caught — `check-secrecy.mjs` was repaired after an audit found this
+	    exact hole. Two things were wrong: its broadcast rule read the ARGUMENT TEXT, so a typed local
+	    (`FireAllClients(payload)`) reduced the scan to seven characters and the payload's contents were
+	    never seen; and its SECRET regex enumerated `aswanguserid` by hand and matched no `Killer*`
+	    token at all. It now resolves the payload back to its declaration and matches `killer\w*`.
+	    Proven by injecting `KillerUserId = killer.UserId` into the payload below and watching the check
+	    go red. Do not take that as licence — the check is a text tripwire and a determined leak can
+	    still walk around it; it is a backstop under the rule, not the rule.
+	  · The position is safe on its own terms, not by permission: an anchored corpse is standing at that
+	    position and replicates to every client one frame later. The payload states nothing new.
+	  · What IS inferable, and cannot be fixed here, is proximity — a client reading replicated character
+	    positions at the instant of the broadcast can see who was within eight studs. That is inherent
+	    to a proximity kill in a replicated world; the counter is design, not code (§4.3: the killer is
+	    standing there in monster form, having just been announced). Recorded in Follow Ups rather than
+	    papered over.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local AntiCheatService = require(script.Parent.AntiCheatService)
 local RoleService = require(script.Parent.RoleService)
@@ -35,6 +56,7 @@ local RoundService = require(script.Parent.RoundService)
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
+local KillValidation = require(Shared.pure.KillValidation)
 local Remotes = require(Shared.Remotes)
 local TransformRules = require(Shared.pure.TransformRules)
 local Types = require(Shared.Types)
@@ -73,6 +95,11 @@ type MonsterState = {
 local monsters: { [number]: MonsterState } = {}
 
 local transformedRemote = Remotes.Get("MonsterTransformed")
+local killedRemote = Remotes.Get("PlayerKilled")
+
+-- One parent for every corpse, so the raycast can exclude them wholesale and a phase change can clear
+-- them with a single Destroy. Created on Start, never destroyed.
+local corpses: Folder? = nil
 
 local function stateFor(userId: number): MonsterState
 	local existing = monsters[userId]
@@ -248,6 +275,88 @@ local function applyFullLook(state: MonsterState, character: Model, humanoid: Hu
 end
 
 --------------------------------------------------------------------------------
+-- The corpse (§4.3 step 4). "Corpse remains for 45s, then fades."
+--------------------------------------------------------------------------------
+
+--[[
+	THE CORPSE IS THE VICTIM'S OWN CHARACTER, DETACHED — not a clone.
+
+	A clone would need Archivable to be true, would duplicate every accessory and its meshes, and would
+	arrive at a client as a brand-new model at the same instant the original disappeared. Detaching
+	keeps the body that was already replicated and already being looked at, which is the difference
+	between "someone died here" and "a prop appeared".
+
+	`player.Character = nil` is what makes it a prop: the player no longer owns it, so nothing the
+	client sends moves it. Anchoring every part is the belt to that braces — it also stops the body
+	sliding down a hill for 45 seconds, which is comic rather than frightening (§4.9).
+
+	NO BLOOD, NO RAGDOLL, NO DISMEMBERMENT. §4.9 is a business constraint, not a taste one: gore pushes
+	the age rating to 13+ and cuts off the audience that plays and spends the most. A body that lies
+	there and fades is the whole effect.
+]]
+local function makeCorpse(victim: Player, character: Model)
+	victim.Character = nil
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+	if humanoid ~= nil then
+		-- Stop it standing up, walking, or being steered. WalkSpeed 0 is not a balance number.
+		humanoid.WalkSpeed = 0
+		humanoid.AutoRotate = false
+		humanoid.PlatformStand = true
+	end
+
+	for _, part in character:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			-- A body should not be a wall. It also should not be a raycast blocker; the kill's line of
+			-- sight excludes this whole folder for the same reason.
+			part.CanCollide = false
+		end
+	end
+
+	character.Name = `Corpse_{victim.UserId}`
+	character.Parent = corpses
+
+	--[[
+		The fade, then the removal. Registered as one delayed closure rather than a loop: a corpse that
+		is Destroyed early — by a phase change, or by the server closing — leaves a tween pointed at a
+		destroyed instance, which is harmless, whereas a running loop is a live coroutine per corpse.
+	]]
+	task.delay(Config.Monster.CorpseDuration, function()
+		if character.Parent == nil then
+			return
+		end
+
+		local info = TweenInfo.new(Config.Monster.CorpseFadeTime)
+
+		for _, part in character:GetDescendants() do
+			if part:IsA("BasePart") then
+				TweenService:Create(part, info, { Transparency = 1 }):Play()
+			end
+		end
+
+		task.delay(Config.Monster.CorpseFadeTime, function()
+			character:Destroy()
+		end)
+	end)
+end
+
+-- Every corpse goes when the round does. Bodies from the last round standing in the plaza during
+-- INTERMISSION is the kind of thing that reads as a bug in a clip, and clips are the marketing.
+local function clearCorpses()
+	local folder = corpses
+
+	if folder == nil then
+		return
+	end
+
+	for _, corpse in folder:GetChildren() do
+		corpse:Destroy()
+	end
+end
+
+--------------------------------------------------------------------------------
 -- Transform and revert
 --------------------------------------------------------------------------------
 
@@ -408,10 +517,195 @@ local function validateAndTransform(player: Player)
 end
 
 --------------------------------------------------------------------------------
+-- The kill (§4.3 steps 3–5, C05)
+--------------------------------------------------------------------------------
+
+-- Vector3 -> the plain table pure/KillValidation takes. The pure module cannot mention Vector3: Lune
+-- has no Roblox datatypes and the whole module would stop being runnable from a terminal.
+local function vec(position: Vector3): KillValidation.Vec3
+	return { X = position.X, Y = position.Y, Z = position.Z }
+end
+
+local function rootOf(character: Model): BasePart?
+	local root = character:FindFirstChild("HumanoidRootPart")
+
+	return if root ~= nil and root:IsA("BasePart") then root :: BasePart else nil
+end
+
+--[[
+	THE ONE CONDITION THAT CANNOT BE PURE (§4.3, "raycast line-of-sight").
+
+	Killing through a wall is the difference between a stalking game and a lag-compensated murder
+	simulator, and it is the single most valuable exploit in this game after knowing the role: an
+	exploiter who can kill through geometry never has to be seen, which deletes the transform's entire
+	risk half.
+
+	The filter excludes both characters — otherwise the ray hits the killer's own torso at zero distance
+	and every kill is refused — and the corpse folder, because a body is not cover. Note that a raycast
+	hits parts regardless of CanCollide unless RespectCanCollide is set, so making corpses
+	non-collidable is NOT enough on its own.
+
+	`workspace:Raycast(origin, direction, params)` returns nil when nothing was hit, which is the
+	"clear line" case. This API is not used anywhere else in this repository yet — see Follow Ups; the
+	Phase 4 playtest is where it is confirmed rather than assumed, and the failure mode if
+	`Enum.RaycastFilterType.Exclude` is wrong for this engine version is that EVERY kill is refused,
+	which is loud rather than silent.
+]]
+local function hasLineOfSight(killerRoot: BasePart, targetRoot: BasePart): boolean
+	local params = RaycastParams.new()
+
+	--[[
+		BUILT AS A LIST, not as a literal with a `corpses :: Instance` cast in it. The plan proposed the
+		cast and flagged it for confirmation; the analyzer answered first — `Folder?` does not cast to
+		`Instance`, because the optional is a union and the two are unrelated types.
+
+		Doing it this way is also the honest reading of the nil case: if Start() has not run there is no
+		corpse folder, and therefore nothing to exclude. An excluded nil would have been silently
+		tolerated at runtime and silently wrong the day the folder mattered.
+	]]
+	local filter: { Instance } = { killerRoot.Parent :: Instance, targetRoot.Parent :: Instance }
+	local folder = corpses
+
+	if folder ~= nil then
+		table.insert(filter, folder)
+	end
+
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = filter
+	params.IgnoreWater = true
+
+	local origin = killerRoot.Position
+	local result = workspace:Raycast(origin, targetRoot.Position - origin, params)
+
+	return result == nil
+end
+
+--[[
+	The commit, in the ONE order that works. Every line here depends on the one above it.
+
+	  1. The corpse first, because it steals the character from the player. RoundService.MarkKilled
+	     applies the body rule, which destroys a character the victim still owns — so if this ran second
+	     there would be no body left to make a corpse out of.
+	  2. The state change, which is what makes the victim uncounted, bodiless and unkillable.
+	  3. The revert (§4.3 step 4, "after a kill it must revert"). This is ALSO what starts the cooldown,
+	     because revert() stamps LastRevertedAt — §4.3 step 5's "30s from revert" is not implemented as
+	     a separate timer anywhere, it is this line.
+	  4. The broadcast, last, so no client is told about a kill the server has not finished committing.
+]]
+local function commitKill(killer: Player, victim: Player, victimCharacter: Model, position: Vector3)
+	makeCorpse(victim, victimCharacter)
+
+	-- `true` = this death was a validated kill, so it counts towards §4.8's attrition win. Every other
+	-- caller passes nothing: a reset or a fall makes the player a GHOST but must NOT credit the Aswang,
+	-- or one survivor pressing the stock reset button ends a 3-player round as ASWANG_WINS.
+	RoundService.MarkKilled(victim, true)
+
+	revert(killer)
+
+	-- TWO FIELDS. See Types.PlayerKilledPayload: the killer appears nowhere in it, in any form, and
+	-- nothing in this repo would catch it if it did. Built as a typed local rather than an inline table
+	-- because FireAllClients takes `...any` and an inline literal is checked against nothing at all.
+	local payload: Types.PlayerKilledPayload = { VictimUserId = victim.UserId, Position = position }
+
+	killedRemote:FireAllClients(payload)
+end
+
+local function validateAndKill(killer: Player, targetUserId: number)
+	local target = Players:GetPlayerByUserId(targetUserId)
+
+	if target == nil then
+		return
+	end
+
+	local killerCharacter = killer.Character
+	local targetCharacter = target.Character
+
+	if killerCharacter == nil or targetCharacter == nil then
+		return
+	end
+
+	local killerRoot = rootOf(killerCharacter)
+	local targetRoot = rootOf(targetCharacter)
+
+	if killerRoot == nil or targetRoot == nil then
+		return
+	end
+
+	local monster = stateFor(killer.UserId)
+
+	local verdict = KillValidation.evaluate({
+		Phase = RoundService.GetPhase(),
+		KillerUserId = killer.UserId,
+		TargetUserId = target.UserId,
+		KillerIsAswang = RoleService.IsAswang(killer),
+		TargetIsAswang = RoleService.IsAswang(target),
+		KillerState = RoundService.GetPlayerState(killer),
+		TargetState = RoundService.GetPlayerState(target),
+		--[[
+			`Announced`, NOT `Transformed`, and the difference is a whole mechanic.
+
+			`Transformed` is set BEFORE the 1.2s windup (to close the spam race), so using it here would
+			let the Aswang fire RequestTransform and RequestKill back to back and kill during the windup
+			— before anyone with line of sight has seen anything. §4.3 step 2 calls that windup "visible
+			to anyone with line of sight" and it is the entire risk half of the risk/reward. `Announced`
+			is set only after MonsterTransformed(true) has gone out, so the kill unlocks exactly when the
+			warning does.
+		]]
+		Transformed = monster.Announced,
+		KillerPos = vec(killerRoot.Position),
+		TargetPos = vec(targetRoot.Position),
+		Range = Config.Monster.KillRange,
+		Now = os.clock(),
+		LastRevertedAt = monster.LastRevertedAt,
+		Cooldown = Config.Monster.KillCooldown,
+	})
+
+	if verdict ~= "OK" then
+		-- LOGGED, NEVER ECHOED, and the stakes are higher than they are for the transform. Returning
+		-- TARGET_IS_ASWANG or NOT_ASWANG to a client is a role oracle you can walk through the whole
+		-- server with: fire at each player in turn and read which answer comes back.
+		if Config.Debug.VerboseLogging then
+			print(`[MonsterService] Refused kill by {killer.Name}: {verdict}`)
+		end
+
+		return
+	end
+
+	-- LAST, because it is the only check that touches the physics engine. Everything cheap has already
+	-- said yes, so the expensive one runs at most once per legitimate attempt — which is what makes an
+	-- unauthorised spam of this remote cost the server nothing beyond a table lookup.
+	if not hasLineOfSight(killerRoot, targetRoot) then
+		if Config.Debug.VerboseLogging then
+			print(`[MonsterService] Refused kill by {killer.Name}: NO_LINE_OF_SIGHT`)
+		end
+
+		return
+	end
+
+	commitKill(killer, target, targetCharacter, targetRoot.Position)
+end
+
+--------------------------------------------------------------------------------
 -- Lifecycle
 --------------------------------------------------------------------------------
 
 local function onPhaseChanged(phase: Types.RoundPhase)
+	--[[
+		CORPSES ARE CLEARED ON THE WAY INTO THE LOBBY, NOT ON THE WAY OUT OF ACTIVE.
+
+		Clearing on "any phase that is not ACTIVE" destroyed the winning kill's body within a frame of
+		creating it: MarkKilled calls EndRound, which sets ENDING, which fires PhaseChanged, which
+		landed here — while `commitKill` was still on the stack that made the corpse. §4.3 step 4 says
+		the body remains 45s, and §4.8 calls the end screen "the screenshot people share", so the one
+		round where the bodies matter most was the one round that had none.
+
+		ENDING keeps them. INTERMISSION and IDLE clear them, which still satisfies the original reason
+		for clearing at all — no bodies from last round standing in the plaza while people wait.
+	]]
+	if phase == Enums.RoundPhase.Intermission or phase == Enums.RoundPhase.Idle then
+		clearCorpses()
+	end
+
 	if phase == Enums.RoundPhase.Active then
 		return
 	end
@@ -429,6 +723,45 @@ local function onPhaseChanged(phase: Types.RoundPhase)
 	table.clear(monsters)
 end
 
+--[[
+	A TRANSFORMED ASWANG THAT DIES MUST REVERT. C04's deferred finding, marked "a required input to
+	C05" because until this chunk there was no way to die at all.
+
+	Note what this is NOT: the kill path does not go through Humanoid.Died — the victim's character is
+	detached and anchored, never killed, because §4.9 wants a fade rather than a death animation. This
+	connection covers everything else that can end a character mid-transform: falling out of the world,
+	a Studio-side reset, and whatever C14's salt does to a monster standing in a bad place.
+
+	Reverting on death also charges the cooldown, because revert() stamps LastRevertedAt. That is the
+	right answer rather than a side effect: dying while transformed should cost the Aswang the same 30
+	seconds a completed hunt does, or falling off a roof becomes a free reset.
+]]
+local function watchCharacter(player: Player, character: Model)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+	if humanoid == nil then
+		return
+	end
+
+	humanoid.Died:Connect(function()
+		revert(player)
+	end)
+end
+
+local function onPlayerAdded(player: Player)
+	player.CharacterAdded:Connect(function(character: Model)
+		watchCharacter(player, character)
+	end)
+
+	-- RoundService turns CharacterAutoLoads off and loads explicitly (Step 1.4), so a character can
+	-- already exist by the time this service's Start() runs on a live server.
+	local character = player.Character
+
+	if character ~= nil then
+		watchCharacter(player, character)
+	end
+end
+
 local function onPlayerRemoving(player: Player)
 	monsters[player.UserId] = nil
 end
@@ -438,6 +771,12 @@ function MonsterService.Init()
 end
 
 function MonsterService.Start()
+	local folder = Instance.new("Folder")
+
+	folder.Name = "Corpses"
+	folder.Parent = workspace
+	corpses = folder
+
 	--[[
 		THE RATE LIMIT LIVES HERE, INLINE, and not inside validateAndTransform — deliberately.
 
@@ -458,8 +797,36 @@ function MonsterService.Start()
 
 		validateAndTransform(player)
 	end)
+
+	-- Same shape as the handler above, for the same reason: `check-ratelimit.mjs` matches the Consume
+	-- call within 1200 characters of the connect site, so the guard is visible to a reader skimming the
+	-- file and to the gate. Consume FIRST, before the UserId is even looked at.
+	Remotes.Get("RequestKill").OnServerEvent:Connect(function(player: Player, targetUserId: unknown)
+		if not AntiCheatService.Consume(player, "RequestKill") then
+			return
+		end
+
+		-- A remote argument is whatever the client sent. `targetUserId` is typed `unknown` rather than
+		-- `number` precisely so this line cannot be skipped: without it a table or a function reaches
+		-- GetPlayerByUserId and throws inside a connection, which Roblox swallows into one warn.
+		if typeof(targetUserId) ~= "number" then
+			return
+		end
+
+		validateAndKill(player, targetUserId)
+	end)
+
 	RoundService.PhaseChanged.Event:Connect(onPhaseChanged)
+	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+	-- Anyone already here. Same reasoning as RoundService.Start's backfill: connect first, then sweep,
+	-- and accept that a player arriving in the window is handled twice. watchCharacter is idempotent
+	-- only in the sense that a second Died connection calls revert() twice, and revert() early-returns
+	-- when the player is not transformed — so the double is harmless.
+	for _, player in Players:GetPlayers() do
+		onPlayerAdded(player)
+	end
 end
 
 return MonsterService

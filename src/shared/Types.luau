@@ -146,6 +146,62 @@ export type TransformVerdict =
 	| "ALREADY_TRANSFORMED"
 	| "ON_COOLDOWN"
 
+--[[
+	The verdict from `pure/KillValidation.luau` (C05). Same shape and same rule as TransformVerdict: a
+	union rather than a boolean so the server can log WHY, and NEVER echoed to any client.
+
+	The echo rule is stricter here than it looks. TARGET_IS_ASWANG is a direct role oracle — fire
+	RequestKill at every player in turn and the one that answers differently is the monster — and
+	KILLER_NOT_ASWANG is the same oracle pointed inward. There is no "safe subset" to return, which is
+	why the handler returns nothing at all on every refusal rather than filtering the verdict.
+]]
+export type KillVerdict =
+	"OK"
+	| "WRONG_PHASE"
+	| "KILLER_NOT_ALIVE"
+	| "SELF"
+	| "NOT_ASWANG"
+	| "NOT_TRANSFORMED"
+	| "ON_COOLDOWN"
+	| "TARGET_NOT_ALIVE"
+	| "TARGET_IS_ASWANG"
+	| "OUT_OF_RANGE"
+
+--[[
+	The kill broadcast (§4.3 step 4, C05). TWO FIELDS, AND THE ABSENT ONE IS THE POINT.
+
+	It does NOT carry the killer — not a UserId, not a name, not a direction, not a distance, not a
+	"you were seen" flag. §4.8 says the reveal is the end screen's job, and a kill that named its author
+	would delete the entire accusation game in one field.
+
+	READ THE RoundEndedPayload COMMENT ABOVE BEFORE ADDING A FIELD HERE, because both of its warnings
+	apply and one extra one does:
+
+	  · Luau accepts an EXTRA field on an annotated table silently. Measured; still true, and it is the
+	    reason none of the rest of this is redundant.
+	  · `check-secrecy.mjs` checks payload FIELDS against an allowlist only for remotes on its
+	    REVEAL_ALLOWLIST, and PlayerKilled is deliberately not on that list. That part is unchanged: the
+	    field ALLOWLIST still does not run here.
+	  · Its broadcast rule DOES now run here, and it did not used to. An audit found two holes and both
+	    are fixed: the rule read the argument TEXT, so the typed local three lines below reduced the
+	    scan to the word `payload` and the fields were never seen; and the SECRET regex enumerated
+	    `aswanguserid` by hand while matching no `Killer*` token at all. It now resolves the payload to
+	    its declaration and matches `killer\w*`, so `KillerUserId` here goes red. Verified by injecting
+	    it and watching the check fail.
+
+	So the specific mistake this comment was written to warn about is now caught mechanically. Add a
+	field here anyway only with a reason you would defend out loud: the check is a text tripwire, it
+	cannot follow data flow, and a leak that avoids the word "killer" avoids it entirely. That is what
+	`exploit-auditor` is for, and neither replaces the other.
+
+	Position is a Vector3 and that is safe: the corpse model stands at that position and replicates to
+	every client on its own. The payload states nothing the workspace does not state one frame later.
+]]
+export type PlayerKilledPayload = {
+	VictimUserId: number,
+	Position: Vector3,
+}
+
 -- SERVER ONLY. Never send this table to a client.
 export type RoundState = {
 	Phase: RoundPhase,
