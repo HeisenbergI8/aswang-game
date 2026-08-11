@@ -1,0 +1,45 @@
+THIRD FIX ROUND — the respawn-throttle stranding bug, fixed and re-tested against its own repro.
+Roblox Studio, 2026-08-11. Config debug: Intermission widened to 30s so the whole repro runs in the
+LOBBY (the branch the bug lived in); Duration/EndScreen 45/6; Solo/Verbose/ForceAswang true. Reverted.
+
+THE BUG (confirmed live by an independent playtester before this fix, and by two code reads):
+  watchForDeath's rate limit returned ABOVE `player.Character = nil`, so a second death inside the
+  3-second window left a DEAD character attached. applyBodyRule's load branch is gated on
+  `Character == nil`, so nothing ever repaired it — permanent for the server session, not for 3s.
+  Worse: STARTING still dealt the corpse in as ALIVE, leaving them eligible for the Aswang draw, and
+  if drawn neither round-abort path could fire because MarkKilled never runs for them.
+
+THE FIX: detach and destroy ALWAYS; throttle only the LoadCharacterAsync, and DEFER it via task.delay
+rather than dropping it. The body always goes, which leaves `Character == nil` — a state the body rule
+can and will repair — and the cooldown still bounds the expensive half, which is all it was for.
+
+--------------------------------------------------------------------------------
+[THROTTLE-FIX] RespawnCooldown = 3; in LOBBY (Intermission 30s)
+[THROTTLE-FIX] kill #1 (unthrottled — should respawn promptly)
+[THROTTLE-FIX] respawn #1 at t+0.524s
+[THROTTLE-FIX] kill #2 IMMEDIATELY — lands inside the cooldown, so the load must be DEFERRED not dropped
+[THROTTLE-FIX] t+ 1.5s  Character=nil              stillTheDeadBody=false  health=nil
+[THROTTLE-FIX] t+ 3.0s  Character=Demiurgos_18     stillTheDeadBody=false  health=100
+[THROTTLE-FIX] t+ 4.5s  Character=Demiurgos_18     stillTheDeadBody=false  health=100
+[THROTTLE-FIX] t+ 6.0s  Character=Demiurgos_18     stillTheDeadBody=false  health=100
+[THROTTLE-FIX] t+ 7.5s  Character=Demiurgos_18     stillTheDeadBody=false  health=100
+[THROTTLE-FIX] t+ 9.0s  Character=Demiurgos_18     stillTheDeadBody=false  health=100
+[THROTTLE-FIX] t+10.5s  Character=Demiurgos_18     stillTheDeadBody=false  health=100
+[THROTTLE-FIX] t+12.0s  Character=Demiurgos_18     stillTheDeadBody=false  health=100
+
+READ IT LIKE THIS
+  t+1.5s   Character = nil          -> the dead body was destroyed immediately. THIS is the fix; the
+                                       old code returned before this line and left the corpse attached.
+  t+3.0s   a NEW body, health 100   -> the DEFERRED load fired after the remaining ~2.5s of cooldown.
+                                       `stillTheDeadBody=false` throughout: it is not the corpse healed,
+                                       it is a different instance.
+  Rate limiting is intact: one rig build per RespawnCooldown, not one per keypress.
+
+ALSO OBSERVED, unplanned, in the stale session before this run (round #12): killing the lone player —
+who is the forced Aswang — during ACTIVE produced an immediate `-> ENDING`, with no `[RoundService]
+Killed` line. That is Finding 1's fix behaving correctly: the Aswang branch returns before the
+VerboseLogging print, and the round aborts rather than running on without a monster.
+
+STILL NOT VERIFIED HERE
+  The disconnect-asymmetry fix (a departing survivor now decrements DealtInSurvivors) needs two
+  clients — a solo round has no survivor to disconnect. Only the arithmetic is pinned in Lune.

@@ -1,0 +1,187 @@
+Respawn-throttle stranding bug — behavioural reproduction
+Captured via mcp__Roblox_Studio__execute_luau (Server datamodel) and mcp__Roblox_Studio__get_console_output.
+Studio session: Place3, Play mode, SoloTesting/VerboseLogging/ForceAswangWhenSolo = true,
+Round.Intermission/Duration/EndScreen = 8/45/6, Round.RespawnCooldown = 3. 2026-08-11.
+
+======================================================================
+METHOD
+======================================================================
+Config.Round.RespawnCooldown = 3s. RoundService.watchForDeath's non-round-death branch (LOBBY/STARTING
+deaths) reads:
+
+    local now = os.clock()
+    local previous = lastRespawnAt[player.UserId]
+    if previous ~= nil and now - previous < Config.Round.RespawnCooldown then
+        return                              -- <-- returns BEFORE the three lines below
+    end
+    lastRespawnAt[player.UserId] = now
+    player.Character = nil
+    character:Destroy()
+    applyBodyRule(player)
+
+To land a second death inside the 3s window, natural LoadCharacterAsync latency in this Studio session
+was highly variable (observed 0.48s–8s+ across ~8 trials), so the run below waited for the player's OWN
+natural respawn (no manual override — this avoids a confound found in earlier attempts where a second,
+independently-loaded character raced a still-pending LoadCharacterAsync coroutine from the first death
+and later got silently clobbered by it, producing a false "recovery"). The moment the natural respawn's
+new Character instance appeared, its Humanoid was killed again immediately.
+
+======================================================================
+CLEAN TRIAL — server os.clock() readings, single execute_luau call so both kills are close together
+======================================================================
+First kill (unthrottled — sets lastRespawnAt):
+  origId              = 0_9192286
+  t0 (first Died)      = 62883.105366...
+
+Natural respawn detected (RoundService's own LoadCharacterAsync, not manually forced):
+  newId               = 0_9193757
+  t1 (respawn seen)    = 62883.731275...   (delta from t0: 0.626s)
+
+Second kill, fired the instant the new character appeared:
+  tPreKill             = 62883.731292...   (delta from t0: 0.626s -- WITHIN the 3s cooldown)
+  Humanoid.Died fired  = true (diedFired=true, confirmed via a locally-connected Died listener,
+                         independent of RoundService's own handler)
+
+  => previous(lastRespawnAt) = 62883.105..., now - previous = 0.626 < Config.Round.RespawnCooldown (3)
+     => this death SHOULD hit the throttled `return` at RoundService.luau:250, before
+        `player.Character = nil` / `character:Destroy()` / `applyBodyRule(player)`.
+
+======================================================================
+OBSERVED STATE IMMEDIATELY AFTER (t0+9s)
+======================================================================
+{"hasCharacter":true,"characterDebugId":"0_9193757","humanoidState":"Enum.HumanoidStateType.Dead","humanoidHealth":0,"osClock":62892.521}
+
+player.Character is STILL the character that was just killed (same GetDebugId, "0_9193757") — not nil,
+not destroyed, not replaced. Humanoid.Health = 0, GetState() = Dead. This is the throttled branch's
+`return` skipping the cleanup lines, exactly as read in the source.
+
+======================================================================
+OBSERVED STATE ~70s LATER (>1 full round cycle: INTERMISSION 8s + STARTING 4s + ACTIVE 45s + ENDING 6s)
+======================================================================
+{"hasCharacter":true,"characterDebugId":"0_9193757","humanoidState":"Enum.HumanoidStateType.Dead","humanoidHealth":0,"osClock":62913.121}
+
+Same instance. Still dead. No recovery.
+
+======================================================================
+OBSERVED STATE AFTER A SECOND FULL CHECK (osClock 62954, ~71s after the strand, well past round #6 of
+this session per the console tail below)
+======================================================================
+{"hasCharacter":true,"characterDebugId":"0_9193757","matchesStrandedInstance":true,"humanoidState":"Enum.HumanoidStateType.Dead","humanoidHealth":0,"osClock":62954.252}
+
+Screenshot taken at this instant (mcp__Roblox_Studio__screen_capture, capture_id
+"throttle-strand-corpse") shows the "YOU ARE THE ASWANG. Do not get seen." role-card overlay rendered
+above a collapsed/ragdolled character model lying on the spawn platform — the client's own view of the
+stranded corpse. Could not be persisted to a file path: the MCP screen_capture tool returns inline image
+data with no filesystem path, and this session has no mechanism to write binary image bytes to disk. Not
+citing a path for it; the JSON reads above are the citable evidence.
+
+======================================================================
+CONSOLE TAIL COVERING THE STRAND WINDOW (mcp__Roblox_Studio__get_console_output, full accumulated buffer)
+======================================================================
+Note: "[RoundService] Server closing — nothing to flush yet." + a fresh Bootstrap/round #0 sequence
+appears once in this buffer; that was a single Play-mode restart that happened BEFORE this clean trial
+was run (confirmed separately via get_studio_state returning "Server datamodel is not available in Edit
+mode" at the time). Everything below "[RoleService] DEBUG — solo round forced to ASWANG..." following
+that boot line is the session the trial ran in; the corpse's debugId (0_9193757) and Dead state were
+re-confirmed live via execute_luau at the two checkpoints above, both well after the boot line.
+
+[RoundService] Server closing — nothing to flush yet.
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 13 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Client] Ready. 5 controllers loaded.
+[Client] Snapshot — INTERMISSION round #0 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[MonsterService] Refused transform for Demiurgos_18: WRONG_PHASE
+[MonsterService] Refused transform for Demiurgos_18: WRONG_PHASE
+[MonsterService] Refused transform for Demiurgos_18: WRONG_PHASE
+[AntiCheat] Rate limit refused Demiurgos_18 (11461085874) on RequestTransform
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[Client] TRANSFORM witnessed (yours)
+[MonsterService] Refused transform for Demiurgos_18: ALREADY_TRANSFORMED
+[Client] revert witnessed (yours)
+[AntiCheat] Rate limit refused Demiurgos_18 (11461085874) on RequestTransform
+[MonsterService] Refused transform for Demiurgos_18: ON_COOLDOWN
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #1 · tasks 0/5 · gate shut · alive 0 · you: GHOST (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #1 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #2 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #2 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #2 · tasks 0/5 · gate shut · alive 0 · you: GHOST (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #2 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #3 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #3 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #3 · tasks 0/5 · gate shut · alive 0 · you: GHOST (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #3 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #4 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #4 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #4 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #4 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #5 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #5 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #5 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #5 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #6 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #6 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+
+======================================================================
+INTERPRETATION
+======================================================================
+- The client snapshot repeatedly reports "you: ALIVE" (rounds #4, #5, #6 shown above; the pattern
+  continues) with "alive 1" -- i.e. RoundService's PlayerState for this UserId is Alive and they are
+  dealt into every subsequent round's roster -- while their actual player.Character is the SAME dead,
+  Health=0 corpse (0_9193757) the whole time. The player is being counted as a living, killable,
+  Aswang-eligible participant while physically unable to act (dead ragdoll, no control).
+- No code path other than applyBodyRule's `Character == nil` branch ever clears or reloads this corpse,
+  and the throttled branch is the only place that leaves Character non-nil after a death, so nothing
+  will ever reach that branch again for this corpse on its own. This matches the static read of
+  RoundService.luau:246-259 exactly.

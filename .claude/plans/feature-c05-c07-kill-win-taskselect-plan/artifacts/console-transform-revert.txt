@@ -1,0 +1,24 @@
+Captured via mcp__Roblox_Studio__get_console_output, Play mode, round #3, 2026-08-11.
+Config: Round.Intermission=8, Duration=45, EndScreen=6, Monster.MaxTransformTime=8,
+Debug.SoloTesting/VerboseLogging/ForceAswangWhenSolo=true.
+
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #3 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[Client] TRANSFORM witnessed (yours)
+[Client] revert witnessed (yours)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #3 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (5s left)
+
+Sequence: pressed T via user_keyboard_input (keyPress T) with a built-in 9500ms wait, sent as
+a single call immediately after round #3 entered ACTIVE. The transform fired and the forced
+revert (MaxTransformTime = 8s) fired within that same 9.5s window, both witnessed on the
+client's own player. Confirms: T still transforms, and the C04 forced revert at
+MaxTransformTime still fires with the C05-C07 changes in place.
+
+Also earlier in this run (round #1 and #2), full round cycles completed:
+INTERMISSION(8s) -> STARTING(4s) -> ACTIVE(45s, full duration) -> ENDING(6s) -> INTERMISSION,
+repeating three times with zero warnings/errors in the console, confirming no regression in
+the phase cycle and no early end by attrition (WinConditions never fired mid-ACTIVE despite
+solo round having only 1 survivor dealt in, who is also the forced Aswang).

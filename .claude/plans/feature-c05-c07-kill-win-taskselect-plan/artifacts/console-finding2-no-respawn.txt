@@ -1,0 +1,59 @@
+FINDING 2 (exploit-auditor, High) — reproduced live, 2026-08-11. CONFIRMED, with a corrected mechanism.
+
+THE CLAIM
+  RoundService.Start sets `Players.CharacterAutoLoads = false`, and applyBodyRule is called from only
+  three sites (onPlayerAdded, setAllPlayerStates, MarkKilled). None is a death handler. So a death that
+  is NOT a kill — Escape > Reset Character, or falling out of the map — never respawns the player.
+
+WHAT I REPRODUCED (server datamodel, `humanoid.Health = 0`, which is what Reset does)
+
+  [F2] CharacterAutoLoads = false
+  [F2] before: health=100 parent=Workspace
+  [F2] set Health = 0; Died should fire now
+  [F2] t+ 2s  Character=Demiurgos_18  sameInstance=true  health=0
+  ...  (unchanged every 2s) ...
+  [F2] t+16s  Character=Demiurgos_18  sameInstance=true  health=0
+
+  Then across a FULL round boundary, 64 seconds, spanning ENDING -> INTERMISSION -> STARTING -> ACTIVE
+  twice over:
+
+  [F2] t+  4s  same=true  health=0  state=Enum.HumanoidStateType.Dead
+  ...  (identical every 4s) ...
+  [F2] t+ 64s  same=true  health=0  state=Enum.HumanoidStateType.Dead
+
+  RespawnTime is 3s. The player never recovers — not after 5x RespawnTime, not at a phase transition,
+  not at a new round. They are dead for the remainder of the server session.
+
+AND THEY ARE STILL COUNTED ALIVE — this is the damaging half. Every client snapshot during rounds 2
+and 3, while the character lay dead:
+
+  [Client] Snapshot — STARTING round #2 · ... · alive 1 · you: ALIVE (3s left)
+  [Client] Snapshot — ACTIVE   round #2 · ... · alive 1 · you: ALIVE (44s left)
+  [Client] Snapshot — STARTING round #3 · ... · alive 1 · you: ALIVE (3s left)
+  [Client] Snapshot — ACTIVE   round #3 · ... · alive 1 · you: ALIVE (44s left)
+
+  RoundService never learns about a death it did not cause, so PlayerStates still says ALIVE,
+  livingSurvivorCount still counts them, and C06's attrition win can never reach its threshold.
+
+WHERE THE AUDITOR'S MECHANISM IS WRONG, AND WHY IT MATTERS
+  The finding says `player.Character` becomes nil, so validateAndKill bails at its
+  `targetCharacter == nil` guard and the player becomes UNKILLABLE. That is not what happens.
+
+  Roblox leaves the dead character model attached: Character is non-nil, parented to Workspace, with a
+  HumanoidRootPart present. Measured above. So the early return does NOT fire, KillValidation DOES run,
+  TargetState is still ALIVE, and the player remains a valid kill target.
+
+  This makes the bug LESS severe than reported — the Aswang can still kill a reset player, so the round
+  is not permanently unwinnable — but it does not remove it. A player who resets is a permanently prone
+  corpse who still counts as a living survivor, and the Aswang must walk over and kill a body to
+  progress the win condition.
+
+ONE READING TO DISREGARD. An earlier probe in this session showed `health=100 state=Running` after a
+kill, which looked like a recovery. It was not: the console shows `[RoundService] Server closing` and a
+fresh `[Bootstrap] Ready. 13 services loaded.` between the two probes — Studio had restarted the
+session. The controlled test above holds the same character instance throughout and shows no recovery.
+
+THE FIX (not applied — this is a report, not a change)
+  RoundService must own respawn as well as spawn: connect `Humanoid.Died` / `CharacterRemoving` and
+  re-run applyBodyRule, with the kill path excluded because makeCorpse detaches rather than kills. A
+  bodiless-or-dead ALIVE player should also not be counted by livingSurvivorCount.

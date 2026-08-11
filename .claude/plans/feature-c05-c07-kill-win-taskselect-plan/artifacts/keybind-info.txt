@@ -1,0 +1,13 @@
+ContextActionService:GetAllBoundActionInfo() on Client datamodel, captured during Play mode
+(round #1, STARTING phase), 2026-08-11.
+
+EmotesMenuToggleAction -> Enum.KeyCode.Period
+AswangKill -> Enum.KeyCode.F
+AswangTransform -> Enum.KeyCode.T
+FreecamToggle -> Enum.KeyCode.P
+ScrollSelectedElement -> Enum.KeyCode.PageUp, Enum.KeyCode.PageDown, Enum.KeyCode.Home, Enum.KeyCode.End
+EnableKeyboardUINavigation -> Enum.KeyCode.BackSlash
+
+Confirms: AswangKill is bound to F, AswangTransform is bound to T, alongside Studio's
+built-in default bindings (emotes menu, freecam, UI navigation). Executed via
+mcp__Roblox_Studio__execute_luau on the Client datamodel.

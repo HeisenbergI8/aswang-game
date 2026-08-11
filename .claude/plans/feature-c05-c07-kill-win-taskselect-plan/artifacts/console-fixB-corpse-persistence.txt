@@ -1,0 +1,43 @@
+Fix B — corpses survive ENDING, are cleared at INTERMISSION.
+
+Cannot make a real corpse solo (nobody to kill as the Aswang while forced-Aswang-when-solo is on),
+so per the brief a stand-in Part named Corpse_TEST was placed into workspace.Corpses during ACTIVE.
+
+execute_luau (Server), during ACTIVE round #7:
+  local corpsesFolder = workspace:WaitForChild("Corpses")
+  local p = Instance.new("Part")
+  p.Name = "Corpse_TEST"
+  p.Anchored = true
+  p.Parent = corpsesFolder
+  -> {"created":true,"existsNow":true,"childCount":1}
+
+Checked again once the console showed ENDING round #7:
+  [RoundService] -> ENDING (6s)
+  [Client] Phase -> ENDING (6s)
+  [Client] Snapshot — ENDING round #7 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (5s left)
+
+execute_luau (Server):
+  corpsesFolder:FindFirstChild("Corpse_TEST") ~= nil
+  -> {"existsNow":true,"childCount":1}     -- SURVIVED ENDING
+
+Checked again once the console had advanced through INTERMISSION round #7 into STARTING/ACTIVE
+round #8:
+  [RoundService] -> INTERMISSION (8s)
+  [Client] Snapshot — INTERMISSION round #7 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+  [RoundService] -> STARTING (4s)
+  [Client] Snapshot — STARTING round #8 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+  [RoundService] -> ACTIVE (45s)
+  [Client] Snapshot — ACTIVE round #8 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+
+execute_luau (Server):
+  corpsesFolder:FindFirstChild("Corpse_TEST") ~= nil, #corpsesFolder:GetChildren()
+  -> {"existsNow":false,"childCount":0}    -- DESTROYED
+
+RESULT: Corpse_TEST persisted across the ACTIVE -> ENDING boundary and was gone by the time the
+next round reached STARTING/ACTIVE — destroyed sometime during the INTERMISSION round #7 window, as
+specified. No console warnings accompanied the clear.
+
+Caveat: the two checks bracket the destruction (present at ENDING, absent by the next round's
+STARTING) but did not catch the exact tick of destruction, since the intervening INTERMISSION
+window elapsed between polls. The brief's requirement — survive ENDING, gone by INTERMISSION's end
+— is satisfied either way.

@@ -1,0 +1,47 @@
+Fix A branch 3 — death OUTSIDE a round (during INTERMISSION/LOBBY) must respawn with a NEW
+character, not convert to GHOST. This is the branch the coordinator flagged as most important
+(strands a player bodiless forever if wrong), so instance identity was compared directly, not just
+non-nil.
+
+Setup: waited for the console to show "INTERMISSION round #4" (player state LOBBY, embodied per
+PlayerBody.mayHaveBody — LOBBY players have a body between rounds). Captured the LOBBY-phase
+character's Instance:GetDebugId() BEFORE killing it, then set Humanoid.Health = 0 on that same
+character (server datamodel).
+
+execute_luau (Server) — capture + kill:
+  local plr = Players:GetPlayers()[1]
+  local char = plr.Character
+  local origDebugId = char:GetDebugId()          -- "0_8025072"
+  local hum = char:FindFirstChildOfClass("Humanoid")
+  hum.Health = 0
+  task.wait(0.3)
+  -> {origDebugId = "0_8025072", haveChar = true, charNilRightAfter = true}
+
+Console at the time of the kill (INTERMISSION round #4, "you: LOBBY"):
+  [RoundService] -> INTERMISSION (8s)
+  [Client] Phase -> INTERMISSION (8s)
+  [Client] Snapshot — INTERMISSION round #4 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+
+No "[RoundService] Killed ...; N alive." line was ever printed for this death (confirmed by reading
+the full console dump — that line only appears for the three round kills where the player was
+ACTIVE). No "you: GHOST" state was ever reported for this player after this kill, in this round or
+the next. This is the load-bearing observation: watchForDeath's phase check (RoundService.luau
+~line 218) routes an INTERMISSION death away from MarkKilled entirely, so the player is never
+counted or displayed as GHOST.
+
+Follow-up snapshots (same continuous console):
+  [RoundService] -> STARTING (4s)
+  [Client] Snapshot — STARTING round #5 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+  [RoundService] -> ACTIVE (45s)
+  [Client] Snapshot — ACTIVE round #5 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+
+execute_luau (Server) — read the character now attached to the player:
+  local plr = Players:GetPlayers()[1]
+  local char = plr.Character
+  return {haveChar = char ~= nil, newDebugId = char:GetDebugId(), charName = char.Name,
+          health = char.Humanoid.Health}
+  -> {"charName":"Demiurgos_18","haveChar":true,"health":100,"newDebugId":"0_8026220"}
+
+RESULT: newDebugId "0_8026220" != origDebugId "0_8025072" — CONFIRMED DIFFERENT INSTANCE. The
+player was re-embodied at full health (100) with a fresh character, never passed through GHOST,
+and was ALIVE again by the following round. Fix A branch 3 holds.

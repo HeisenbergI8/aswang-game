@@ -1,0 +1,34 @@
+Fix A branch 2 — a GHOST gets a body back when the round ends and everyone returns to LOBBY.
+
+Method: after killing the sole player during ACTIVE (branch 1's probe), let the round run to
+completion without further intervention and watch the console across ENDING -> INTERMISSION ->
+STARTING -> next ACTIVE. Observed across THREE independent rounds in one continuous Play session
+(round 1, round 3, round 5 — each preceded by the round-1-style kill probe):
+
+Round #1 (killed mid-ACTIVE):
+  [RoundService] Killed 11461085874; 0 alive.
+  [Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · alive 0 · you: GHOST (16s left)
+  [RoundService] -> ENDING (6s)
+  [Client] Phase -> ENDING (6s)
+  [Client] Snapshot — ENDING round #1 · tasks 0/5 · gate shut · alive 0 · you: GHOST (5s left)
+  [RoundService] -> INTERMISSION (8s)
+  [Client] Phase -> INTERMISSION (8s)
+  [Client] Snapshot — INTERMISSION round #1 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+  [RoundService] -> STARTING (4s)
+  [Client] Phase -> STARTING (4s)
+  [Client] Snapshot — STARTING round #2 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+  [RoundService] -> ACTIVE (45s)
+  [Client] Snapshot — ACTIVE round #2 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+
+Round #3 and round #5 reproduced the identical GHOST -> LOBBY -> ALIVE sequence (see full session
+dump in console-full-session-dump.txt).
+
+Server-side confirmation for round 1's transition: `plr.Character` was nil immediately after the
+kill (execute_luau probe in console-fixA-branch1-death-during-active.txt) and non-nil again by the
+time round #2's ACTIVE snapshot reported "you: ALIVE" with full health (confirmed via execute_luau
+health read of 100 in the round-3 retest, see console-fixA-branch3-outside-round-respawn.txt).
+
+Observed: "you: GHOST" while dead through ENDING, flips to "you: LOBBY" exactly at the
+ENDING->INTERMISSION transition, and the player is embodied and "you: ALIVE" again by the next
+round's STARTING/ACTIVE — reproduced identically 3 times (rounds 1, 3, 5) with no deviation, no
+warnings, no stuck-GHOST state observed.

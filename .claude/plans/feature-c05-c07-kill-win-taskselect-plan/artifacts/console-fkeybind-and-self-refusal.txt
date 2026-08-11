@@ -1,0 +1,50 @@
+Captured via mcp__Roblox_Studio__get_console_output, Play mode, 2026-08-11.
+Config: Round.Intermission=8, Duration=45, EndScreen=6, Debug.SoloTesting/VerboseLogging/
+ForceAswangWhenSolo=true.
+
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 13 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Client] Ready. 5 controllers loaded.
+[Client] Snapshot — INTERMISSION round #0 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+
+--- (5x user_keyboard_input keyPress F, 300ms apart, while ACTIVE) ---
+--- NO new console lines appeared: no [MonsterService] refusal, no [AntiCheat] rate-limit line ---
+--- confirms nearestTarget() returned nil solo and no remote was fired, no rate-limit token spent ---
+
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (5s left)
+[MonsterService] Refused kill by Demiurgos_18: WRONG_PHASE
+   (^ this probe was fired late, real time had elapsed past ACTIVE into ENDING while other
+     tool calls ran — re-run below during ACTIVE proper)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #1 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #2 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #2 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[MonsterService] Refused kill by Demiurgos_18: SELF
+   (^ fired Remotes.Get("RequestKill"):FireServer(me.UserId) from Client datamodel
+      immediately after entering round #2 ACTIVE — confirms the remote wire is live and
+      SELF precedes phase-irrelevant checks during ACTIVE)
+
+Analysis:
+- Round #1 ran INTERMISSION(8s) -> STARTING(4s) -> ACTIVE(45s, full duration, no early end)
+  -> ENDING(6s) -> INTERMISSION(8s). No WinConditions early-end fired mid-ACTIVE.
+- Round #2 entered ACTIVE normally, confirming the cycle repeats with zero warnings.
+- The WRONG_PHASE line on round #1 is a probe-timing artifact (real wall-clock time passed
+  during the agent's tool-call turnaround between the F-press check and firing the remote),
+  not a phase-check bug — it correctly reports WRONG_PHASE once ENDING started, and correctly
+  reports SELF once ACTIVE was current for round #2.

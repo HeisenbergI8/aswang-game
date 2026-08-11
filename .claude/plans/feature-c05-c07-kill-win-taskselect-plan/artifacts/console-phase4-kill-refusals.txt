@@ -1,0 +1,70 @@
+Phases 4-6 — live Studio console, 2026-08-11. Kill refusals, rate limit, and the solo win guard.
+Studio: Place3 · Config debug: Intermission/Duration/EndScreen = 8/60/6, Solo/Verbose/ForceAswang = true
+(all six reverted afterwards; `git diff src/shared/Config.luau` empty, `check:debug` green)
+
+WHAT IS PROVEN HERE
+  1. WRONG_PHASE vs SELF tracks the phase EXACTLY. Shot 4 lands in ENDING and shots 5-6 in
+     INTERMISSION -> WRONG_PHASE. Shots 1-3 and 7-14 land in ACTIVE -> SELF. The phase check runs
+     first in KillValidation's fixed order, and the boundary is exact in both directions.
+  2. SELF is refused whether the killer is transformed or not (PROBE-3 untransformed, PROBE-3b
+     transformed), which is the check-order property: SELF precedes the role and form checks, so
+     "kill myself" cannot be used as a role probe with a different refusal shape.
+  3. The AntiCheat rate limit on RequestKill: an 8-call burst yields exactly 3 verdicts and then
+     `[AntiCheat] Rate limit refused`. Capacity = 3, live.
+  4. The verdict NEVER reaches the client. Every refusal above is a SERVER log line; the client
+     received no reply remote of any kind on any probe.
+  5. C04's forced revert fires (`[Client] revert witnessed (yours)` at MaxTransformTime = 8s) — the
+     gap C04's own verification could not reach.
+  6. THREE FULL ROUNDS RAN TO SUNRISE. A solo round has zero survivors dealt in, and
+     WinConditions.aswangWinsByAttrition returns false there by design. Had that guard been wrong,
+     every round would have ended within a tick of ACTIVE. Rounds 1, 2 and 3 all ran their full 60s
+     and ended on ENDING.
+
+PROBE DESIGN ERROR, RECORDED RATHER THAN HIDDEN
+  PROBE-1 and PROBE-2 were aimed at `me.UserId + 1`, a UserId no player has. validateAndKill returns
+  at its `target == nil` guard BEFORE calling KillValidation, so those two probes proved only the nil
+  -target early return -- not WRONG_PHASE and not NOT_TRANSFORMED. PROBE-1b re-ran the phase case
+  correctly by targeting self. NOT_TRANSFORMED remains UNREACHABLE solo: it sits after SELF in the
+  check order, so reaching it needs a second player. See verification.md.
+
+--------------------------------------------------------------------------------
+[RoundService] -> ACTIVE (60s)
+[PROBE-3] RequestKill on self, expect SELF
+[MonsterService] Refused kill by Demiurgos_18: SELF
+[PROBE] transforming; windup is 1.2s
+[Client] TRANSFORM witnessed (yours)
+[PROBE-3b] RequestKill on self while transformed, expect SELF
+[MonsterService] Refused kill by Demiurgos_18: SELF
+[Client] revert witnessed (yours)
+[RoundService] -> ENDING (6s)
+[RoundService] -> INTERMISSION (8s)
+[RoundService] -> STARTING (4s)
+[RoundService] -> ACTIVE (60s)
+[PROBE] waiting 16s for the RequestKill token bucket to refill
+[PROBE-6] 8-call burst, expect 3 x SELF then AntiCheat refusals
+[MonsterService] Refused kill by Demiurgos_18: SELF
+[MonsterService] Refused kill by Demiurgos_18: SELF
+[MonsterService] Refused kill by Demiurgos_18: SELF
+[AntiCheat] Rate limit refused Demiurgos_18 (11461085874) on RequestKill
+[PROBE-1b] shot 1 fired
+[MonsterService] Refused kill by Demiurgos_18: SELF
+[PROBE-1b] shot 2 fired
+[MonsterService] Refused kill by Demiurgos_18: SELF
+[PROBE-1b] shot 3 fired
+[MonsterService] Refused kill by Demiurgos_18: SELF
+[RoundService] -> ENDING (6s)
+[PROBE-1b] shot 4 fired
+[MonsterService] Refused kill by Demiurgos_18: WRONG_PHASE      <-- phase flipped, verdict flipped
+[RoundService] -> INTERMISSION (8s)
+[PROBE-1b] shot 5 fired
+[MonsterService] Refused kill by Demiurgos_18: WRONG_PHASE
+[PROBE-1b] shot 6 fired
+[MonsterService] Refused kill by Demiurgos_18: WRONG_PHASE
+[RoundService] -> STARTING (4s)
+[RoundService] -> ACTIVE (60s)
+[PROBE-1b] shot 7 fired
+[MonsterService] Refused kill by Demiurgos_18: SELF             <-- back in ACTIVE, back to SELF
+[PROBE-1b] shot 8 fired
+[MonsterService] Refused kill by Demiurgos_18: SELF
+[PROBE-1b] shots 9-14 fired
+[MonsterService] Refused kill by Demiurgos_18: SELF   (x6)

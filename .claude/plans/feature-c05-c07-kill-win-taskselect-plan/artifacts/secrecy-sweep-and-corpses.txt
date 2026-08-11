@@ -1,0 +1,26 @@
+Captured via mcp__Roblox_Studio__execute_luau on Server datamodel, round #7 in progress, 2026-08-11.
+Reads Players/Workspace/CollectionService directly — no service module required, so this is live
+DataModel state, not a fresh require-cache instance.
+
+CharacterAutoLoads: false
+
+--- Player: Demiurgos_18 ---
+Player attrs: 0
+Player tags: (none)
+Character: Demiurgos_18 at -1.34506356716156, 3.9960899353027344, -3.9608993530273438
+Character attrs: 0
+Character tags: (none)
+Humanoid attrs: 0
+Humanoid tags: (none)
+
+Corpses folder exists: true
+Corpses children count: 0
+
+Analysis:
+- Players.CharacterAutoLoads = false, confirming RoundService.Start sets the flag (matches
+  verification.md's Phase 1 finding, reconfirmed live during the C05-C07 pass).
+- Zero attributes and zero CollectionService tags on Player, Character, and Humanoid. No trace
+  of role, form, or any other server-only state leaking onto a client-visible replicated
+  surface. This matches the C04 pass's secrecy finding, reconfirmed after C05-C07's changes.
+- workspace.Corpses exists (created in MonsterService.Start) and is empty, as expected for a
+  solo round where no kill has succeeded (there is nobody to kill).

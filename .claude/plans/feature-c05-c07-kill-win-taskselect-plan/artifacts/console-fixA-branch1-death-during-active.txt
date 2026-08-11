@@ -1,0 +1,34 @@
+Fix A branch 1 — death during ACTIVE
+Probe: executed on Server datamodel via execute_luau:
+  local plr = Players:GetPlayers()[1]
+  local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+  hum.Health = 0
+
+Result of execute_luau call immediately after (1s task.wait inside):
+  {"healthAfter":0,"charNowNil":true,"charStillSame":false}
+  -> player.Character became nil immediately after the kill.
+
+get_console_output (full session log at time of capture):
+
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 13 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Client] Ready. 5 controllers loaded.
+[Client] Snapshot — INTERMISSION round #0 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[RoundService] Killed 11461085874; 0 alive.
+[Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · alive 0 · you: GHOST (16s left)
+
+Observed:
+  - "[RoundService] Killed <userId>; 0 alive." logged exactly as specified.
+  - Client snapshot flipped to "alive 0 · you: GHOST" in the same tick's broadcast.
+  - player.Character read back as nil immediately after (execute_luau probe above).
+
+This is the core of Fix A: the player is counted 0 alive (not still ALIVE-but-dead), which is
+the win-condition fix from C05-C07.

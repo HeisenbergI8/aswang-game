@@ -1,0 +1,23 @@
+Fix A edge case — die twice in quick succession (rapid repeated Health = 0 on the same corpse).
+
+execute_luau (Server), round #5, during ACTIVE:
+  local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+  hum.Health = 0                     -- first, fires Humanoid.Died
+  out.afterFirst = hum.Health        -- 0
+  hum.Health = 0                     -- immediate second write, same tick
+  out.afterSecond = hum.Health       -- 0
+  task.wait(0.3)
+  local ok, err = pcall(function() hum.Health = 0 end)   -- third, slightly later
+  out.thirdOk = ok                   -- true, no error thrown
+
+Result: {"thirdOk":true,"afterSecond":0,"afterFirst":0} — no error from any of the three writes.
+
+Console for round #5 shows exactly ONE "[RoundService] Killed ...; 0 alive." line and alive count
+never went negative:
+  [RoundService] Killed 11461085874; 0 alive.
+  [Client] Snapshot — ACTIVE round #5 · tasks 0/5 · gate shut · alive 0 · you: GHOST (18s left)
+
+This matches the code's guard in RoundService.MarkKilled: it returns early unless
+state.PlayerStates[player.UserId] == Alive, so the second and third writes are no-ops (Humanoid.Died
+does not re-fire on a Health value that is already 0 in any case, and even if it had, MarkKilled's
+guard makes a duplicate call idempotent). No double-count, no crash, no negative alive.

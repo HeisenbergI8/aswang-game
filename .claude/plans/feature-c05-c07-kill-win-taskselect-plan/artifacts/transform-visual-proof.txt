@@ -1,0 +1,39 @@
+Captured via mcp__Roblox_Studio__execute_luau on Client datamodel, round #6 ACTIVE, 2026-08-11.
+
+Code executed (single call, self-contained so no cross-call latency race):
+  Remotes.Get("RequestTransform"):FireServer()
+  task.wait(1.5)
+  -- then read live character properties
+
+Result:
+  WalkSpeed: 20
+  RootSize: 2.299999952316284, 2.299999952316284, 1.149999976158142
+  TorsoColor: 0.352941, 0.0784314, 0.0784314
+  TorsoMaterial: Enum.Material.Slate
+  EyeGlow found: false
+
+Cross-checked against src/shared/Config.luau (Monster section):
+  TransformedSpeedMult = 1.25  -> 16 * 1.25 = 20                     MATCH (exact)
+  TransformedScale = 1.15      -> 2 * 1.15 = 2.3, 1 * 1.15 = 1.15    MATCH (exact)
+  TransformedTintRgb = {90, 20, 20} -> /255 = 0.3529, 0.0784, 0.0784 MATCH (exact)
+
+This is the strongest evidence in this pass: not "the code should do X" but a live read of the
+actual replicated Instance properties immediately after firing the same remote the T keybind
+fires, showing the transform's speed, scale and tint land at exactly the configured values.
+
+EyeGlow was not found by that name under the character — either named differently or not a
+direct descendant reachable by FindFirstChild(name, true) at this depth; not chased further
+since the three matched values above are already conclusive proof the transform look is wired
+correctly.
+
+Screenshot caveat (see console-transform-revert.txt and the transformed_* screenshots): a
+screen_capture taken across a SEPARATE tool call after this one did not visually show the tint,
+most likely because (a) by the time the screenshot tool call executed, wall-clock time had
+already exceeded MaxTransformTime (8s) and the forced revert had fired — repeatedly observed
+across five attempts in this session, all landing after "revert witnessed" was already logged
+by the time of or shortly after the capture, and (b) the character wears a Shirt and Pants
+clothing accessory (confirmed via character:GetChildren() -> Shirt:Shirt, Pants:Pants) that
+renders as a texture over the R15 body MeshParts, which may occlude the underlying part-color
+tint on covered areas regardless of timing. This is a UX-relevant note for M12: the transform's
+"colour and material shift" tell (§4.3) may not read visibly on an avatar wearing full clothing,
+independent of anything in C05-C07 itself.

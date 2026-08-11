@@ -1,0 +1,32 @@
+Captured via mcp__Roblox_Studio__execute_luau (Server) and get_console_output, 2026-08-11.
+Config: Round.Intermission=8, Duration=45, EndScreen=6, Debug.SoloTesting/VerboseLogging/
+ForceAswangWhenSolo=true.
+
+Position reading #1 (during INTERMISSION round #8, "you: LOBBY" per client snapshot):
+  Demiurgos_18 HumanoidRootPart.Position = -1.34506356716156, 3.9960899353027344, -3.9608993530273438
+  charExists = true
+
+Position reading #2 (after the transition INTERMISSION round #8 -> STARTING round #9 ->
+ACTIVE round #9, i.e. across the STARTING->ACTIVE boundary):
+  Demiurgos_18 HumanoidRootPart.Position = -1.34506356716156, 3.9960899353027344, -3.9608993530273438
+  charExists = true
+
+IDENTICAL. The player kept the same body at the same position across a full phase transition
+(the "LOBBY" state during INTERMISSION does not remove or move the character), confirming no
+teleport to spawn is fired on each transition — matches verification.md's prior Phase 1 finding
+("2 rounds, 7 transitions, position constant"), reconfirmed here after the C05-C07 changes.
+
+Players.CharacterAutoLoads = false (see secrecy-sweep-and-corpses.txt), confirming
+RoundService.Start is still the one setting this flag; the flag is what suppresses Roblox's
+default auto-respawn-and-teleport-to-spawn behaviour on death/join, which is what would
+otherwise move the character every transition.
+
+Full round-cycle log across this session (see full console dump in
+console-fkeybind-and-self-refusal.txt / console-transform-revert.txt for the first 6 rounds;
+this file continues through round #9): the round advanced
+  INTERMISSION(8s) -> STARTING(4s) -> ACTIVE(45s, always the FULL 45s) -> ENDING(6s) -> repeat
+NINE consecutive times with zero warnings or errors, and ACTIVE never ended early. This is
+strong evidence that WinConditions' attrition check (AswangWinSurvivorThreshold clamped by
+survivors actually dealt in, per the Config.luau comment) does not fire on tick one of a solo
+round despite there being only 1 survivor total (who is also the forced Aswang) — a round with
+zero "real" survivors dealt in is never won by attrition, matching the plan's design intent.

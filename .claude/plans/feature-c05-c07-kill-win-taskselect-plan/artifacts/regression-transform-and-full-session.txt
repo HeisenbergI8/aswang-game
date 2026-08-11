@@ -1,0 +1,73 @@
+Regression sweep — T transform + forced revert, and the full console session (11 round cycles).
+
+execute_luau (Client), round #11 ACTIVE — fires RequestTransform and reads WalkSpeed / RootPart
+size / UpperTorso color in a single call with in-Luau task.wait, avoiding cross-call latency:
+
+  before:          {"speed":16,"rootSize":"2, 2, 1","torsoColor":"0.294118, 0.592157, 0.294118"}
+  mid_transformed: {"speed":20,"rootSize":"2.3, 2.3, 1.15","torsoColor":"0.352941, 0.0784314, 0.0784314"}
+  after_reverted:  {"speed":16,"rootSize":"2, 2, 1","torsoColor":"0.294118, 0.592157, 0.294118"}
+
+Cross-check against Config.Monster read from the server in the same session:
+  {"scale":1.15,"tint":{"1":90,"3":20,"2":20},"speedMult":1.25,"maxTransformTime":8}
+  20 / 16 = 1.25 = TransformedSpeedMult. 2.3 / 2 = 1.15 = TransformedScale.
+  0.352941*255=90, 0.0784314*255=20, 0.0784314*255=20 = TransformedTintRgb (90,20,20). All exact.
+  after_reverted returned to baseline after the 8.5s wait inside the same call, past
+  MaxTransformTime = 8s.
+
+Console corroboration (full session, both attempts):
+  round #10: [Client] TRANSFORM witnessed (yours)  ... [Client] revert witnessed (yours)
+  round #11: [Client] TRANSFORM witnessed (yours)  ... [Client] revert witnessed (yours)
+
+FULL SESSION CONSOLE DUMP (11 consecutive round cycles, INTERMISSION through ACTIVE, covering all
+of this pass's probes — Fix A branches 1/2/3, quick-succession, Fix B corpse, this transform test):
+
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 13 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Client] Ready. 5 controllers loaded.
+[Client] Snapshot — INTERMISSION round #0 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+... (rounds 1-9 cycle cleanly: STARTING -> ACTIVE -> [kill on rounds 1,3,5] -> ENDING ->
+    INTERMISSION -> next STARTING, exactly as documented in the branch-specific artifacts above) ...
+[Client] Snapshot — INTERMISSION round #9 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+Attempted to call require with invalid argument(s).
+Stack Begin
+Script 'AssistantCommand', Line 10
+Stack End
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #10 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #10 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[Client] TRANSFORM witnessed (yours)
+[Client] revert witnessed (yours)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #10 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #10 · tasks 0/5 · gate shut · alive 0 · you: LOBBY (7s left)
+[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #11 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (3s left)
+[RoundService] -> ACTIVE (45s)
+[Client] Phase -> ROUND LIVE (45s)
+[Client] Snapshot — ACTIVE round #11 · tasks 0/5 · gate shut · alive 1 · you: ALIVE (44s left)
+[Client] TRANSFORM witnessed (yours)
+[Client] revert witnessed (yours)
+
+NOTE ON THE ONE NON-GAME LINE: "Attempted to call require with invalid argument(s)" / "Script
+'AssistantCommand', Line 10" between rounds 9 and 10 is from a mistake in one of MY OWN
+execute_luau probes (an earlier attempt used a placeholder `require(CollectionService)` call by
+accident) — it is attributed to the Studio Assistant's own command-execution script, not to any
+game script under src/. It is not a RoundService/MonsterService/Client warning and is not a
+regression. Excluding that one self-inflicted line, zero warnings or errors appear anywhere across
+11 full round cycles.
+
+CONFIRMED: T still transforms with the exact configured mechanical/visual delta; the forced revert
+at MaxTransformTime (8s) still fires; the round cycle ran 11 times end-to-end with no warnings from
+any game service.

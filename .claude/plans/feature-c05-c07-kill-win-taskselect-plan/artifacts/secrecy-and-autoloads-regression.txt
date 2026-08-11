@@ -1,0 +1,22 @@
+Regression sweep — secrecy surface and CharacterAutoLoads, round #8 ACTIVE.
+
+execute_luau (Server):
+  local plr = Players:GetPlayers()[1]
+  local char = plr.Character
+  local hum = char:FindFirstChildOfClass("Humanoid")
+  return {
+    characterAutoLoads = Players.CharacterAutoLoads,
+    playerAttrs = plr:GetAttributes(),
+    charAttrs = char:GetAttributes(),
+    humAttrs = hum:GetAttributes(),
+    playerTags = CollectionService:GetTags(plr),
+    charTags = CollectionService:GetTags(char),
+    humTags = CollectionService:GetTags(hum),
+  }
+
+Result:
+  {"charTags":[],"playerAttrs":[],"humAttrs":[],"humTags":[],"playerTags":[],"charAttrs":[],
+   "characterAutoLoads":false}
+
+CONFIRMED: Players.CharacterAutoLoads == false. GetAttributes() empty ({}) on Player, Character and
+Humanoid. GetTags() empty ([]) on all three. No secrecy leak via attribute or tag on this pass.

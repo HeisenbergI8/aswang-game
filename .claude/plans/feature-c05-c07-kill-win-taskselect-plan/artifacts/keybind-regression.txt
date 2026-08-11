@@ -1,0 +1,11 @@
+Regression sweep — keybindings, round #8.
+
+execute_luau (Client):
+  ContextActionService:GetAllBoundActionInfo()
+
+Result (relevant entries):
+  "AswangKill":     {"1":"Enum.KeyCode.F"}
+  "AswangTransform":{"1":"Enum.KeyCode.T"}
+
+CONFIRMED: F is still bound to AswangKill, T is still bound to AswangTransform. No regression in
+the client keybindings.
