@@ -25,6 +25,14 @@
 // file X occurring after at least one review launch, and the count is how many DISTINCT review
 // generations have been followed by an edit to that same file.
 //
+// THE WINDOW IS THE LEDGER'S, NOT THE SESSION'S
+// ---------------------------------------------
+// `record-activity.mjs` keeps only the last `MAX_TURNS_KEPT` (20) turns, so this counts fix rounds
+// inside a rolling window rather than over all history. That is the right scope and it is worth
+// knowing: a patch loop happens inside one working stretch, and a file that stops being patched ages
+// out by itself. It also means this can never accumulate into a permanent accusation about work from
+// last week — the failure mode that would get it switched off.
+//
 // WHY IT BLOCKS ONCE, AND ONLY ADVISES
 // ------------------------------------
 // It cannot know that the third patch is wrong — only that the shape of the work has been wrong three
