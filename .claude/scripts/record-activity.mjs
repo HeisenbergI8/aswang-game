@@ -148,11 +148,19 @@ const main = async () => {
     if (typeof agent === 'string' && REVIEW_AGENTS.test(agent)) events.push({ turn, agent, launched: true })
   }
 
-  if (tool === 'SendMessage') {
-    // A resumed agent is identified by its id, not its type, so the type is unknown here. Recorded as
-    // a generic review touch: it proves a reviewer was engaged this turn, which is what the gate asks.
-    events.push({ turn, agent: 'resumed', launched: true })
-  }
+  // ── A RESUME IS DELIBERATELY *NOT* CREDITED ─────────────────────────────────
+  //
+  // The first version of this credited every `SendMessage` as a review touch, on the reasoning that a
+  // resumed auditor keeps its own findings in context and should not read as nothing. An audit proved
+  // that unconditional: a message to ANY agent — a research task, anything — silenced the gate, which
+  // is exactly the hole the `Task`/`Agent` branch above is written to avoid. A resume carries only the
+  // target's id, never its type, so there is nothing here to filter on.
+  //
+  // So it is dropped, and the cost is a spurious nudge on the rare turn that only resumes a reviewer.
+  // That is the right direction to fail: a gate that asks when it needn't costs one sentence, and a
+  // gate that can be silenced by an unrelated message costs the thing it was guarding. Recording the
+  // LAUNCH above already fixes the case that actually mattered — background reviewers finishing two
+  // or three turns after the turn that edited the source.
 
   if (tool === 'Edit' || tool === 'Write' || tool === 'NotebookEdit') {
     const file = payload.tool_input?.file_path

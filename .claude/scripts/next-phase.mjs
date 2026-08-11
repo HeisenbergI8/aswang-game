@@ -255,8 +255,6 @@ const phases = [...byPhase.entries()]
 // same conditions. It is a separate status only so the report says which of the two it is.
 const next = phases.find(phase => phase.status !== 'done')
 
-if (process.argv.includes('--self-test')) process.exit(selfTest())
-
 const blocked = blockingPhase(phases, next)
 const allDone = phases.length > 0 && phases.every(phase => phase.status === 'done')
 

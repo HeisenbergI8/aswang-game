@@ -61,15 +61,65 @@ export const PAYLOAD_FIELDS = new Map([
   ['RoleAssigned', new Set(['Role'])]
 ])
 
-// Field names assigned in a table constructor: `{ Result = x, KillerName = y }` -> Result, KillerName.
-// A payload built as a variable rather than inline reads as no fields, which is the same blind spot
-// the call-name check already has and is stated in the header rather than pretended away.
-export const strayFields = (remote, args) => {
+// Field names assigned at the TOP LEVEL of a table constructor, given text starting at its `{`.
+//
+// `=(?!=)` so `Result = (a == b)` yields `Result` and not `a`. Depth 1 — not 0 — is the top level,
+// because the constructor's own opening brace is the first token counted; getting that wrong returns
+// an empty list for every payload, which reads exactly like "nothing to flag".
+export const constructorFields = (body) => {
+  const fields = []
+  let depth = 0
+
+  for (const token of body.matchAll(/[{}]|([A-Za-z_]\w*)\s*=(?!=)/g)) {
+    if (token[0] === '{') depth += 1
+    else if (token[0] === '}') depth -= 1
+    else if (depth === 1 && token[1]) fields.push(token[1])
+  }
+
+  return fields
+}
+
+//[[
+//  Resolve the payload of a Fire* call to a list of field names, following ONE level of indirection.
+//
+//  Three shapes reach this, and the third is the one that matters:
+//    :FireAllClients({ Result = r })                  -> read inline
+//    :FireClient(player, { Role = role })             -> read inline, past the player argument
+//    local payload: T = { ... } ; :FireAllClients(payload) -> follow the local BACKWARDS
+//
+//  The third is what both real call sites use, because `FireAllClients` takes `...any` and a typed
+//  local is the only thing that checks anything at all. A checker that cannot read it is a checker
+//  that fires on hypotheticals.
+//]]
+export const payloadFieldsAt = (code, open) => {
+  const args = argsAt(code, open)
+  const inline = args.indexOf('{')
+
+  if (inline !== -1) return constructorFields(args.slice(inline))
+
+  const identifier = /([A-Za-z_]\w*)\s*\)?\s*$/.exec(args.trim())
+
+  if (!identifier) return []
+
+  // Backwards to the nearest declaration of that name. Bounded window: a payload built further away
+  // than this is not one a reader would connect to the call either.
+  const window = code.slice(Math.max(0, open - 1200), open)
+  const declaration = new RegExp(`local\\s+${identifier[1]}\\s*(?::[^=]+)?=\\s*\\{`, 'g')
+  let last = null
+
+  for (const match of window.matchAll(declaration)) last = match
+
+  if (!last) return []
+
+  return constructorFields(window.slice(last.index + last[0].length - 1))
+}
+
+export const strayFields = (remote, fields) => {
   const allowed = PAYLOAD_FIELDS.get(remote)
 
   if (!allowed) return []
 
-  return [...args.matchAll(/([A-Za-z_]\w*)\s*=/g)].map(match => match[1]).filter(field => !allowed.has(field))
+  return fields.filter(field => !allowed.has(field))
 }
 
 // Tokens that name the secret. Deliberately broad on the monster side and narrow on the generic side:
@@ -120,6 +170,37 @@ export const scan = files => {
       findings.push({ file, line, why, detail })
     }
 
+    // 0. THE FIELDS OF AN ALLOWLISTED REVEAL, wherever its payload was built.
+    //
+    // Separate from the scan below, and it has to be. That one only looks at calls whose ARGUMENT TEXT
+    // names the secret — so a payload built as `local payload: Types.RoundEndedPayload = {...}` and
+    // passed by name is skipped entirely, because `payload` matches no token. Both real reveal sites in
+    // this repo are exactly that shape, so the first version of this check fired on neither of them: an
+    // audit added `KillerName` to the real payload and the scan returned zero findings.
+    //
+    // FireClient too, not only FireAllClients — RoleAssigned is a per-player send and is the other
+    // remote allowed to carry a role.
+    for (const match of withStrings.matchAll(/:Fire(?:AllClients|Client)\s*\(/g)) {
+      const remote = remoteNameBefore(withStrings, match.index)
+
+      if (!remote || !REVEAL_ALLOWLIST.has(remote)) continue
+
+      const open = match.index + match[0].length - 1
+      const fields = payloadFieldsAt(code, open)
+      const stray = strayFields(remote, fields)
+
+      if (stray.length === 0) continue
+
+      add(
+        match.index,
+        `\`${remote}\` carries ${stray.map(field => `\`${field}\``).join(', ')} — not on its field allowlist`,
+        `An allowlisted reveal may carry ONLY ${[...(PAYLOAD_FIELDS.get(remote) ?? [])].join(', ')}. ` +
+          'Being on REVEAL_ALLOWLIST exempts the CALL, never the PAYLOAD, and the typechecker does not ' +
+          'help — Luau silently accepts an extra field on an annotated table. Add the field here, with ' +
+          'a reason, if it genuinely belongs in the reveal.'
+      )
+    }
+
     // 1. Broadcasts carrying the secret.
     for (const match of code.matchAll(/:FireAllClients\s*\(/g)) {
       const open = match.index + match[0].length - 1
@@ -133,21 +214,7 @@ export const scan = files => {
       // length by construction, so the index carries across.
       const remote = remoteNameBefore(withStrings, match.index)
 
-      if (remote && REVEAL_ALLOWLIST.has(remote)) {
-        const stray = strayFields(remote, args)
-
-        if (stray.length === 0) continue
-
-        add(
-          match.index,
-          `\`${remote}\` carries ${stray.map(field => `\`${field}\``).join(', ')} — not on its field allowlist`,
-          `An allowlisted reveal may carry ONLY ${[...(PAYLOAD_FIELDS.get(remote) ?? [])].join(', ')}. ` +
-            'Being on REVEAL_ALLOWLIST exempts the CALL, never the PAYLOAD — add the field to PAYLOAD_FIELDS ' +
-            'here, with a reason, if it genuinely belongs in the reveal.'
-        )
-
-        continue
-      }
+      if (remote && REVEAL_ALLOWLIST.has(remote)) continue
 
       add(
         match.index,
@@ -258,6 +325,31 @@ const selfTest = () => {
     'a roster smuggled onto the private role assignment',
     'Remotes.Get("RoleAssigned"):FireAllClients({ Role = role, Roster = everyone })',
     true
+  )
+
+  // THE SHAPE THE REAL CODE USES, and the one the first version of this check could not see. Both
+  // reveal sites build a TYPED LOCAL and pass the variable, because FireAllClients takes `...any` and
+  // the annotation is the only thing checking anything. An audit proved the inline-only version
+  // returned zero findings against the real file — a checker that only fires on hypotheticals.
+  check(
+    'a stray field on a payload built as a typed local',
+    'local payload: Types.RoundEndedPayload = {\n\tResult = r,\n\tKillerName = k,\n}\nRemotes.Get("RoundEnded"):FireAllClients(payload)',
+    true
+  )
+  check(
+    'a typed-local payload carrying only declared fields',
+    'local payload: Types.RoundEndedPayload = {\n\tResult = r,\n\tRoundNumber = n,\n}\nRemotes.Get("RoundEnded"):FireAllClients(payload)',
+    false
+  )
+  check(
+    'a stray field on a per-player RoleAssigned local',
+    'local payload: Types.RoleAssignedPayload = {\n\tRole = role,\n\tOthers = roster,\n}\nRemotes.Get("RoleAssigned"):FireClient(player, payload)',
+    true
+  )
+  check(
+    'a nested value is not mistaken for a stray field',
+    'Remotes.Get("RoundEnded"):FireAllClients({ Result = r, RoundNumber = { n = 1 } })',
+    false
   )
   check('a private role assignment', 'Remotes.Get("RoleAssigned"):FireClient(player, role)', false)
   check('a comment describing the rule', '-- never FireAllClients the Aswang role to anyone\nlocal x = 1', false)

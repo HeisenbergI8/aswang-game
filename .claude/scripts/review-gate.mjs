@@ -40,10 +40,11 @@ const PLANS = '.claude/plans'
 // says how to override it.
 const PLAN_RECENT_MS = 2 * 60 * 60 * 1000
 
-// `resumed` is not an agent type — it is what record-activity writes when a reviewer is continued via
-// SendMessage, where only the agent's id is known and not its type. Resuming keeps the auditor's own
-// prior findings in context and is strictly better than a fresh spawn, so it must not read as nothing.
-const REVIEW_AGENTS = new Set(['playtester', 'auditor', 'change-auditor', 'exploit-auditor', 'resumed'])
+// Deliberately NOT including a marker for a resumed agent. See record-activity.mjs: a `SendMessage`
+// carries only the target's id, never its type, so crediting it lets any unrelated message silence
+// this gate. Recording the LAUNCH is what fixes the real problem — background reviewers finish turns
+// after the edit that prompted them.
+const REVIEW_AGENTS = new Set(['playtester', 'auditor', 'change-auditor', 'exploit-auditor'])
 
 // ── WHEN THE EXPLOIT AUDITOR IS NOT OPTIONAL ───────────────────────────────────
 //
@@ -266,10 +267,9 @@ if (process.argv[1]?.endsWith('review-gate.mjs')) {
     // An unrelated agent must NOT silence the gate — the ledger records every subagent completion.
     check('an unrelated agent does not count as review', decide({ ...base, agentsRun: ['Explore'] }).action, 'nudge')
 
-    // A REVIEWER RESUMED VIA SendMessage. Continuing an auditor keeps its own prior findings in
-    // context and is strictly better than a fresh spawn; before this it read as nothing at all,
-    // so doing the better thing looked like doing nothing.
-    check('a resumed reviewer counts', decide({ ...base, agentsRun: ['resumed'] }).action, 'pass')
+    // A RESUME MUST NOT COUNT. A SendMessage carries only an agent id, so crediting it would let a
+    // message to anything at all silence this gate — the same hole the Explore case above pins.
+    check('a resumed-agent marker does not count as review', decide({ ...base, agentsRun: ['resumed'] }).action, 'nudge')
 
     // LAUNCHES, not only completions. These reviewers are launched in the background and finish two
     // or three turns later, so the turn that edited the source always looked unreviewed. Every nudge
