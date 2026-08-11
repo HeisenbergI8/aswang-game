@@ -27,7 +27,7 @@ local Remotes = require(Shared.Remotes)
 -- init.server.luau swallows it into a single warn, and the server sits in IDLE forever looking exactly
 -- like "nobody has joined yet".
 local RoleService = require(script.Parent.RoleService)
-local PlayerBody = require(Shared.pure.PlayerBody)
+local BodyTransitions = require(Shared.pure.BodyTransitions)
 local RoundTransitions = require(Shared.pure.RoundTransitions)
 local Types = require(Shared.Types)
 local WinConditions = require(Shared.pure.WinConditions)
@@ -48,6 +48,10 @@ local state = {
 	-- How many SURVIVORS were dealt into this round, snapshotted at STARTING. A snapshot rather than a
 	-- live count on purpose: see enterStarting.
 	DealtInSurvivors = 0,
+	-- Kills the Aswang has actually COMMITTED this round. Only commitKill increments it. §4.8's win is
+	-- counted from this rather than from who is still standing, because presence cannot tell a kill
+	-- from a quit — three patches failed on that before the rule changed shape.
+	AswangKills = 0,
 	-- Keyed by UserId. LOBBY between rounds, ALIVE for everyone dealt into a round, SPECTATOR for
 	-- anyone who joined after it started (spec §6.4), GHOST once C15 lands.
 	PlayerStates = {} :: { [number]: PlayerState },
@@ -127,10 +131,41 @@ local pendingLoads: { [number]: boolean } = {}
 -- would let a client alternate faster than either intends.
 local lastRespawnAt: { [number]: number } = {}
 
-local function applyBodyRule(player: Player)
-	local allowed = PlayerBody.mayHaveBody(RoundService.GetPlayerState(player))
+--[[
+	`cause` defaults to PHASE_CHANGE because five of the six call sites are one: something moved the
+	player's state and the body must catch up. Only the failed-load retry passes anything else.
 
-	if allowed then
+	THE STATE PASSED IS THE POST-TRANSITION ONE, and that is worth stating because an audit found the
+	table's comments implying otherwise. `MarkKilled` writes GHOST *before* calling here, and
+	`setAllPlayerStates` writes the whole table before its loop, so `GetPlayerState` always answers
+	with where the player has ARRIVED, never where they came from. The cells agree either way today —
+	`ALIVE/DIED` and `GHOST/DIED` are both REVOKE — but a future cell where they differ would be read
+	off the wrong row, so the convention is pinned here rather than left to inspection.
+]]
+local function applyBodyRule(player: Player, cause: BodyTransitions.Cause?)
+	local action =
+		BodyTransitions.actionFor(RoundService.GetPlayerState(player), cause or "PHASE_CHANGE")
+
+	if action == "KEEP" then
+		return
+	end
+
+	--[[
+		DEFER is "should have a body, but not yet" — the rung that did not exist when this function was
+		imperative, and whose absence WAS the permanent-strand bug: a throttled respawn returned having
+		neither granted nor revoked, so the player kept a dead character forever.
+	]]
+	if action == "DEFER" then
+		task.delay(Config.Round.RespawnCooldown, function()
+			if player.Parent ~= nil then
+				applyBodyRule(player)
+			end
+		end)
+
+		return
+	end
+
+	if action == "GRANT" then
 		if player.Character == nil and not pendingLoads[player.UserId] then
 			--[[
 				DEVIATION FROM THE PLAN, forced by the analyzer: `LoadCharacter` is deprecated in
@@ -174,21 +209,12 @@ local function applyBodyRule(player: Player)
 						different route, which is why "eventually applied" has to be a property of this
 						function rather than of any one caller.
 
-						Guarded on the player still being here, and on the rule still wanting a body, so
-						a departed or now-SPECTATOR player does not get retried forever.
+						THE TABLE DECIDES WHETHER TO RETRY, not a hand-written guard here. Re-entering with
+						cause LOAD_FAILED answers DEFER for LOBBY and ALIVE — who are owed a body — and
+						KEEP for GHOST and SPECTATOR, who are owed nothing and whose retry would loop
+						against a rule that will never say yes.
 					]]
-					task.delay(Config.Round.RespawnCooldown, function()
-						if player.Parent == nil then
-							return
-						end
-
-						if
-							PlayerBody.mayHaveBody(RoundService.GetPlayerState(player))
-							and player.Character == nil
-						then
-							applyBodyRule(player)
-						end
-					end)
+					applyBodyRule(player, "LOAD_FAILED")
 
 					return
 				end
@@ -197,9 +223,12 @@ local function applyBodyRule(player: Player)
 					RE-APPLY, because the state can have changed while we yielded. A player who was
 					LOBBY when the load started and SPECTATOR when it finished would otherwise keep the
 					body this rule exists to deny them — the exact C04 hole, reopened by the async call.
-					The recursion terminates: this branch only runs when the rule now says `false`.
+					The recursion terminates: re-entering can only reach the REVOKE branch, which yields.
 				]]
-				if not PlayerBody.mayHaveBody(RoundService.GetPlayerState(player)) then
+				if
+					BodyTransitions.actionFor(RoundService.GetPlayerState(player), "PHASE_CHANGE")
+					== "REVOKE"
+				then
 					applyBodyRule(player)
 				end
 			end)
@@ -507,6 +536,7 @@ local function enterIdle()
 	state.TasksCompleted = 0
 	state.GateOpen = false
 	state.DealtInSurvivors = 0
+	state.AswangKills = 0
 	-- The live assignments go; RoleService's HISTORY deliberately survives, because it is the whole
 	-- anti-repeat mechanism and a server that reset it every lobby would have no memory at all.
 	RoleService.ClearRoles()
@@ -542,6 +572,7 @@ local function enterStarting()
 		refuses to make in ACTIVE (see its comment) for the same reason.
 	]]
 	state.DealtInSurvivors = livingSurvivorCount()
+	state.AswangKills = 0
 
 	setPhase(Enums.RoundPhase.Starting, Config.Round.StartingDelay)
 	-- TODO(C07): TaskService.SelectTasksForRound()
@@ -658,24 +689,22 @@ function RoundService.MarkKilled(player: Player, causedByKill: boolean?)
 	end
 
 	--[[
-		A DEATH THE ASWANG DID NOT CAUSE MUST NOT COUNT TOWARDS THE ASWANG'S WIN.
+		THE ONLY PLACE A KILL IS COUNTED, and the reason `causedByKill` exists at all.
 
-		Read the comment below about disconnects: it says a disconnect must move NEITHER side of the
-		attrition comparison, because otherwise quitting becomes a way to void a round and a dropped
-		phone hands the Aswang a win. A player resetting is the same event wearing different clothes,
-		and the first version of this fix let it move one side and not the other.
+		A death the Aswang did not cause — a reset, a fall, C14's salt later — still makes the player a
+		GHOST, still drops the alive count, and still shows on every HUD. It just does not advance the
+		win, because §4.8's rule now asks how many people the Aswang KILLED rather than how many are
+		still standing.
 
-		The arithmetic that made it serious: at MinPlayers = 3, DealtInSurvivors is 2 and the effective
-		threshold is min(2, 2-1) = 1. ONE survivor pressing the stock reset button dropped
-		LivingSurvivors to 1, satisfied `1 <= 1`, and ended the round as ASWANG_WINS. One button, no
-		remote, no rate limit, nothing for AntiCheat to see.
-
-		Dropping the denominator alongside the numerator keeps the rule meaning what §4.8 says it
-		means — most of the people the Aswang COULD have killed are dead by its hand — and leaves a
-		self-removal costing the Aswang exactly nothing, which is the correct incentive.
+		The previous version decremented `DealtInSurvivors` here instead, to keep both sides of a
+		comparison moving together. That was the third of three failed patches on this arithmetic, and
+		it was inert above four survivors: `effective = min(2, dealt - 1)` only binds at `dealt <= 3`.
+		With the rule counting kills, the denominator no longer has to be corrected at all — a
+		departure simply is not a kill, which is what both previous comments claimed and neither
+		delivered.
 	]]
-	if causedByKill ~= true then
-		state.DealtInSurvivors = math.max(0, state.DealtInSurvivors - 1)
+	if causedByKill == true then
+		state.AswangKills += 1
 	end
 
 	-- Immediately, rather than waiting up to SnapshotInterval: AlivePlayerCount and the victim's own
@@ -701,18 +730,21 @@ function RoundService.MarkKilled(player: Player, causedByKill: boolean?)
 		§6.4 already answers this for the headcount — "finish the round, then return to IDLE" — and this
 		is the same answer for the same reason.
 
-		This comment used to go on to claim that "DealtInSurvivors being a frozen snapshot" meant a
-		disconnect moved NEITHER side of the comparison. That was wrong, and an audit caught it:
-		`DealtInSurvivors` is frozen, but `livingSurvivorCount()` is computed live, so a disconnect
-		dropped one side only. `onPlayerRemoving` now decrements the other side to match — see the note
-		there. Both paths that remove a survivor without a kill now move both sides together.
+		THIS COMMENT HAS BEEN WRONG TWICE, so what it claims now is deliberately narrow. It used to say
+		a frozen `DealtInSurvivors` meant a disconnect moved neither side of a comparison; that was
+		false, because `livingSurvivorCount()` was computed live. The next version said the decrement
+		fixed it; that was false too, and provably inert above four survivors.
+
+		What is true now is structural rather than arithmetic: the rule reads `state.AswangKills`, and
+		nothing but a validated kill ever writes it. A disconnect, a reset and a fall cannot move it
+		because they do not touch it — there is no comparison left to keep balanced.
 
 		EndRound is guarded on ACTIVE inside this service, so this stays a request rather than a second
 		writer of the phase.
 	]]
 	if
-		WinConditions.aswangWinsByAttrition({
-			LivingSurvivors = livingSurvivorCount(),
+		WinConditions.aswangWinsByKills({
+			AswangKills = state.AswangKills,
 			DealtInSurvivors = state.DealtInSurvivors,
 			Threshold = Config.Round.AswangWinSurvivorThreshold,
 		})
@@ -776,16 +808,12 @@ local function onPlayerAdded(player: Player)
 
 	-- The other half of that sentence, and the half C01 left out. A SPECTATOR with a body is uncounted
 	-- AND, from C05 on, unkillable — an alt account that watches the whole round from ten studs away.
-	applyBodyRule(player)
+	applyBodyRule(player, "JOINED")
 
 	snapshotRemote:FireClient(player, buildSnapshot(player))
 end
 
 local function onPlayerRemoving(player: Player)
-	-- Read BEFORE the key is cleared: the attrition bookkeeping below needs to know whether this player
-	-- was actually dealt into the round, and a moment later there is nothing left to ask.
-	local wasAlive = state.PlayerStates[player.UserId] == Enums.PlayerState.Alive
-
 	state.PlayerStates[player.UserId] = nil
 	-- The in-flight load (if any) will fail in its own pcall and clear this itself; dropping the key
 	-- here as well keeps the table bounded by the players actually on the server.
@@ -822,27 +850,21 @@ local function onPlayerRemoving(player: Player)
 	end
 
 	--[[
-		A DEPARTING SURVIVOR DROPS BOTH SIDES OF THE ATTRITION COMPARISON, exactly as a reset does.
+		NOTHING TO ADJUST HERE ANY MORE, and its absence is the point.
 
-		MarkKilled's comment used to assert this already held — "DealtInSurvivors being a frozen
-		snapshot is the other half of it: a disconnect moves neither side of the comparison" — and an
-		audit showed it was false. `DealtInSurvivors` is indeed frozen, but `livingSurvivorCount()` is
-		computed LIVE from `state.PlayerStates`, and the line above just set this player's key to nil.
-		So a disconnect dropped the numerator and left the denominator alone: the precise asymmetry the
-		reset fix was written to close, surviving on the neighbouring path.
+		This block used to decrement `DealtInSurvivors` for a departing survivor, to keep both sides of
+		the old comparison falling together. That was the third of three failed patches on this rule:
+		`effective = min(2, dealt - 1)` only binds at `dealt <= 3`, so above four survivors the
+		decrement did nothing while the live headcount fell anyway — an 8-player round still went from
+		a five-kill win to two when three alt accounts quit.
 
-		It was worth real money. In an 8-player round `DealtInSurvivors` freezes at 7 and the effective
-		threshold is 2, so three alt accounts joining and quitting as ACTIVE begins turned a five-kill
-		win into a two-kill win. Five leaving made it one. Once C31's economy lands, that is a direct
-		win-rate and XP farm — and it is the same "a losing survivor quits and hands the Aswang the
-		round" outcome the note below calls unacceptable.
+		The rule now counts `state.AswangKills`, which only a validated kill writes. A disconnect
+		cannot move it, so there is no longer a ratio to keep honest and no correction to apply. A
+		redesign that DELETES the patches written against it is the sign the shape was the problem.
 
-		NO WIN CHECK HERE, deliberately, and that half of the old comment was always right: §6.4 says a
-		round that loses players FINISHES. This only keeps the ratio honest for whoever is left.
+		The Aswang's own departure still aborts the round — that is the branch above, and it is about
+		there being no monster left, not about counting.
 	]]
-	if wasAlive then
-		state.DealtInSurvivors = math.max(0, state.DealtInSurvivors - 1)
-	end
 
 	-- NOTE the absence of a headcount check here. Spec §6.4: a round that drops below MinPlayers
 	-- FINISHES, then returns to IDLE — RoundTransitions ignores the count in ACTIVE and re-reads it

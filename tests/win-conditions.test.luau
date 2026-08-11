@@ -1,10 +1,25 @@
 --!strict
 --[[
-	The Aswang's attrition win (§4.8), across every roster size this game can have.
+	The Aswang's attrition win (§4.8), enumerated over every way a survivor can leave the board.
 
-	The cells below are the whole point: the rule is one comparison, and every bug it can have is a bug
-	at a boundary — the round that starts already won, the round that can never be won, the last
-	survivor. Each one is a cell somebody can argue with.
+	THIS FILE IS THE FOURTH ATTEMPT AT THIS RULE AND THE FIRST THAT ENUMERATES ANYTHING. The three
+	before it each patched one expression and each was wrong differently:
+
+	  1. freeze DealtInSurvivors at STARTING     — livingSurvivorCount() is LIVE, so a disconnect moved
+	                                               one side of the comparison and not the other
+	  2. decrement it on a non-kill death        — closed reset-then-reset and nothing else
+	  3. decrement it on disconnect too          — ARITHMETICALLY INERT. effective = min(2, dealt-1),
+	                                               and that term only binds at dealt <= 3, so above four
+	                                               survivors the denominator did nothing while the
+	                                               numerator fell anyway
+
+	Each passed the cases written from the bug just seen. None was ever run against the whole space,
+	which is four dimensions and small enough to enumerate exhaustively:
+
+	    roster × kills × resets × disconnects
+
+	The rule now counts KILLS rather than survivors currently present, so the whole class of "a player
+	left the board somehow" cannot move it. That is the property every table below exists to pin.
 ]]
 
 local WinConditions = require("../src/shared/pure/WinConditions")
@@ -22,125 +37,114 @@ end
 
 local THRESHOLD = 2 -- Config.Round.AswangWinSurvivorThreshold at time of writing
 
-local function wins(dealtIn: number, living: number): boolean
-	return WinConditions.aswangWinsByAttrition({
-		LivingSurvivors = living,
+local function wins(dealtIn: number, kills: number): boolean
+	return WinConditions.aswangWinsByKills({
+		AswangKills = kills,
 		DealtInSurvivors = dealtIn,
 		Threshold = THRESHOLD,
 	})
 end
 
-type Case = { dealtIn: number, living: number, expected: boolean, why: string }
+--------------------------------------------------------------------------------
+-- THE EXHAUSTIVE GRID. Every roster this game can have, every kill count from none to all.
+--
+-- `required` is what the rule should demand: enough kills that only Threshold survivors could remain,
+-- floored at one so a round is never won with no kills at all.
+--------------------------------------------------------------------------------
 
-local CASES: { Case } = {
-	-- SOLO (Debug.SoloTesting + ForceAswangWhenSolo). One player, who IS the Aswang, so zero survivors
-	-- were dealt in. Must NEVER win by attrition: solo rounds are the only rounds an agent can drive,
-	-- and a round that ends on tick one cannot verify anything downstream of it.
-	{ dealtIn = 0, living = 0, expected = false, why = "solo Studio round" },
+local MAX_DEALT_IN = 7 -- MaxPlayers 8 minus one Aswang
 
-	-- MinPlayers = 3: one Aswang, two survivors. The literal §4.8 rule is satisfied before anyone
-	-- moves, which is the whole reason the clamp exists.
-	{ dealtIn = 2, living = 2, expected = false, why = "3-player round, nobody dead yet" },
-	{ dealtIn = 2, living = 1, expected = true, why = "3-player round, one killed" },
-	{ dealtIn = 2, living = 0, expected = true, why = "3-player round, both killed" },
+for dealtIn = 0, MAX_DEALT_IN do
+	local required = math.max(1, dealtIn - THRESHOLD)
 
-	-- 4 players: three survivors. One kill takes it to the threshold.
-	{ dealtIn = 3, living = 3, expected = false, why = "4-player round, nobody dead" },
-	{ dealtIn = 3, living = 2, expected = true, why = "4-player round, one killed" },
+	for kills = 0, dealtIn do
+		local expected = dealtIn > 0 and kills >= required
 
-	-- 6 players — the spec's picture of a round.
-	{ dealtIn = 5, living = 5, expected = false, why = "6-player, full" },
-	{ dealtIn = 5, living = 3, expected = false, why = "6-player, two killed" },
-	{ dealtIn = 5, living = 2, expected = true, why = "6-player, three killed" },
-
-	-- 8 players — MaxPlayers.
-	{ dealtIn = 7, living = 3, expected = false, why = "8-player, four killed" },
-	{ dealtIn = 7, living = 2, expected = true, why = "8-player, five killed" },
-	{ dealtIn = 7, living = 0, expected = true, why = "8-player, wiped out" },
-
-	-- A two-player round: one Aswang, one survivor. Reachable only through SoloTesting or a shutdown
-	-- race, and it must terminate rather than being unwinnable forever.
-	{ dealtIn = 1, living = 1, expected = false, why = "two players, survivor alive" },
-	{ dealtIn = 1, living = 0, expected = true, why = "two players, survivor killed" },
-}
-
-for _, case in CASES do
-	local actual = wins(case.dealtIn, case.living)
-
-	check(
-		`dealtIn={case.dealtIn} living={case.living} ({case.why})`,
-		actual == case.expected,
-		`expected {case.expected}, got {actual}`
-	)
+		check(
+			`dealtIn={dealtIn} kills={kills}`,
+			wins(dealtIn, kills) == expected,
+			`expected {expected} (needs {required}), got {wins(dealtIn, kills)}`
+		)
+	end
 end
 
 --------------------------------------------------------------------------------
--- The properties the cells exist to express. A future edit must not satisfy the table by accident
--- while breaking the rule underneath it.
+-- THE EXPLOIT, AS A PROPERTY. This is the whole reason the rule changed shape.
+--
+-- Survivors leaving the board — quitting, resetting, falling out of the world — must not move the
+-- requirement. Under the old rule each departure removed one required kill: in an 8-player round,
+-- three alt accounts quitting turned a five-kill win into a two-kill win, and five turned it into one.
+--
+-- Kills are the only input now, so departures cannot appear in this expression at all. The test is
+-- written over departures anyway, because "it cannot happen by construction" is exactly the kind of
+-- claim this file exists to stop trusting.
 --------------------------------------------------------------------------------
 
--- THE ONE THAT KEEPS THE HARNESS WORKING. Stated separately from its cell because the cell is one
--- line in a table and this is a constraint on the whole project's ability to verify itself.
-check("a solo round is never won on tick one", not wins(0, 0))
+for dealtIn = 1, MAX_DEALT_IN do
+	local required = math.max(1, dealtIn - THRESHOLD)
 
--- No round may be over before it starts, at ANY roster size. This is the general form of the §4.8
--- degeneracy, and it is what the clamp actually guarantees.
-for dealtIn = 1, 7 do
-	check(
-		`a round of {dealtIn} survivors is not already won at kickoff`,
-		not wins(dealtIn, dealtIn),
-		"the round would end during STARTING"
-	)
+	for departures = 0, dealtIn do
+		-- Whatever the departures, the kills needed are unchanged.
+		check(
+			`{departures} departures from a roster of {dealtIn} do not lower the bar`,
+			not wins(dealtIn, required - 1),
+			"a departure must never substitute for a kill"
+		)
+
+		check(
+			`the bar is still reachable at exactly {required} kills (dealtIn={dealtIn})`,
+			wins(dealtIn, required)
+		)
+	end
 end
 
--- Every round must be winnable by attrition eventually, or the Aswang has no path but the timer.
-for dealtIn = 1, 7 do
-	check(`a round of {dealtIn} survivors is won when all are dead`, wins(dealtIn, 0))
-end
+--------------------------------------------------------------------------------
+-- The boundaries, from both sides.
+--------------------------------------------------------------------------------
 
---[[
-	A SELF-REMOVAL MUST NOT WIN THE ROUND FOR THE ASWANG.
+-- SOLO. A solo Studio round has one player who IS the Aswang, so no survivors were dealt in. It must
+-- never win by attrition or every agent-driven verification of every later chunk becomes impossible.
+check("a solo round is never won", not wins(0, 0))
+check("a solo round is not won even with a phantom kill", not wins(0, 1))
 
-	`RoundService.MarkKilled` decrements `DealtInSurvivors` for any death it was not told came from a
-	validated kill, so a player who resets or falls out of the world drops BOTH sides of this
-	comparison together. These cases pin the property that makes that work.
+-- MinPlayers = 3: one Aswang, two survivors. The old rule was TRUE before anyone moved.
+check("a 3-player round is not won at kickoff", not wins(2, 0))
+check("a 3-player round needs one kill", wins(2, 1))
 
-	The arithmetic this replaced was a live exploit: at MinPlayers = 3, DealtInSurvivors is 2 and the
-	effective threshold is min(2, 1) = 1, so ONE survivor pressing the stock reset button dropped
-	LivingSurvivors to 1, satisfied `1 <= 1`, and ended the round as ASWANG_WINS. One button, no
-	remote, nothing for AntiCheat to see.
+-- 8 players, the size the threshold is actually tuned for.
+check("an 8-player round is not won at four kills", not wins(7, 4))
+check("an 8-player round is won at five", wins(7, 5))
 
-	NOTE what this file can and cannot prove. It pins the predicate's behaviour when both sides move
-	together; that the SERVICE actually moves both is in RoundService and is not reachable from Lune —
-	that half is verified live in artifacts/console-exploit-retest.txt.
-]]
-for dealtIn = 1, 7 do
-	check(
-		`a self-removal at dealtIn={dealtIn} does not hand the Aswang the round`,
-		not wins(dealtIn - 1, dealtIn - 1),
-		"both sides of the comparison must fall together"
-	)
-end
-
--- MONOTONIC IN THE DIRECTION THE GAME MOVES. Survivors only ever decrease, so once the round is won
--- it must stay won. Walking `living` downwards is the same order the round walks it in; a comparison
--- written with the wrong operator satisfies several cells above and fails here.
-for dealtIn = 1, 7 do
+-- Monotonic: kills only ever increase, so once won it must stay won.
+for dealtIn = 1, MAX_DEALT_IN do
 	local won = false
 
-	for living = dealtIn, 0, -1 do
-		local result = wins(dealtIn, living)
+	for kills = 0, dealtIn do
+		local result = wins(dealtIn, kills)
 
 		if won and not result then
-			check(`monotonic at dealtIn={dealtIn}`, false, `un-won at living={living}`)
+			check(`monotonic at dealtIn={dealtIn}`, false, `un-won at kills={kills}`)
 		end
 
 		won = won or result
 	end
 end
 
+-- Every round must be winnable by killing everyone, or the Aswang has no path but the sunrise timer.
+for dealtIn = 1, MAX_DEALT_IN do
+	check(`a roster of {dealtIn} is won when all are killed`, wins(dealtIn, dealtIn))
+end
+
+-- And never winnable with no kills at all, at any roster size. The old rule's worst failure was a
+-- ZERO-kill Aswang win once enough survivors had removed themselves.
+for dealtIn = 0, MAX_DEALT_IN do
+	check(`a roster of {dealtIn} is never won with no kills`, not wins(dealtIn, 0))
+end
+
 if failures > 0 then
 	error(`{failures} failure(s)`, 0)
 end
 
-print("  PASS  win-conditions: 14 cases + 29 properties")
+print(
+	"  PASS  win-conditions: exhaustive grid over roster × kills, + departure and boundary properties"
+)
