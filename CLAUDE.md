@@ -199,9 +199,8 @@ automatically for those paths. It is not a tier — it is a surface.
 
 ### Which reviewers actually run — surface-based, not one-size
 
-A full three-reviewer pass costs 150–250k tokens. Running it on every diff exhausts a session before the
-work is done, and running none of it ships the C04 bug below. So reviewers are chosen by **what the diff
-touches and what you are about to claim**:
+A full three-reviewer pass costs 150–250k tokens, so reviewers are chosen by **what the diff touches and
+what you are about to claim**:
 
 | Condition | Reviewer |
 | --- | --- |
@@ -219,74 +218,50 @@ instead of captured state, permanently branding the ex-Aswang in a way readable 
 **Scope every brief.** "Audit the diff" costs three times "audit `MonsterService`'s revert path and
 answer these four questions", and returns less. Name the files and the questions.
 
-**Which auditor:** `auditor` traces a written plan step by step and requires a plan directory.
-`change-auditor` audits the working diff against the user's request. Presence of a plan decides it.
-
 **Planning means the `architect` agent — never the built-in `Plan` agent.** They describe themselves
-almost identically, but `Plan` has no Write tool: it reports in chat and creates no plan directory.
-Everything downstream needs that directory — `implement-plan` reads it, `auditor` traces against it,
-`verify-plan.mjs` and `goal-check.mjs` grade it, and `/build`'s cursor walks its `#### Step N.M` headings.
-Picking `Plan` produces a plausible answer and silently breaks all five.
+almost identically, but `Plan` has no Write tool, so it creates no plan directory — and `implement-plan`,
+`auditor`, `verify-plan.mjs`, `goal-check.mjs` and `/build`'s cursor all need one. Picking `Plan`
+produces a plausible answer and silently breaks all five.
 
 **Trivial tier still gets `npm run verify`** and a plain statement of what changed. It skips the agents,
 not the checking.
 
 **Spawning policy:** auto-spawn for Small and Medium — say which tier you picked in one line, then
 proceed. For **Large**, state the tier and the agents you intend to run and **wait for confirmation**.
+Routing is a judgement no hook can make, so naming the tier out loud IS the enforcement: a tier stated
+in one line can be corrected in three words, and one never stated cannot be challenged.
 
-**Naming the tier out loud is the enforcement.** Routing is a judgement no hook can make, so the safeguard
-is visibility: a tier stated in one line is a claim the user can correct in three words. A tier never
-stated cannot be challenged. Skipping the announcement is the actual failure mode, not choosing wrong.
+**Launch them concurrently, all of them, in one message, with `run_in_background: true`.** They share no
+data — the playtester drives the running place, the auditors read the diff — so sequencing only adds the
+slower one's wall clock to the faster one's, and naming two now to add the third when the gate objects
+costs a whole extra round trip. Omit an agent only for a *precondition you checked this turn*: the
+playtester establishes nothing when `rojo serve` is down (`ReplicatedStorage` empty in `search_game_tree`
+means Rojo never synced). Check, then say why in one line.
 
-**Run the reviewers concurrently — this is the default, not an optimisation.** Launch them in one message
-with `run_in_background: true`. They share no data: the playtester drives the running place, the auditors
-read the diff. Sequencing them only adds the slower one's wall clock to the faster one's.
+**Finish editing before you trigger them.** A review pass costs 5–8 minutes, and `review-gate.mjs` fires
+on every turn that edits a tracked `.luau` file and goes green — so applying an auditor's fixes *in a
+later turn* buys a second full review round. Do the work, self-review, apply what you already know needs
+applying, run `verify`, and only then launch. Batch any genuinely new findings into a single turn.
 
-**Finish editing before you trigger them.** A review pass costs 5–8 minutes of wall clock; `review-gate.mjs`
-fires on every turn that touches a tracked `.luau` file and goes green. So applying an auditor's
-recommended fixes *in a later turn* buys a second full review round — for this repo's real numbers, ~8
-minutes to re-audit six lines. Do the work, self-review, apply what you already know needs applying, run
-`verify`, and **only then** launch the reviewers. Where an auditor's finding is genuinely new, batch every
-resulting fix into a single turn rather than trickling them out.
+They run **after** implementation: an auditor with no `implementation-log.md` has nothing to trace.
 
-**The playtester cannot edit `Config.luau` — set debug values yourself, before launching it.**
-`guard-agent-write.mjs` scopes its writes to `.claude/plans/` and `tests/`, so asking it to shorten
-`Round.Duration` for a fast cycle is asking for something it will correctly refuse twice and then report.
-A round cycle is 461s at committed values; drop `Intermission/Duration/EndScreen` to 8/20/6 and set
-`Debug.SoloTesting`/`VerboseLogging` yourself first, then revert all five and confirm with
-`git diff src/shared/Config.luau` that only intended changes survive. `verify` goes red while they are
-set — `tests/config.test.luau` asserts `SoloTesting == false` — which is the test working, and
-`guard-commit.mjs` refuses a red tree anyway, so the values cannot reach history.
-
-**`execute_luau` cannot read a live service's state.** With `datamodel_type: "Server"` it runs with its
-own module require-cache: `require(…RoundService)` there returns a fresh, un-`Init()`'d copy reading
-`IDLE`, while the real service is in `ACTIVE`. It sees the same Instance tree, so it looks like it
-worked. Read server state through a field the server already publishes — `RoundSnapshot`'s `YourState`
-is populated by calling `GetPlayerState()`, so the console line proves the call.
-
-**Launch all three in the same message as each other, first time.** Naming two and adding the playtester
-after the gate objects costs a whole extra round trip. The one case for omitting an agent is a
-*precondition you have checked this turn* — e.g. the playtester cannot verify anything when `rojo serve`
-is down or Studio is not connected, and re-running it just reproduces the same refusal. Check
-(`ReplicatedStorage` empty in `search_game_tree` means Rojo never synced), then say why in one line.
-
-The ordering that *is* real: they all run **after** implementation, and an auditor with no
-`implementation-log.md` to read has nothing to trace.
+**Set the playtester's debug values yourself, before launching it** — it cannot edit `Config.luau` and
+will correctly refuse. A round cycle is 461s at committed values; set `Round.Intermission/Duration/
+EndScreen` to 8/20/6 plus `Debug.SoloTesting`/`VerboseLogging`, then revert all five afterwards and
+confirm with `git diff src/shared/Config.luau`. `guard-commit.mjs` runs `check:debug` and refuses to
+commit them, so they cannot reach history. Two Studio traps — `execute_luau` cannot read a live
+service's state, and player count is a UI action no agent can drive — are explained in
+`.claude/agents/playtester.md`; read it before briefing one.
 
 ### Claims about verification are checked, not trusted
 
-`record-activity.mjs` writes a per-turn ledger of what actually happened — which `src/**.luau` files were
-edited, which commands ran, each one's exit code, and which review agents finished. `claim-check.mjs`
-reads it on `Stop` and blocks the turn when:
+`record-activity.mjs` ledgers every edit, command and exit code per turn, and `claim-check.mjs` blocks on
+`Stop` when source was edited and nothing was verified, or when the message **asserts** a green gate no
+run supports — "the tree is green", "13/13 invariants", "I tested it in Studio".
 
-- **source was edited and nothing was verified**, or
-- **the message claims a green gate that no run supports** — "the tree is green", "13/13 invariants",
-  "analyze is clean", "I tested it in Studio", when the ledger has no successful run.
-
-Deliberately narrow. Hedged or honest language passes untouched: "I have not run the tests yet", "next I
-should run verify", and reporting a genuine failure are all fine and are pinned as test cases. The gate
-exists for the one sentence that does real damage — *asserting* a green gate that was never run — because
-a false green is worse than a reported red. It stops anyone else looking.
+So state only what ran. Hedged and honest language passes untouched ("I have not run the tests yet",
+"next I should run verify", and any report of a genuine failure), because a false green is worse than a
+reported red — it stops anyone else looking.
 
 ### The artifact directory
 
@@ -297,10 +272,9 @@ a false green is worse than a reported red. It stops anyone else looking.
 | Verify | `playtester` agent | `<plan>/verification.md` + files in `<plan>/artifacts/` |
 | Audit | `auditor` · `change-auditor` · `exploit-auditor` | nothing — they report in chat, scored /100 |
 
-**The auditors write nothing.** They report as their final message, scored out of 100 against a rubric.
-The score measures **how much the auditor's own evidence is worth**, not how good the code is — an
-implementation it could only read, never play, caps around the mid-60s. Treat a high score with no
-runtime evidence as a red flag rather than a pass.
+**The auditors write nothing** — they report in chat, scored out of 100. That score measures **how much
+the auditor's own evidence is worth**, not how good the code is: an implementation it could only read,
+never play, caps around the mid-60s. Treat a high score with no runtime evidence as a red flag.
 
 Supporting skills: `lean-code` (before writing), `studio-sync` (before touching Studio), `asset-pipeline`
 (before making any art or sound), `playtest` (for the M5/M12 human gates), `debug-ladder` (after two
@@ -310,61 +284,38 @@ failed fix attempts), `lesson-keeper`, `lessons-review`, `git-committer`. The bu
 ### The task loop — `/build`
 
 A supervised loop: code decides *whether* to continue and *what is next*, the model does the work.
-`task-driver.mjs` on `Stop` decides; `build-trigger.mjs` on `UserPromptSubmit` creates the run record
-itself, because a skill that merely *tells* the model to create one produces no run when it forgets — and
-a driver with no run releases forever, which is indistinguishable from working correctly.
+`task-driver.mjs` on `Stop` decides; `build-trigger.mjs` on `UserPromptSubmit` creates the run record.
 
-**The loop can only drive Large-tier work, and that is a property of the tiers rather than a gap.** The
-cursor advances through `#### Step N.M` headings, and the routing table gives an architect — so a plan —
-to Large only. `/build --tier small|medium` is therefore **refused with an explanation** rather than
-started. A run whose plan is not yet bound releases for three turns, then halts with `no plan bound`.
-
-Halt conditions are evaluated **unconditionally, before** the tree is consulted. A single ordered list
-with `tree red → release` above them silently abandons runs: a run that is red *and* stuck releases every
-turn forever and **no halt report is ever written**. Four regression cases pin it.
+**The loop can only drive Large-tier work**, because its cursor walks `#### Step N.M` headings and only
+Large gets an architect, so only Large has a plan. `/build --tier small|medium` is **refused with an
+explanation** rather than started. A run whose plan is not bound releases for three turns, then halts.
 
 A halt reporting `done` means **four proxies were satisfied**: plan steps passed, `verify` green,
 `implementation-log.md` present, and `verification.md` citing a file that exists in `artifacts/`. The
-artifact check is the strongest of the four and is still a proxy — it proves a screenshot exists and was
-cited, never that it shows the right thing.
+artifact check is the strongest and is still a proxy — it proves a screenshot was cited, never that it
+shows the right thing.
 
 ### The repair loop
 
-A blocking `Stop` hook re-invokes the model with `reason` as feedback. `verify-gate.mjs` uses that as a
-loop rather than a brake:
+A red tree makes `verify-gate.mjs` block `Stop` with the failure and the next action; **it escalates on
+lack of progress, not on attempts**, so three different fixes producing three different failures is fine
+and a repeat is not. The ladder is block → escalate (points at `debug-ladder`) → HALT with a report,
+after which it never blocks that run again. `loop-breaker.mjs` does the same for a repeated Bash command.
 
-| | a brake would be | this is |
-| --- | --- | --- |
-| Predicate | "is the tree red?" | red, keyed on WHICH failure |
-| Reason | "fix it" — a complaint | the next action, plus what was already tried |
-| Exhaustion | reset and allow | escalate, then HALT with a report |
-
-**Progress, not attempts, drives escalation.** Counting retries punishes a loop that is converging — three
-different fixes producing three different failures is progress — and rewards one that thrashes with a
-reworded command. Each iteration hashes the failure SET (analyzer diagnostics, selene warnings, stylua
-diffs and check-script `FAIL` lines, with line and column numbers stripped, since the same error sliding
-down a file is not progress). A changed fingerprint resets the counter; an unchanged one escalates.
-
-The ladder is **block** → **escalate** (names what was tried, points at `debug-ladder`) → **HALT** (writes
-a report, tells the model to stop and report, never blocks that run again). `loop-breaker.mjs` does the
-same for a repeated Bash command: inject at 2, block at 3, halt on a second block.
+Two things follow for you: when it escalates, **change the kind of fix rather than its details**, and
+when it halts, **stop and tell the user** — do not start a fourth attempt. A read-only reviewer that
+cannot repair `src/` is blocked once and told to report the red tree instead (`canRepair`).
 
 ### Lessons and candidates
 
-`.claude/lessons/` holds a **capped** set of things this repo taught the hard way — one file per lesson,
-40 maximum. Retrieval is mechanical: `lessons.mjs inject` runs on `UserPromptSubmit`, pushing the index in
-once per session and the full text of any lesson whose `trigger:` terms match. A non-matching prompt costs
-nothing.
+`.claude/lessons/` is a capped store (40) of things this repo taught the hard way; `lessons.mjs inject`
+pushes matching ones into context automatically, so there is nothing to remember. The bar is four tests
+— recurrence, non-obviousness, behaviour change, real cost — at roughly one per session, often zero, and
+**the intended end state of a lesson is deletion** once it graduates into this file or a check script.
 
-The bar is four tests, all of which must pass — recurrence, non-obviousness, behaviour change, real cost
-— and the expected rate is about one per session, often zero. **The intended end state for any lesson is
-deletion**: once it hardens into a rule it graduates into this file or into a check script, and the lesson
-is removed. The store shrinking because three entries became one guard is the system working.
-
-`.claude/.candidates.jsonl` is the episodic layer beneath it — raw incidents captured automatically,
-**never injected into context** and therefore free. `npm run verify` prints `- candidates: N/15`; at 15 a
-review is due. Capture generously, distil strictly: a missed candidate is a lesson lost, a noisy one is a
-line somebody skims.
+`.claude/.candidates.jsonl` is the episodic layer beneath it: incidents captured automatically, **never
+injected into context** and therefore free. `verify` prints `- candidates: N/15`; at 15 run
+`/lessons-review`. Capture generously, distil strictly.
 
 ### The harness
 
@@ -388,23 +339,21 @@ Rules enforced by code rather than by instruction, so they hold regardless of wh
 | 22 self-test suites | every guard and gate proven in BOTH directions | `harness-selftest.mjs` |
 
 All hook wiring lives in `.claude/settings.json`. **Do not move per-agent hooks into agent frontmatter** —
-`hooks:` in frontmatter is documented as agent-scoped and has been observed not to fire, while
-settings.json hooks fired normally in the same session. Per-agent scoping is done inside the scripts by
-reading `agent_type` off the payload. (`tools:` in frontmatter *does* work.)
+`hooks:` there is documented as agent-scoped and has been observed not to fire, while settings.json hooks
+fired normally in the same session. Per-agent scoping is done inside the scripts by reading `agent_type`
+off the payload. (`tools:` in frontmatter *does* work.)
 
-**The ALLOW half of every suite is the important half.** A guard that only proves it can refuse has proven
-the cheap half; the expensive failure is refusing correct work until somebody switches it off, and then it
-protects nothing. `guards.test.mjs` carries 31 allow cases against 26 blocks, and several of the allows
-are shapes a naive version genuinely did refuse.
+**Writing or changing a guard? The ALLOW cases are the half that matters** — see the header of
+`harness-selftest.mjs`. Every suite must prove both directions, and be listed in `SUITES`.
 
 **Two honest limits.** `disableAllHooks` turns all of it off, and the playtester retains Bash — so it is
 guarded on the Edit/Write path, not sandboxed. The `.claude/scripts/` checks work regardless, which is why
 they are the foundation rather than the decoration.
 
-**A hook that is configured and silently not firing is the worst failure available here**, because it looks
-exactly like a guard with nothing to do. `hook-heartbeat.mjs` records every fire and `npm run verify`
-reports any registered-but-never-fired hook. A `WARN` there after editing `settings.json` usually means the
-session needs restarting for the new wiring to take effect — but check rather than assume.
+**A configured hook that silently never fires looks exactly like a guard with nothing to do.**
+`hook-heartbeat.mjs` records every fire and `npm run verify` reports any registered-but-never-fired hook.
+A `WARN` there after editing `settings.json` usually means the session needs restarting — but check
+rather than assume.
 
 ## Git
 

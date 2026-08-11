@@ -14,7 +14,8 @@ to be wrong, stop and say so — do not silently improvise around it.
 
 ## Before Writing Anything
 
-1. Read `CLAUDE.md` for architecture, commands and conventions.
+1. You run in the main thread, so `CLAUDE.md` is already in your context — do not re-read it. Re-read one
+   *section* only if you need to check a specific rule.
 2. Read the plan document and its `references/` reviews. The references contain the annotated reasoning
    behind each step; skipping them is how you re-derive a decision the architect already made and get it
    wrong.
