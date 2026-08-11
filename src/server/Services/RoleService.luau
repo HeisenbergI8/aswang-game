@@ -31,6 +31,7 @@
 ]]
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- script.Parent is Services; script.Parent.Parent is the `Server` script that src/server/init.server.luau
@@ -121,6 +122,54 @@ function RoleService.AssignRoles(candidates: { number }): number?
 		Older = Config.Roles.OlderAswangWeight,
 		HistoryRounds = Config.Roles.RepeatCooldownRounds,
 	}
+
+	--[[
+		THE SOLO TESTING OVERRIDE, and why it names nobody.
+
+		C04's transform cannot be reached solo: `RoleDraw.draw` clamps picks to `#candidates - 1` so a
+		round always keeps a survivor, which means a lone player is ALWAYS a survivor. Correct for the
+		game, useless for testing the monster — so this REPLACES the draw rather than weighting it. No
+		weight can beat that clamp.
+
+		THE FIRST VERSION TOOK A UserId IN `Config.Debug`, AND THAT WAS A LEAK. `src/shared` maps
+		wholesale into ReplicatedStorage, so the forced id was a plaintext literal any client could
+		`require` and read — before the round started, with nothing on the wire and nothing for
+		`check:secrecy` to see. Exactly the failure RoleDraw's header calls "the only leak in this game
+		that leaves no trace".
+
+		So there is no id. The override applies to the ONLY candidate there is, which is the whole
+		situation it was built for, and a boolean discloses nothing about who anyone is.
+
+		Three STRUCTURAL guards, not process ones:
+		  1. `RunService:IsStudio()` — unreachable on a published place whatever shipped.
+		  2. Exactly ONE candidate. `SoloTesting` floors the player COUNT at MinPlayers; it does not
+		     mean one player, so without this an eight-person team test would be silently rigged.
+		  3. The flag, pinned false by `check:debug` — which, unlike `tests/config.test.luau`, runs
+		     inside `verify:fast` and is therefore what `guard-commit.mjs` actually consults.
+
+		`history` is deliberately NOT written: it is the anti-repeat draw input, and feeding it a pick
+		no draw made would distort the next real draw. A forced round therefore cannot exercise
+		anti-repeat weighting — the correct trade, stated so nobody "fixes" it.
+	]]
+	if RunService:IsStudio() and Config.Debug.ForceAswangWhenSolo and #candidates == 1 then
+		local soloUserId = candidates[1]
+
+		warn(
+			"[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set."
+		)
+
+		roles[soloUserId] = "ASWANG"
+
+		local player = Players:GetPlayerByUserId(soloUserId)
+
+		if player ~= nil then
+			local payload: Types.RoleAssignedPayload = { Role = "ASWANG" }
+
+			Remotes.Get("RoleAssigned"):FireClient(player, payload)
+		end
+
+		return soloUserId
+	end
 
 	local assignments = RoleDraw.draw(
 		candidates,

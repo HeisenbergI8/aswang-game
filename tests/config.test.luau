@@ -162,8 +162,30 @@ check(
 	"this must never be true on a published place"
 )
 
+-- The solo testing override rigs the draw. RoleService also gates it on RunService:IsStudio() and on
+-- there being exactly one candidate, so this is the third of three guards rather than the only one.
+--
+-- NOTE it is `check:debug` and not this assertion that stops a commit: guard-commit.mjs runs
+-- `verify:fast`, which does not include `test:unit`, so nothing in this file is consulted at commit
+-- time. That was believed otherwise for a while and an audit disproved it. This check remains because
+-- it is where the REASON lives; check-debug.mjs is where the enforcement does.
+check(
+	"the solo forced-Aswang override is off",
+	Config.Debug.ForceAswangWhenSolo == false,
+	"this rigs the draw and must never ship"
+)
+
+-- Spec §4.1: a round is ~7 minutes. Nothing pinned a FLOOR, so a 60-second duration left over from a
+-- Studio session passed every check — including this file — and would have shipped silently. Five
+-- tasks cannot be found and completed across a village in under five minutes.
+check(
+	"a round is long enough to actually be played",
+	Config.Round.Duration >= 300,
+	`Duration={Config.Round.Duration}s — a testing value left in?`
+)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end
 
-print("  PASS  config: 19 balance invariants")
+print("  PASS  config: 21 balance invariants")

@@ -83,7 +83,14 @@ export const judgeStaged = staged => {
 
 // `git commit` may be anywhere in a chain, so the self-filter looks for it as a command segment rather
 // than at the start of the string.
-export const isCommit = command => /(^|&&|\|\||;|\|)\s*git\s+commit\b/.test(command ?? '')
+// NEWLINE IS IN THIS LIST BECAUSE IT WAS MISSING, and its absence disabled the guard entirely for a
+// very ordinary command shape: any multi-line Bash block whose `git commit` starts its own line. That
+// is what a heredoc commit message looks like, and what most scripted commits look like. Found by
+// accident while proving a different fix — a probe commit that should have been refused went through.
+//
+// A guard with a hole this shape is worse than no guard, because every commit that slipped past it
+// looked like a commit the guard had approved.
+export const isCommit = command => /(^|&&|\|\||;|\||\n)\s*git\s+commit\b/.test(command ?? '')
 
 const main = async () => {
   let payload
@@ -106,10 +113,25 @@ const main = async () => {
 
   try {
     execFileSync('npm', ['run', '--silent', 'verify:fast'], { encoding: 'utf8', stdio: 'pipe' })
+
+    // ── AND THE DEBUG FLAGS, HERE AND NOT IN verify:fast ────────────────────────
+    //
+    // `tests/config.test.luau` has always asserted `SoloTesting == false`, and that was believed to be
+    // what stopped a debug flag reaching history — the tree goes red, and this guard refuses a red
+    // tree. It never did: `verify:fast` does not run `test:unit`, so no assertion in that file has
+    // ever been consulted at commit time. An audit found this while reviewing a force-role switch
+    // written on the strength of that false guarantee.
+    //
+    // It runs HERE rather than inside `verify:fast` because `verify-gate.mjs` runs `verify:fast` on
+    // every Stop. Putting it there blocks every turn of a Studio session for having testing values
+    // set, which is the state a Studio session is SUPPOSED to be in — the guard would make the thing
+    // it guards untestable. A commit is the moment the values stop being temporary, so a commit is
+    // where the question belongs.
+    execFileSync('node', ['.claude/scripts/check-debug.mjs'], { encoding: 'utf8', stdio: 'pipe' })
   } catch (error) {
     const output = `${error.stdout ?? ''}${error.stderr ?? ''}`.trim().split('\n').slice(-12).join('\n')
 
-    deny(`\`npm run verify:fast\` is failing — refusing to commit a red tree.\n\n${output}`)
+    deny(`\`npm run verify:fast\` or \`check:debug\` is failing — refusing to commit a red tree.\n\n${output}`)
   }
 
   process.exit(0)
@@ -135,6 +157,12 @@ if (process.argv[1]?.endsWith('guard-commit.mjs')) {
     check('a plain copy is NOT a commit', isCommit('cp -R a b'), false)
     check('grepping for the phrase is NOT a commit', isCommit('grep -rn "git commit" docs/'), false)
     check('git log is NOT a commit', isCommit('git log -5'), false)
+
+    // THE BYPASS. A newline-separated commit is the shape of every heredoc and scripted commit, and it
+    // slipped the guard completely until this case existed.
+    check('a newline-separated commit is recognised', isCommit('git add -A\ngit commit -m "x"'), true)
+    check('a commit after a heredoc terminator is recognised', isCommit('cat <<EOF\nbody\nEOF\ngit commit -F -'), true)
+    check('a newline inside a quoted string is still not a commit', isCommit('echo "line\nabout git log"'), false)
 
     const blocked = staged => judgeStaged(staged) !== null
 
