@@ -41,6 +41,37 @@ export const REVEAL_ALLOWLIST = new Map([
   ['RoleAssigned', 'fired to exactly one player, carrying only that player\'s OWN role (spec §4.2)']
 ])
 
+// ── THE FIELD ALLOWLIST, AND WHY THE CALL ALLOWLIST WAS NOT ENOUGH ────────────
+//
+// REVEAL_ALLOWLIST exempts a CALL. Until this existed it exempted the whole call, so the scanner
+// skipped the payload entirely — and Luau independently accepts an EXTRA field on an annotated table
+// (measured: a wrong type and a missing field are caught, an extra one is not). Both guards were
+// therefore off on exactly the two remotes that carry the secret by design.
+//
+// The concrete shape: `KillerName = killer.Name` added beside `Result` on the reveal, which is the
+// NATURAL way to build a richer end screen. It reaches eight clients with `npm run verify` green.
+//
+// So an allowlisted remote must also declare the fields it may carry. Adding a field is now an edit to
+// THIS file, which shows up in review — the same asymmetry that makes REVEAL_ALLOWLIST worth having.
+export const PAYLOAD_FIELDS = new Map([
+  // Types.RoundEndedPayload. The round is over; the reveal is the point (spec §4.8).
+  ['RoundEnded', new Set(['Result', 'AswangUserId', 'RoundNumber'])],
+  // Types.RoleAssignedPayload. Fired to ONE player, carrying ONLY that player's own role (spec §4.2).
+  // A UserId here would be pointless (the receiver knows who they are) and a roster would be fatal.
+  ['RoleAssigned', new Set(['Role'])]
+])
+
+// Field names assigned in a table constructor: `{ Result = x, KillerName = y }` -> Result, KillerName.
+// A payload built as a variable rather than inline reads as no fields, which is the same blind spot
+// the call-name check already has and is stated in the header rather than pretended away.
+export const strayFields = (remote, args) => {
+  const allowed = PAYLOAD_FIELDS.get(remote)
+
+  if (!allowed) return []
+
+  return [...args.matchAll(/([A-Za-z_]\w*)\s*=/g)].map(match => match[1]).filter(field => !allowed.has(field))
+}
+
 // Tokens that name the secret. Deliberately broad on the monster side and narrow on the generic side:
 // `role` alone would match `RoleService`, so it only counts inside a payload.
 const SECRET = /\b(aswang|imposter|impostor|monsteruserid|iskiller|isaswang|aswanguserid|secretrole)\b/i
@@ -102,7 +133,21 @@ export const scan = files => {
       // length by construction, so the index carries across.
       const remote = remoteNameBefore(withStrings, match.index)
 
-      if (remote && REVEAL_ALLOWLIST.has(remote)) continue
+      if (remote && REVEAL_ALLOWLIST.has(remote)) {
+        const stray = strayFields(remote, args)
+
+        if (stray.length === 0) continue
+
+        add(
+          match.index,
+          `\`${remote}\` carries ${stray.map(field => `\`${field}\``).join(', ')} — not on its field allowlist`,
+          `An allowlisted reveal may carry ONLY ${[...(PAYLOAD_FIELDS.get(remote) ?? [])].join(', ')}. ` +
+            'Being on REVEAL_ALLOWLIST exempts the CALL, never the PAYLOAD — add the field to PAYLOAD_FIELDS ' +
+            'here, with a reason, if it genuinely belongs in the reveal.'
+        )
+
+        continue
+      }
 
       add(
         match.index,
@@ -195,6 +240,25 @@ const selfTest = () => {
 
   // ALLOW — every one of these is correct code that a blunter check would refuse.
   check('the end-of-round reveal', 'Remotes.Get("RoundEnded"):FireAllClients({ AswangUserId = id })', false)
+
+  // THE FIELD ALLOWLIST. Being on REVEAL_ALLOWLIST exempts the CALL, never the PAYLOAD — and the
+  // typechecker does not help either, because Luau silently accepts an extra field on an annotated
+  // table. Before this pair of cases both guards were off on the two remotes that carry the secret.
+  check(
+    'a stray name smuggled onto the reveal',
+    'Remotes.Get("RoundEnded"):FireAllClients({ Result = r, AswangUserId = id, KillerName = killer.Name })',
+    true
+  )
+  check(
+    'the reveal carrying only its declared fields',
+    'Remotes.Get("RoundEnded"):FireAllClients({ Result = r, AswangUserId = id, RoundNumber = n })',
+    false
+  )
+  check(
+    'a roster smuggled onto the private role assignment',
+    'Remotes.Get("RoleAssigned"):FireAllClients({ Role = role, Roster = everyone })',
+    true
+  )
   check('a private role assignment', 'Remotes.Get("RoleAssigned"):FireClient(player, role)', false)
   check('a comment describing the rule', '-- never FireAllClients the Aswang role to anyone\nlocal x = 1', false)
   check('a docstring naming the secret', '--[[ AswangUserId is THE SECRET; never replicate it ]]\nlocal y = 2', false)

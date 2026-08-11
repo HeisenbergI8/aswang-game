@@ -128,6 +128,32 @@ const main = async () => {
     if (typeof agent === 'string' && REVIEW_AGENTS.test(agent)) events.push({ turn, agent })
   }
 
+  // ── LAUNCHES COUNT, NOT ONLY COMPLETIONS ────────────────────────────────────
+  //
+  // SubagentStop fires when an agent FINISHES, and the reviewers here are deliberately launched in the
+  // background — so they finish two or three turns after the turn that edited the source. The editing
+  // turn therefore always looked unreviewed, and `review-gate` nudged for reviewers that were at that
+  // moment already running. Every nudge in this session's C02-C04 work was that, not a real omission.
+  //
+  // Recording the LAUNCH fixes it and fixes the resumed-agent case at the same time: continuing an
+  // auditor with SendMessage keeps its prior findings in context and is strictly better than a fresh
+  // spawn, but it emits no SubagentStop of its own until it stops again.
+  //
+  // The gate is not weakened by this. A launch that is later skipped or dies still leaves the work
+  // unreviewed — but that shows up as a missing REPORT, which a person reads, rather than as a nudge
+  // fired at a model that already did the right thing and has no way to say so.
+  if (tool === 'Agent' || tool === 'Task') {
+    const agent = payload.tool_input?.subagent_type
+
+    if (typeof agent === 'string' && REVIEW_AGENTS.test(agent)) events.push({ turn, agent, launched: true })
+  }
+
+  if (tool === 'SendMessage') {
+    // A resumed agent is identified by its id, not its type, so the type is unknown here. Recorded as
+    // a generic review touch: it proves a reviewer was engaged this turn, which is what the gate asks.
+    events.push({ turn, agent: 'resumed', launched: true })
+  }
+
   if (tool === 'Edit' || tool === 'Write' || tool === 'NotebookEdit') {
     const file = payload.tool_input?.file_path
 

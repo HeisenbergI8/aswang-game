@@ -197,6 +197,28 @@ or more than one defensible approach exists.
 `Remotes.luau`, `RoleService`, `MonsterService` or `AntiCheatService`. `review-gate.mjs` names it
 automatically for those paths. It is not a tier — it is a surface.
 
+### Which reviewers actually run — surface-based, not one-size
+
+A full three-reviewer pass costs 150–250k tokens. Running it on every diff exhausts a session before the
+work is done, and running none of it ships the C04 bug below. So reviewers are chosen by **what the diff
+touches and what you are about to claim**:
+
+| Condition | Reviewer |
+| --- | --- |
+| 🔒 surface — `src/server/**`, `Remotes.luau`, Role/Monster/AntiCheat | **`exploit-auditor`, always.** Non-negotiable |
+| Large tier, or a diff over ~3 files | **+ `auditor`** (plan exists) or **`change-auditor`** (no plan) |
+| You are about to state that something *works* | **+ `playtester`**, and it must return an artifact |
+| Small diff, green tree, no behavioural claim | **none.** `npm run verify` and a plain statement |
+| Harness scripts (`.claude/scripts/**`) | **`check:guards` + `change-auditor`.** Not `exploit-auditor` — no game surface, no Luau |
+
+**The 🔒 row is the one that is not a judgement call.** In this repo's C04 work `analyze`, all five checks
+and six Lune suites were green over a Critical bug: the transform's revert restored hardcoded defaults
+instead of captured state, permanently branding the ex-Aswang in a way readable map-wide. Only
+`exploit-auditor` found it. Static green over a secrecy surface means very little.
+
+**Scope every brief.** "Audit the diff" costs three times "audit `MonsterService`'s revert path and
+answer these four questions", and returns less. Name the files and the questions.
+
 **Which auditor:** `auditor` traces a written plan step by step and requires a plan directory.
 `change-auditor` audits the working diff against the user's request. Presence of a plan decides it.
 

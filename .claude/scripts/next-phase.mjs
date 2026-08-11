@@ -27,6 +27,98 @@ import { activeRun, hashPlan } from './run-state.mjs'
 // "no plan" rather than "I could not run".
 const VERIFY_PLAN = join(dirname(fileURLToPath(import.meta.url)), 'verify-plan.mjs')
 
+// ── BLOCK AT THE CURSOR, NOT ANYWHERE IN THE PLAN ────────────────────────────
+//
+// This was once a plain `phases.find(...)` over the whole document, and `task-driver.mjs` halts on it
+// UNCONDITIONALLY, before anything else is considered. So a plan whose LAST phase ended in a
+// two-client screenshot halted the run at iteration 0 having driven nothing — six mechanical phases
+// refused because the seventh needed a person.
+//
+// The wasted run was not the damage. The incentive was: a plan is rewarded for inventing a fake check
+// so the loop will start, which is the exact opposite of what `verify:plan --lint` exists to
+// encourage. An honestly-unverifiable step should cost you the last phase, not the whole plan.
+//
+// So a blocking phase blocks only once the cursor has REACHED it — when it is also `next`. One further
+// down is a thing to know about, and the phase table still prints it either way.
+export const blockingPhase = (phases, next) => {
+  const candidate = phases.find(
+    phase => phase.status === 'needs-human' || phase.status === 'low-confidence'
+  )
+
+  return candidate && next && candidate.phase === next.phase ? candidate : null
+}
+
+const selfTest = () => {
+  let failures = 0
+  let ran = 0
+
+  const check = (label, actual, expected) => {
+    ran += 1
+    if (actual === expected) return
+
+    failures += 1
+    console.log(`  FAIL  ${label} — expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
+  }
+
+  const at = (phases) => {
+    const next = phases.find(phase => phase.status !== 'done')
+
+    return blockingPhase(phases, next)?.phase ?? null
+  }
+
+  // THE REGRESSION. Mechanical work ahead of a human-only phase must still drive.
+  check(
+    'a needs-human phase further down does not block',
+    at([
+      { phase: 1, status: 'done' },
+      { phase: 2, status: 'pending' },
+      { phase: 7, status: 'needs-human' }
+    ]),
+    null
+  )
+  check(
+    'a partially-done phase ahead of one still does not block',
+    at([
+      { phase: 1, status: 'partial' },
+      { phase: 7, status: 'needs-human' }
+    ]),
+    null
+  )
+
+  // THE OTHER HALF, which matters just as much: once the cursor arrives, it MUST stop.
+  check(
+    'a needs-human phase at the cursor blocks',
+    at([
+      { phase: 1, status: 'done' },
+      { phase: 7, status: 'needs-human' }
+    ]),
+    7
+  )
+  check(
+    'low-confidence at the cursor blocks too',
+    at([
+      { phase: 1, status: 'done' },
+      { phase: 2, status: 'low-confidence' }
+    ]),
+    2
+  )
+  check('a fully done plan blocks on nothing', at([{ phase: 1, status: 'done' }]), null)
+  check(
+    'ordinary pending work blocks on nothing',
+    at([
+      { phase: 1, status: 'done' },
+      { phase: 2, status: 'pending' }
+    ]),
+    null
+  )
+
+  console.log(failures ? `  FAIL  next-phase: ${ran - failures}/${ran}` : `  PASS  next-phase: ${ran}/${ran} cases`)
+
+  return failures ? 1 : 0
+}
+
+if (process.argv.includes('--self-test')) process.exit(selfTest())
+
 const planPath = process.argv[2]
 const asJson = process.argv.includes('--json')
 
@@ -161,8 +253,11 @@ const phases = [...byPhase.entries()]
 
 // `low-confidence` is treated exactly like `needs-human` by the driver — halt once, sign-off path,
 // same conditions. It is a separate status only so the report says which of the two it is.
-const blocked = phases.find(phase => phase.status === 'needs-human' || phase.status === 'low-confidence')
 const next = phases.find(phase => phase.status !== 'done')
+
+if (process.argv.includes('--self-test')) process.exit(selfTest())
+
+const blocked = blockingPhase(phases, next)
 const allDone = phases.length > 0 && phases.every(phase => phase.status === 'done')
 
 const verdict = {

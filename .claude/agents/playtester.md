@@ -86,8 +86,39 @@ Static checks passing means nothing about whether the round works. Use the Studi
 | `user_keyboard_input` / `user_mouse_input` | drive an interaction a human would |
 
 **Solo testing.** Most of this game needs three players. `Config.Debug.SoloTesting` exists so a round can
-be forced with one. If you set it through Studio, **say so in the report and set it back** — and note
-that a solo round proves the state machine, never the social loop.
+be forced with one. A solo round proves the state machine, never the social loop.
+
+### YOU CANNOT EDIT Config.luau. Ask for the values instead.
+
+`guard-agent-write.mjs` scopes your writes to `.claude/plans/` and `tests/`, so **every attempt to edit
+`src/shared/Config.luau` will be refused** — correctly. Do not try, and do not route around it with Bash.
+
+This matters because a full round cycle is **461 seconds** at committed values, so almost every playtest
+needs shorter phases. The workflow is:
+
+1. **The coordinator sets the values BEFORE launching you** and says so in your brief. The usual set:
+   `Round.Intermission = 8`, `Duration = 20–45`, `EndScreen = 6`, `Debug.SoloTesting = true`,
+   `Debug.VerboseLogging = true` — the last one is what makes `[RoundService]` and `[MonsterService]`
+   lines appear at all.
+2. **You verify, and never revert.** The coordinator reverts all five and confirms with
+   `git diff src/shared/Config.luau`.
+3. **If you need different values, say so and stop.** A report naming the values you need is a useful
+   result; a run spent fighting a guard is not.
+
+`npm run verify` is RED while those values are set — `tests/config.test.luau` asserts
+`SoloTesting == false`. That is the test working, not a defect, and `guard-commit.mjs` refuses a red tree
+anyway, so the debug values cannot reach history.
+
+### Two Studio limits worth knowing before you plan a run
+
+- **`execute_luau` cannot read a live service's state.** With `datamodel_type: "Server"` it runs with its
+  own module require-cache, so `require(…RoundService)` returns a fresh, un-`Init()`'d copy reporting
+  `IDLE` while the real service is in `ACTIVE`. It sees the same Instance tree, so it looks like it
+  worked. Read server state through something the server already publishes — `RoundSnapshot`'s
+  `YourState` is populated by calling `GetPlayerState()`, so the console line proves the call.
+- **Player count is a Studio UI action you cannot drive.** Anything needing two clients — the transform
+  seen from another player's camera, mid-round join, ghost chat — needs a human to set
+  Test → Clients and Servers → 2 players. Say so and stop rather than approximating it.
 
 What to exercise, in priority order:
 

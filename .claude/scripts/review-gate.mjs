@@ -40,7 +40,10 @@ const PLANS = '.claude/plans'
 // says how to override it.
 const PLAN_RECENT_MS = 2 * 60 * 60 * 1000
 
-const REVIEW_AGENTS = new Set(['playtester', 'auditor', 'change-auditor', 'exploit-auditor'])
+// `resumed` is not an agent type — it is what record-activity writes when a reviewer is continued via
+// SendMessage, where only the agent's id is known and not its type. Resuming keeps the auditor's own
+// prior findings in context and is strictly better than a fresh spawn, so it must not read as nothing.
+const REVIEW_AGENTS = new Set(['playtester', 'auditor', 'change-auditor', 'exploit-auditor', 'resumed'])
 
 // ── WHEN THE EXPLOIT AUDITOR IS NOT OPTIONAL ───────────────────────────────────
 //
@@ -116,7 +119,12 @@ export const readTurn = (text, turn) => {
 
     if (event.turn !== turn) continue
     if (event.edit && !edits.includes(event.edit)) edits.push(event.edit)
-    if (event.run === 'verify' && event.ok === true) verifyGreen = true
+    // LAST WRITE WINS, not "any green run". This latched `true` on the first green `verify` and stayed
+    // there, so a turn that ran verify green, then edited source and ran it RED, still reported the tree
+    // as passing — and the gate's own message said "`npm run verify` passed" over a red tree. A gate
+    // that misreports the tree state is worse than no gate, because it is the thing everyone else
+    // stops looking after.
+    if (event.run === 'verify') verifyGreen = event.ok === true
     if (event.agent && REVIEW_AGENTS.has(event.agent)) agentsRun.push(event.agent)
   }
 
@@ -257,6 +265,16 @@ if (process.argv[1]?.endsWith('review-gate.mjs')) {
 
     // An unrelated agent must NOT silence the gate — the ledger records every subagent completion.
     check('an unrelated agent does not count as review', decide({ ...base, agentsRun: ['Explore'] }).action, 'nudge')
+
+    // A REVIEWER RESUMED VIA SendMessage. Continuing an auditor keeps its own prior findings in
+    // context and is strictly better than a fresh spawn; before this it read as nothing at all,
+    // so doing the better thing looked like doing nothing.
+    check('a resumed reviewer counts', decide({ ...base, agentsRun: ['resumed'] }).action, 'pass')
+
+    // LAUNCHES, not only completions. These reviewers are launched in the background and finish two
+    // or three turns later, so the turn that edited the source always looked unreviewed. Every nudge
+    // during this repo's C02-C04 work was that, fired at reviewers that were already running.
+    check('a reviewer launched this turn counts', decide({ ...base, agentsRun: ['exploit-auditor'] }).action, 'pass')
 
     // The security escalation.
     check('a server diff names the exploit auditor', decide(base).security, true)

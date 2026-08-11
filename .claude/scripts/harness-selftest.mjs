@@ -55,6 +55,9 @@ export const SUITES = [
   ['build-trigger', ['.claude/scripts/build-trigger.mjs', '--self-test']],
   ['verify-plan', ['.claude/scripts/verify-plan.mjs', '--self-test']],
   ['goal-check', ['.claude/scripts/goal-check.mjs', '--self-test']],
+  // Pins that a human-only step blocks the LOOP only once the cursor reaches it — the fix for a plan
+  // whose last phase needed a person halting the whole run at iteration 0.
+  ['next-phase', ['.claude/scripts/next-phase.mjs', '--self-test']],
   ['preflight', ['.claude/scripts/preflight.mjs', '--self-test']],
 
   // The accountability layer.
