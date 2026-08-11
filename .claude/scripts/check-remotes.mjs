@@ -68,7 +68,21 @@ export const scan = (files, lists) => {
       findings.push({ file, line, why, detail })
     }
 
-    for (const match of withStrings.matchAll(/Remotes\.Get\(\s*["']([\w]+)["']\s*\)([\s\S]{0,40})/g)) {
+    //  The trailing context is a LOOKAHEAD, and that is not a style choice.
+    //
+    //  It used to be a plain group — `\)([\s\S]{0,40})` — which `matchAll` CONSUMES. Two
+    //  `Remotes.Get(...)` calls within 40 characters of each other therefore produced ONE match: the
+    //  second was inside the first's swallowed context and never scanned. Adjacent declarations are the
+    //  normal way to write this file, so the blind spot was the common case rather than a corner.
+    //
+    //  Every direction check below runs off this loop, so the cost was not a miscount in the
+    //  "declared but not yet wired" note — it was `check:remotes` silently failing to see a client
+    //  firing a DOWN event, which is the exact class of bug this script exists to catch. Found when
+    //  `PlayerKilled` reported as unwired while being demonstrably fired and listened to.
+    //
+    //  `(?=(...))` matches the same 40 characters without advancing lastIndex, so the next Get is still
+    //  there to be found. The capture group inside a lookahead still populates `match[2]`.
+    for (const match of withStrings.matchAll(/Remotes\.Get\(\s*["']([\w]+)["']\s*\)(?=([\s\S]{0,40}))/g)) {
       const [, name, after] = match
 
       used.add(name)
@@ -171,6 +185,46 @@ const selfTest = () => {
   check('a remote captured into a variable for later use', 'local ev = Remotes.Get("PhaseChanged")\nev:FireAllClients(x)', false)
   check('a name mentioned only in a comment', '-- "PhasChanged" was the old spelling\nlocal x = 1', false)
   check('a waived deliberate direction break', 'Remotes.Get("PhaseChanged"):FireServer(x) -- remotes-ok: studio-only probe', false)
+
+  //  ADJACENCY. Every case above uses exactly ONE Remotes.Get, which is precisely why this scanner
+  //  spent its whole life blind to the second one: the trailing context group was consumed, so a Get
+  //  within 40 characters of a preceding Get was never scanned at all. These are the regression
+  //  guards, and they must stay in both directions.
+  check(
+    'a violation on the Get immediately after another',
+    'Remotes.Get("PhaseChanged").OnClientEvent:Connect(f)\nRemotes.Get("PhaseChanged"):FireAllClients(x)',
+    true,
+    'src/client/Y.luau'
+  )
+  check(
+    'a violation three Gets deep',
+    'local a = Remotes.Get("PhaseChanged")\nlocal b = Remotes.Get("RoundEnded")\nRemotes.Get("PhaseChanged"):FireServer(x)',
+    true
+  )
+  check(
+    'two adjacent declarations, both correct',
+    'local a = Remotes.Get("PhaseChanged")\nlocal b = Remotes.Get("RoundEnded")',
+    false
+  )
+
+  //  The same bug seen from the other side. `used` drives the "declared but not yet wired" note, and
+  //  it is what first exposed this: PlayerKilled was fired AND listened to and still reported unwired.
+  //  Asserted directly rather than through `check`, which only sees findings.
+  {
+    ran += 1
+
+    const path = join(dir, 'src/server/Adjacent.luau')
+
+    mkdirSync(join(path, '..'), { recursive: true })
+    writeFileSync(path, 'local a = Remotes.Get("PhaseChanged")\nlocal b = Remotes.Get("RoundEnded")')
+
+    const { used } = scan([path], lists)
+
+    if (!used.has('PhaseChanged') || !used.has('RoundEnded')) {
+      failures += 1
+      console.log(`  FAIL  both adjacent Gets are counted as used — got [${[...used].join(', ')}]`)
+    }
+  }
 
   rmSync(dir, { recursive: true, force: true })
 

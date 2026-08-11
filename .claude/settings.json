@@ -219,6 +219,17 @@
             "timeout": 300
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/lesson-prompt.mjs"],
+            "statusMessage": "Checking for anything worth learning",
+            "timeout": 30
+          }
+        ]
       }
     ]
   }

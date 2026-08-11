@@ -131,6 +131,25 @@ export const stripQuoted = text =>
     .replace(/"[^"]*"/g, ' ')
     .replace(/\*\*[^*]*\*\*/g, ' ')
 
+// Machine-generated envelopes that arrive on the SAME channel as a user prompt but are not one:
+// background-task completions, IDE file-open events, injected reminders.
+//
+// Measured in this repo on 2026-08-12: of 58 queued candidates, 44 were filed as `user-correction`,
+// and a sample of the most recent showed the majority were `<task-notification>` blocks. An agent's
+// report reliably contains "wrong", "failed", "should" and "instead" — so the correction classifier
+// fired on the AGENT's prose and recorded it as though the user had said it. The backlog became
+// unreadable, which is the same as not capturing at all.
+//
+// STRIPPED RATHER THAN SKIPPED, because a real correction often rides ALONGSIDE one of these: the
+// user types an instruction in the same turn an IDE event fires, and this very session opened two
+// files mid-conversation. Whatever the user actually wrote survives; the envelope does not.
+export const stripEnvelopes = text =>
+  text
+    .replace(/<task-notification>[\s\S]*?<\/task-notification>/g, ' ')
+    .replace(/<ide_opened_file>[\s\S]*?<\/ide_opened_file>/g, ' ')
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ' ')
+    .replace(/<ide_selection>[\s\S]*?<\/ide_selection>/g, ' ')
+
 export const classify = text => {
   const hits = []
 
@@ -206,7 +225,12 @@ const snippet = (text, max = 220) => text.replace(/\s+/g, ' ').trim().slice(0, m
 // ---------------------------------------------------------------------------- commands
 
 const record = async payload => {
-  const prompt = typeof payload?.prompt === 'string' ? payload.prompt : ''
+  const raw = typeof payload?.prompt === 'string' ? payload.prompt : ''
+
+  // Envelopes off BEFORE anything is classified, scored or stored. Doing it here rather than inside
+  // `classify` means the snippet written to the backlog is also the human's words — a row whose text
+  // is an agent's report is unreadable later even if its kind happened to be right.
+  const prompt = stripEnvelopes(raw)
 
   if (!prompt.trim()) return
 
@@ -351,6 +375,41 @@ const selfTest = () => {
   check('a process correction', captured('before doing anything tell me your plan'), true)
   check('resignation', captured('this is useless now'), true)
   check('a forward-looking instruction', captured('next time run the analyzer first'), true)
+
+  //  ENVELOPES. The failure these prevent was measured, not imagined: 44 of 58 rows in this repo's
+  //  backlog were filed as user corrections, and the recent ones were mostly agent reports. An
+  //  agent's prose is full of "wrong", "failed" and "should", so the classifier fired on IT.
+  const capturedAfterStrip = text => classify(stripEnvelopes(text)).length > 0
+
+  check(
+    'a task-notification is not a user correction',
+    capturedAfterStrip('<task-notification>the fix was wrong and should be reverted</task-notification>'),
+    false
+  )
+  check(
+    'a system-reminder is not a user correction',
+    capturedAfterStrip('<system-reminder>you should not have skipped the tests</system-reminder>'),
+    false
+  )
+  check(
+    'an IDE file-open event is not a user correction',
+    capturedAfterStrip('<ide_opened_file>why is check-debug.mjs open?</ide_opened_file>'),
+    false
+  )
+
+  //  THE ALLOW HALF, which is the half that matters: a real correction arriving in the SAME turn as
+  //  an envelope must still be captured. Stripping rather than skipping is what buys this, and it is
+  //  not hypothetical — this repo's own session had IDE events fire mid-instruction twice.
+  check(
+    'a real correction riding alongside an envelope survives',
+    capturedAfterStrip('<ide_opened_file>README.md</ide_opened_file>no thats wrong, do it the other way'),
+    true
+  )
+  check(
+    'a real correction after a task-notification survives',
+    capturedAfterStrip('<task-notification>agent finished</task-notification>stop and tell me your plan instead'),
+    true
+  )
 
   // NOT CAPTURED — ordinary work, which is the overwhelming majority of messages.
   check('a plain request', captured('add the salt throw handler'), false)

@@ -11,8 +11,10 @@
 //
 // Four shapes, each of which has shipped in real Roblox social-deduction games:
 //
-//   1. A secret-bearing payload on a broadcast — `:FireAllClients(...)` carrying a role or a userId
-//      the receiver is not entitled to.
+//   1. A secret-bearing payload on a send — `:FireAllClients(...)` or `:FireClient(...)` carrying a
+//      role or a userId the receiver is not entitled to. The payload is resolved back to its `local
+//      x = { … }` declaration, so the typed-local idiom this repo recommends is inspected rather than
+//      skipped.
 //   2. Attributes and CollectionService tags. Both REPLICATE TO EVERY CLIENT. `SetAttribute("Role",
 //      …)` on a character is the single most common way this leaks, and it looks like local state.
 //   3. The client naming the secret at all. `AswangUserId` appearing anywhere under `src/client/`
@@ -26,6 +28,35 @@
 // passes this check. Renaming the variable defeats it entirely. This is a tripwire on the OBVIOUS
 // forms, not a proof of secrecy — the proof is `exploit-auditor` reading the diff, and the tripwire
 // exists so that agent has less to catch.
+//
+// Rule 1's envelope, measured by an audit rather than guessed. It inspects TABLE-CONSTRUCTOR PAYLOADS
+// ONLY: a single `{ … }` bound to a local within 1200 characters of the call, read at its top level.
+//
+// Four STRUCTURAL classes sit outside that envelope entirely, and the first is the one CLAUDE.md names
+// as the whole reason `exploit-auditor` exists:
+//
+//   · a positional argument that is not a table — `FireAllClients(aswangUserId)` is caught only
+//     because the VARIABLE NAME survives in the argument text. One rename defeats it completely.
+//   · a helper's return value — `FireAllClients(buildPayload(k))`
+//   · a RemoteFunction — `OnServerInvoke = function() return state.AswangUserId end`. THERE IS NO
+//     RemoteFunction RULE IN THIS FILE AT ALL. (`Remotes.luau` declares none today, so this is
+//     forward-looking rather than live — but it is a hole, not an omission by design.)
+//   · a replicated Instance — a StringValue parented to ReplicatedStorage. Rule 4 needs the secret
+//     token and the container on the SAME LINE.
+//
+// And within table payloads, every one of these gets through, each confirmed against the real `scan()`:
+//
+//   · a field assigned AFTER the constructor      — `payload.KillerUserId = k`
+//   · a payload built by a helper                 — `local payload = buildKillPayload(k, v)`
+//   · a bracket-string key                        — `{ ["AswangUserId"] = id }`, because `readSource`
+//                                                    blanks string contents before this rule sees them
+//   · a nested table inside a local               — `Meta = { KillerUserId = k }`
+//   · a declaration further than 1200 characters from the call
+//   · a field name avoiding both tokens           — `Murderer`, `Attacker`, `SourceUserId`
+//
+// So this rule raises the cost of a MISTAKE and does nothing against INTENT. That is the intended
+// bargain — the realistic failure here is a tired author adding `KillerUserId` to an existing payload,
+// and that one is now caught. Do not read a green tick as coverage of the list above.
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -124,7 +155,18 @@ export const strayFields = (remote, fields) => {
 
 // Tokens that name the secret. Deliberately broad on the monster side and narrow on the generic side:
 // `role` alone would match `RoleService`, so it only counts inside a payload.
-const SECRET = /\b(aswang|imposter|impostor|monsteruserid|iskiller|isaswang|aswanguserid|secretrole)\b/i
+//  `killer\w*` and `aswang\w*` are PREFIXES, not exact words, and that is the point of the change.
+//
+//  The old list enumerated `aswanguserid` and `iskiller` by hand and therefore matched neither
+//  `KillerUserId` nor `KillerName` — the two most natural wrong fields this game will ever grow, on
+//  exactly the broadcast C05 added. A killer field on `PlayerKilled` would have typechecked, scanned
+//  clean and shipped, because §4.8 puts the reveal on the end screen and nothing else was watching.
+//
+//  Widening is safe because of WHERE this regex is applied: broadcast payloads, attribute names and
+//  tag names — never general server code. `commitKill(killer, victim)` is untouched; a `killer` field
+//  crossing to every client is not, and the `-- secrecy-ok: <reason>` waiver is there for the case
+//  that turns out to be deliberate.
+const SECRET = /\b(aswang\w*|imposter|impostor|monsteruserid|killer\w*|iskiller|isaswang|secretrole)\b/i
 const ROLE_TOKEN = /\b(role|roles)\b/i
 
 // Balanced-paren extraction from an offset pointing at the `(`. Returns the argument text.
@@ -141,6 +183,32 @@ const argsAt = (code, open) => {
   }
 
   return code.slice(open + 1)
+}
+
+//  Drop the leading argument from an argument list — for `:FireClient(player, payload)`, the player.
+//
+//  The comma has to be found at DEPTH ZERO. `FireClient(p, { A = f(x, y), B = 2 })` contains commas
+//  inside both a table and a call, and splitting on the first one would hand back a fragment that
+//  parses as neither. Returns the whole string unchanged when there is no top-level comma, so a
+//  one-argument call is never silently emptied.
+const dropFirstArgument = args => {
+  let depth = 0
+
+  for (let i = 0; i < args.length; i += 1) {
+    const char = args[i]
+
+    if (char === '(' || char === '{' || char === '[') depth += 1
+    else if (char === ')' || char === '}' || char === ']') depth -= 1
+    else if (char === ',' && depth === 0) return args.slice(i + 1)
+  }
+
+  //  NO TOP-LEVEL COMMA MEANS NO PAYLOAD — return nothing, not the recipient.
+  //
+  //  Returning `args` here left `FireClient(killer)` scanning its own target, which is the exact
+  //  false positive this function exists to remove, surviving on the one-argument shape. A signal
+  //  remote fired at the Aswang with no payload is a plausible C14 salt-feedback call, and its only
+  //  escape would be a waiver that then silences that line permanently.
+  return ''
 }
 
 // The remote name for a `Remotes.Get("X"):FireAllClients(` call, when it is written inline. When the
@@ -201,12 +269,48 @@ export const scan = files => {
       )
     }
 
-    // 1. Broadcasts carrying the secret.
-    for (const match of code.matchAll(/:FireAllClients\s*\(/g)) {
+    //  1. Sends carrying the secret — BOTH `:FireAllClients` and `:FireClient`.
+    //
+    //  `:FireClient` was missing for a long time, and it is not the rare case: `broadcastSnapshot` in
+    //  RoundService is a per-player `FireClient` loop, so "send this to everyone" is written that way
+    //  in this codebase as often as not. A loop firing the Aswang's UserId to each player in turn
+    //  reaches exactly as many clients as a broadcast and was invisible to this rule.
+    //
+    //  The allowlist still governs both, and `RoleAssigned` is on it precisely because it is a
+    //  legitimate one-player `FireClient` carrying that player's own role.
+    for (const match of code.matchAll(/:Fire(?:AllClients|Client)\s*\(/g)) {
       const open = match.index + match[0].length - 1
-      const args = argsAt(code, open)
 
-      if (!SECRET.test(args) && !ROLE_TOKEN.test(args)) continue
+      //  THE RECIPIENT IS NOT THE PAYLOAD. `:FireClient(player, payload)` takes the target player
+      //  first, and testing the whole argument text meant the RECIPIENT's name was scanned — so
+      //  `FireClient(killer, { VictimUserId = v })` tripped the check the moment SECRET grew the
+      //  `killer\w*` prefix. That is a false positive on the single most dangerous call site in the
+      //  game: a send aimed at the Aswang. The only escape is a waiver, and a waiver disables the line
+      //  permanently, including for a later edit that adds a genuinely leaky field to that same call.
+      //  So the noise would have trained a silencer onto exactly the line that most needs watching.
+      //
+      //  `payloadFieldsAt` already skips the recipient; this makes the raw-text test agree with it.
+      const args = match[0].includes('FireClient') ? dropFirstArgument(argsAt(code, open)) : argsAt(code, open)
+
+      //  RESOLVE THE PAYLOAD, do not just read the argument text.
+      //
+      //  Testing `args` alone made this rule dead on every broadcast written in this repo's own house
+      //  style. `FireAllClients(payload)` has an argument text of exactly seven characters — `payload`
+      //  — so a table containing the literal `AswangUserId` scanned clean and shipped green. And the
+      //  typed local is not an unusual shape here: `Types.luau`'s comments RECOMMEND it, because
+      //  `FireAllClients` takes `...any` and an inline literal is checked against nothing at all. So
+      //  the guard was defeated by the very idiom the codebase tells you to use.
+      //
+      //  `payloadFieldsAt` already does this resolution for rule 2 (the field allowlist), including
+      //  walking back to a `local X = {` declaration. Rule 1 now shares it, so both rules see the same
+      //  fields and there is one notion of "what this call actually carries".
+      const fields = payloadFieldsAt(code, open)
+      const carriesSecret =
+        SECRET.test(args) ||
+        ROLE_TOKEN.test(args) ||
+        fields.some(field => SECRET.test(field) || ROLE_TOKEN.test(field))
+
+      if (!carriesSecret) continue
 
       // `withStrings`, not `code`: the remote's NAME is a string literal, and `code` has string
       // contents blanked. Reading it from `code` made every call look like an unnamed remote, so the
@@ -218,7 +322,9 @@ export const scan = files => {
 
       add(
         match.index,
-        `:FireAllClients carries what looks like the Aswang's identity on ${remote ? `\`${remote}\`` : 'an unnamed remote'}`,
+        // `match[0]` rather than a hardcoded name: this loop matches both send forms now, and reporting
+        // `:FireAllClients` at a `:FireClient` call site sends the reader looking for the wrong line.
+        `${match[0].trim()} carries what looks like the Aswang's identity on ${remote ? `\`${remote}\`` : 'an unnamed remote'}`,
         remote
           ? `Only ${[...REVEAL_ALLOWLIST.keys()].join(', ')} may. Add a reason to REVEAL_ALLOWLIST if this is genuinely the reveal.`
           : 'The remote is held in a variable, so its name cannot be checked here. Call it inline as Remotes.Get("Name"):FireAllClients(...).'
@@ -304,6 +410,86 @@ const selfTest = () => {
   check('an unnamed remote broadcasting a role', 'local ev = something\nev:FireAllClients({ Role = r })', true)
   check('a role attribute', 'character:SetAttribute("Role", "ASWANG")', true)
   check('a role tag', 'CollectionService:AddTag(char, "Aswang")', true)
+
+  //  THE TYPED-LOCAL PAYLOAD. Every BLOCK case above passes its table INLINE, which is why this rule
+  //  looked healthy for so long while being dead on the shape this repo actually writes: `Types.luau`
+  //  recommends the typed local precisely because `FireAllClients` takes `...any` and an inline
+  //  literal is checked against nothing. Before the fix, the argument text was the seven characters
+  //  `payload` and a table containing `AswangUserId` scanned completely clean.
+  check(
+    'the secret in a typed local payload, not inline',
+    'local payload: Types.PlayerKilledPayload = { VictimUserId = v, AswangUserId = k }\n' +
+      'Remotes.Get("PlayerKilled"):FireAllClients(payload)',
+    true
+  )
+  check(
+    'the secret in an untyped local payload',
+    'local payload = { Role = role }\nRemotes.Get("PhaseChanged"):FireAllClients(payload)',
+    true
+  )
+  check(
+    'a killer field in a local payload on a non-allowlisted remote',
+    'local payload = { VictimUserId = v, KillerUserId = k }\n'
+      + 'Remotes.Get("PlayerKilled"):FireAllClients(payload)',
+    true
+  )
+
+  //  A per-player `FireClient` LOOP reaches every client too, and this rule used to match only
+  //  `:FireAllClients`. RoundService's own broadcastSnapshot is written this way, so the shape is
+  //  idiomatic here rather than exotic — it was simply invisible.
+  check(
+    'a FireClient loop carrying the secret to every player in turn',
+    'for _, p in Players:GetPlayers() do\n\tRemotes.Get("PhaseChanged"):FireClient(p, { AswangUserId = id })\nend',
+    true
+  )
+  check(
+    'a legitimate one-player FireClient on an allowlisted remote',
+    'Remotes.Get("RoleAssigned"):FireClient(player, { Role = role })',
+    false
+  )
+
+  //  THE RECIPIENT IS NOT THE PAYLOAD, in both directions. Widening SECRET to `killer\w*` made the
+  //  target of a FireClient scannable, so a send TO the killer tripped the check on the variable name
+  //  alone — a false positive on the most dangerous call site in the game, whose only escape is a
+  //  waiver that would then silence that line forever. C14's salt feedback is the next real one.
+  check(
+    'a send addressed TO the killer, carrying nothing secret',
+    'Remotes.Get("SaltEffect"):FireClient(killer, { VictimUserId = v })',
+    false
+  )
+  check(
+    'the same shape but the PAYLOAD carries the secret — must still block',
+    'Remotes.Get("SaltEffect"):FireClient(target, { KillerUserId = k })',
+    true
+  )
+
+  //  THESE THREE PIN THE DEPTH-AWARE SPLIT ITSELF, which is the whole substance of dropFirstArgument.
+  //  An audit replaced it with a one-line `args.indexOf(',')` and the suite still reported 29/29 — the
+  //  cases above exercise the BRANCH but not the parsing, so they could not tell a correct
+  //  implementation from a naive one. Each of these dies under the naive split.
+  //  The sharp one: the recipient expression contains a comma AND a secret-looking token after it.
+  //  A naive `indexOf(',')` split keeps `killerPlayer), { … }` and flags a clean payload; the
+  //  depth-aware split drops the whole recipient and correctly allows. The `pick(a, b)` pair below
+  //  does NOT discriminate — a naive split happens to give the right answer on both — so this case is
+  //  the one carrying the weight.
+  check(
+    'a recipient expression whose own arguments look secret, with a clean payload',
+    'Remotes.Get("SaltEffect"):FireClient(pick(a, killerPlayer), { VictimUserId = v })',
+    false
+  )
+  check(
+    'a recipient expression containing its own comma, with a clean payload',
+    'Remotes.Get("SaltEffect"):FireClient(pick(a, b), { VictimUserId = v })',
+    false
+  )
+  check(
+    'the same, but the payload really does carry the secret',
+    'Remotes.Get("SaltEffect"):FireClient(pick(a, b), { KillerUserId = k })',
+    true
+  )
+  // A one-argument send has no payload at all, so there is nothing to scan and nothing to flag.
+  check('a payload-less send addressed to the killer', 'Remotes.Get("SaltEffect"):FireClient(killer)', false)
+
 
   // ALLOW — every one of these is correct code that a blunter check would refuse.
   check('the end-of-round reveal', 'Remotes.Get("RoundEnded"):FireAllClients({ AswangUserId = id })', false)

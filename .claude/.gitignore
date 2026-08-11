@@ -12,6 +12,7 @@
 .claim-state.json
 .review-state.json
 .lessons-state.json
+.lesson-prompt-state.json
 .analyze-state.json
 .harness-selftest.json
 .DS_Store
