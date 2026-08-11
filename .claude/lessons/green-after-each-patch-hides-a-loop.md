@@ -28,6 +28,6 @@ roughly half a million subagent tokens, largely re-covering ground.
 - Distrust any comment asserting an invariant. Three defects came from one path being fixed while its
   twin was not, with a comment claiming otherwise (`MarkKilled` vs `onPlayerRemoving`).
 - A fix prescribed by a review is still a fix: it earns the same grid, not more trust.
-**Not yet encoded.** The mechanical half is a per-location fix-round ledger — `record-activity.mjs`
-already logs edits per turn, so a Stop guard could block at three edits to one file with "change the
-shape". Written as a lesson because *which* shape is a judgement. Graduate and delete once that exists.
+**Encoded:** `guard-fix-rounds.mjs` — counts fix rounds per file (an edit landing after a review ran)
+and climbs block → escalate → HALT. It cannot judge *which* shape is right, so this lesson stays until
+the guard has caught a loop it was not built from. Delete it then.
