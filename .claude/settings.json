@@ -225,6 +225,13 @@
           {
             "type": "command",
             "command": "node",
+            "args": [".claude/scripts/guard-fix-rounds.mjs"],
+            "statusMessage": "Counting fix rounds per file",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "node",
             "args": [".claude/scripts/lesson-prompt.mjs"],
             "statusMessage": "Checking for anything worth learning",
             "timeout": 30

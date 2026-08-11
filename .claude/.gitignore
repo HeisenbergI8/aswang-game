@@ -16,3 +16,4 @@
 .analyze-state.json
 .harness-selftest.json
 .DS_Store
+.fix-rounds-state.json
