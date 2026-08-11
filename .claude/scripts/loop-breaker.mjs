@@ -19,6 +19,8 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
+import { commandFailed } from './lib/hook-payload.mjs'
+
 const STATE_PATH = '.claude/.loop-state.json'
 const INJECT_AT = 2
 const BLOCK_AT = 3
@@ -46,25 +48,6 @@ const writeState = state => {
   writeFileSync(STATE_PATH, `${JSON.stringify(state)}\n`)
 }
 
-// Returns true only when the payload gives positive evidence of failure.
-const didFail = payload => {
-  if (payload.hook_event_name === 'PostToolUseFailure') return true
-
-  const response = payload.tool_response
-
-  if (!response || typeof response !== 'object') return false
-
-  for (const field of ['exit_code', 'exitCode', 'code', 'status', 'returnCode']) {
-    if (typeof response[field] === 'number') return response[field] !== 0
-  }
-
-  for (const field of ['is_error', 'isError', 'error', 'failed']) {
-    if (typeof response[field] === 'boolean') return response[field]
-  }
-
-  return false
-}
-
 const main = async () => {
   const debug = process.argv.includes('--debug')
 
@@ -78,7 +61,7 @@ const main = async () => {
 
   if (debug) {
     console.error(JSON.stringify({ event: payload.hook_event_name, tool_response: payload.tool_response }, null, 2))
-    console.error(`didFail() => ${didFail(payload)}`)
+    console.error(`commandFailed() => ${commandFailed(payload)}`)
     process.exit(0)
   }
 
@@ -99,7 +82,7 @@ const main = async () => {
   const scope = `${payload.session_id ?? 'unknown'}:${payload.agent_id ?? 'main'}`
   const key = `${scope}:${createHash('sha1').update(command.trim()).digest('hex').slice(0, 12)}`
 
-  if (!didFail(payload)) {
+  if (!commandFailed(payload)) {
     if (state.entries[key]) delete state.entries[key]
 
     writeState(state)

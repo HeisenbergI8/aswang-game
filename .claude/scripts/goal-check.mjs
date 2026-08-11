@@ -40,6 +40,11 @@ import { join } from 'node:path'
 //
 // `execFileSync(file, args)` invokes no shell, so `$()`, backticks, `;` and `|` are inert literal
 // characters in an argv element. Nothing has to recognise an attack, so nothing can fail to.
+// Advisory only — it never blocks DONE. A different number from verify-plan's STRICT_MIN_REAL (which
+// gates the loop) and next-phase's LOW_CONFIDENCE_RATIO (which is per phase), because this one asks a
+// third question: how much is "15 of 16 steps passed" actually worth in a completion report?
+const WEAK_EVIDENCE_RATIO = 1 / 3
+
 const passes = (file, args) => {
   try {
     execFileSync(file, args, { stdio: 'pipe', encoding: 'utf8' })
@@ -193,7 +198,7 @@ if (process.argv[1]?.endsWith('goal-check.mjs')) {
   // steps that HAVE a check, not against every step: a step honestly marked unverifiable is not a
   // weak check.
   const checked = planTotal - (summary ? Number(summary[3]) : 0)
-  const weak = checked > 0 && discriminating <= checked / 3
+  const weak = checked > 0 && discriminating <= checked * WEAK_EVIDENCE_RATIO
 
   if (asJson) {
     console.log(

@@ -12,6 +12,8 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
+import { commandFailed } from './lib/hook-payload.mjs'
+
 const LEDGER = '.claude/.run-ledger.json'
 const MAX_TURNS_KEPT = 20
 
@@ -42,25 +44,9 @@ const readStdin = async () => {
   return Buffer.concat(chunks).toString('utf8')
 }
 
-// Positive evidence of failure only — same discipline as the loop breaker. When the payload shape is
-// unrecognised, treat the run as passing rather than inventing a failure that blocks a turn.
-const failed = payload => {
-  if (payload.hook_event_name === 'PostToolUseFailure') return true
-
-  const response = payload.tool_response
-
-  if (!response || typeof response !== 'object') return false
-
-  for (const field of ['exit_code', 'exitCode', 'code', 'status', 'returnCode']) {
-    if (typeof response[field] === 'number') return response[field] !== 0
-  }
-
-  for (const field of ['is_error', 'isError', 'error', 'failed']) {
-    if (typeof response[field] === 'boolean') return response[field]
-  }
-
-  return false
-}
+// Failure detection is `lib/hook-payload.mjs`'s `commandFailed` — the identical rule the loop breaker
+// escalates on. It used to be copied here; two copies of one delicate rule is how a ledger and a
+// breaker come to disagree about what happened, with nothing to notice.
 
 // Keeps the last MAX_TURNS_KEPT turns. Called only from the main thread — see the note at the append
 // site.
@@ -180,7 +166,7 @@ const main = async () => {
       // `cmd` is here because `lessons.mjs nudge` keys its failed-then-recovered detection on the
       // command string. Omitting it makes every run hash to '' and count as failed, and the nudge can
       // then never fire — a green test over a dead mechanism.
-      events.push({ turn, run: match.kind, ok: !failed(payload), cmd: command.trim().slice(0, 80) })
+      events.push({ turn, run: match.kind, ok: !commandFailed(payload), cmd: command.trim().slice(0, 80) })
     }
   }
 

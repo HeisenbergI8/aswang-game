@@ -7,13 +7,12 @@
 //
 //   .claude/.run/current            pointer: { runId, sessionId, lastBeatAt }
 //   .claude/.run/<id>/state.json    the run record
-//   .claude/.run/<id>/attempts.jsonl what was tried, append-only
 //
 // Nothing here blocks anything. It is read and written by hooks that decide.
 
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 export const RUN_ROOT = '.claude/.run'
@@ -54,7 +53,6 @@ const headSha = () => {
 }
 
 export const statePath = runId => join(RUN_ROOT, runId, 'state.json')
-export const attemptsPath = runId => join(RUN_ROOT, runId, 'attempts.jsonl')
 
 // ── Pointer ────────────────────────────────────────────────────────────────────
 
@@ -115,13 +113,11 @@ export const init = ({ objective, milestone, planPath, sessionId, budget = {} })
     phaseIteration: 0,
     redIterations: 0,
     planlessIterations: 0,
-    spawns: 0,
     phaseCursor: null,
-    preflightFailures: 0,
 
     startedAt: new Date().toISOString(),
     lastBeatAt: new Date().toISOString(),
-    budget: { iterations: 8, runMs: 4 * 60 * 60 * 1000, iterationMs: 35 * 60 * 1000, spawns: 14, ...budget },
+    budget: { iterations: 8, runMs: 4 * 60 * 60 * 1000, iterationMs: 35 * 60 * 1000, ...budget },
 
     paused: false,
     halted: false,
@@ -169,50 +165,16 @@ export const halt = (runId, reason, report = '') => {
   return state
 }
 
-// ── Attempts ───────────────────────────────────────────────────────────────────
+// ── ATTEMPTS LIVE IN verify-gate.mjs, NOT HERE ─────────────────────────────────
 //
-// The single highest-value file here. `debug-ladder` asks the MODEL to write this by hand; writing
-// it mechanically is the whole point of moving the counter outside the model. An agent that can read
-// its own failed hypotheses stops producing variations of them.
-
-export const recordAttempt = (runId, entry) => {
-  try {
-    mkdirSync(join(RUN_ROOT, runId), { recursive: true })
-    appendFileSync(attemptsPath(runId), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`)
-  } catch {
-    /* evidence, not a dependency */
-  }
-}
-
-export const recentAttempts = (runId, count = 3) => {
-  try {
-    return readFileSync(attemptsPath(runId), 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map(line => {
-        try {
-          return JSON.parse(line)
-        } catch {
-          return null
-        }
-      })
-      .filter(Boolean)
-      .slice(-count)
-  } catch {
-    return []
-  }
-}
-
-// A `hypothesis` field exists so an attempt records WHY it was made, not only what it touched. Two
-// attempts that changed the same files for different reasons are different attempts.
-export const describeAttempts = runId =>
-  recentAttempts(runId)
-    .map(
-      (attempt, index) =>
-        `  ${index + 1}. phase ${attempt.phase ?? '?'} — ${attempt.hypothesis ?? 'no hypothesis recorded'}` +
-        `\n     touched: ${(attempt.filesTouched ?? []).join(', ') || '(nothing)'}`
-    )
-    .join('\n')
+// This file used to carry recordAttempt / recentAttempts / describeAttempts over
+// `.claude/.run/<runId>/attempts.jsonl`. It was a complete, plausible implementation with exactly one
+// problem: nothing ever called the writer. `task-driver` read it on every drive and every halt, and
+// got an empty string every time — which is why the only halt report this repo has produced says
+// `## Attempts` / `(none recorded)`.
+//
+// `verify-gate.mjs` was independently keeping the same ledger, keyed `session:agent`, and writing it
+// for real. That one won. The driver imports `describeAttempts` from there.
 
 // ── CLI ────────────────────────────────────────────────────────────────────────
 

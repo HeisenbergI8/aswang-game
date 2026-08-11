@@ -32,6 +32,15 @@
 // A test file outside every gate is documentation, not a test. This list and `npm run check:guards`
 // are the only two things that execute them, so a suite added without a line here never runs — and it
 // will be reported as green from memory, which is worse than not having written it.
+//
+// ── AND THE ALLOW HALF OF EVERY SUITE IS THE HALF THAT MATTERS ─────────────────
+//
+// A guard that only proves it can REFUSE has proven the cheap half. The expensive failure is refusing
+// correct work until somebody switches the guard off — and then it protects nothing at all. So each
+// suite must pin both directions, and the allow cases should be the shapes a naive version genuinely
+// did refuse: `guards.test.mjs` carries 31 allows against 26 blocks, and several of the allows are
+// exactly those. `verify-gate`'s `canRepair` cases are written the same way — five agent types that
+// must still get the full repair ladder, against the four that provably cannot edit `src/`.
 
 import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync, statSync, writeFileSync, rmSync, existsSync } from 'node:fs'
@@ -55,12 +64,14 @@ export const SUITES = [
   ['build-trigger', ['.claude/scripts/build-trigger.mjs', '--self-test']],
   ['verify-plan', ['.claude/scripts/verify-plan.mjs', '--self-test']],
   ['goal-check', ['.claude/scripts/goal-check.mjs', '--self-test']],
+  ['check-debug', ['.claude/scripts/check-debug.mjs', '--self-test']],
   // Pins that a human-only step blocks the LOOP only once the cursor reaches it — the fix for a plan
   // whose last phase needed a person halting the whole run at iteration 0.
   ['next-phase', ['.claude/scripts/next-phase.mjs', '--self-test']],
   ['preflight', ['.claude/scripts/preflight.mjs', '--self-test']],
 
   // The accountability layer.
+  ['hook-payload', ['.claude/scripts/lib/hook-payload.mjs', '--self-test']],
   ['verify-gate', ['.claude/scripts/verify-gate.mjs', '--self-test']],
   ['claim-check', ['.claude/scripts/claim-check.mjs', '--self-test']],
   ['review-gate', ['.claude/scripts/review-gate.mjs', '--self-test']],

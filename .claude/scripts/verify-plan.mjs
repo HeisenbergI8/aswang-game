@@ -143,6 +143,21 @@ export const parseSteps = markdown => {
 // text is typed. It proves authorship, not behaviour. Reported, never enforced: some steps genuinely
 // cannot be proven by a command — a deletion, a wording change, a lighting tweak that lives in Studio
 // — and blocking those pushes an architect to write a fake check instead of an honest `unverifiable`.
+// ── THREE THRESHOLDS, THREE QUESTIONS ──────────────────────────────────────────
+//
+// The same "are these checks weak?" idea is measured in three places with three different numbers, and
+// that is deliberate rather than drift — each answers a different question, so they are named here and
+// cross-referenced rather than merged:
+//
+//   STRICT_MIN_REAL   (this file)      may a LOOP be driven by this plan at all?      — hard gate
+//   WEAK_WARN_RATIO   (this file)      is a green run worth mentioning a caveat for?  — advisory
+//   next-phase.mjs    LOW_CONFIDENCE   is THIS PHASE proven enough to advance past?   — per phase
+//   goal-check.mjs    WEAK_EVIDENCE    is "steps passed" weak evidence of DONE?       — advisory
+//
+// Merging them to one constant would change behaviour in all four places at once.
+const STRICT_MIN_REAL = 0.5
+const WEAK_WARN_RATIO = 0.66
+
 export const shape = command => {
   if (!command) return 'none'
   if (/^\s*test\s+-[fde]\s/.test(command)) return 'exists'
@@ -405,7 +420,7 @@ const main = () => {
     return 2
   }
 
-  if (strict && checkable > 0 && tally.real < checkable / 2) {
+  if (strict && checkable > 0 && tally.real < checkable * STRICT_MIN_REAL) {
     console.error(
       `STRICT  ${tally.real} of ${checkable} checks can actually fail — under half. A loop driven by this ` +
         `plan would be driven by checks that pass when nothing was done.`
@@ -414,7 +429,7 @@ const main = () => {
     return 2
   }
 
-  if (checkable > 0 && weak > checkable * 0.66) {
+  if (checkable > 0 && weak > checkable * WEAK_WARN_RATIO) {
     console.log(
       `WARN  only ${tally.real} of ${tally.real + weak} checks can actually fail — a green run here mostly ` +
         `proves the text was typed. Prefer a command that runs something.`

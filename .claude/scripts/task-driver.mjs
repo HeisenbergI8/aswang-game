@@ -21,7 +21,10 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { beat } from './hook-heartbeat.mjs'
-import { RUN_ROOT, activeRun, describeAttempts, halt, hashPlan, update } from './run-state.mjs'
+import { RUN_ROOT, activeRun, halt, hashPlan, update } from './run-state.mjs'
+// The attempts ledger is verify-gate's, because verify-gate is what writes it. run-state carried a
+// second, never-written copy and this file read that one — so "Already tried" was empty on every run.
+import { describeAttempts } from './verify-gate.mjs'
 
 // ── Caps ───────────────────────────────────────────────────────────────────────
 //
@@ -29,17 +32,23 @@ import { RUN_ROOT, activeRun, describeAttempts, halt, hashPlan, update } from '.
 // | Iterations           | 8/session  | below where compaction bites                            |
 // | Wall clock/iteration | 35 min     | an agent driving Studio through MCP is slow; headroom    |
 // | Wall clock/run       | 4 hours    | architect + phases + verification + fixes               |
-// | Subagent spawns      | 14/run     | architect 1 + playtester/auditor at ~6 verify points     |
 // | Tokens               | none       | UNMEASURED — see below                                  |
 //
 // THE TOKEN CAP IS DELIBERATELY ABSENT. A cap chosen from a guess halts mid-milestone every time.
 // `hook-heartbeat.mjs` records which keys each payload carries; add a token cap only once `usage` is
 // observed to be among them.
+//
+// A `spawns: 14` cap and a `preflightFailures >= 2` halt used to sit here too. Both were UNREACHABLE:
+// nothing in the harness ever incremented either field, so the two conditions could not fire and the
+// two budgets protected nothing while reading — in the docs and in this table — as though they did.
+// They are removed rather than wired, because wiring them means new machinery (a spawn event for every
+// agent type in record-activity; a third `verify:fast` per turn for preflight) to enforce guessed
+// numbers the iteration and wall-clock caps already bound. `preflight.mjs` itself is untouched and
+// still runs as the manual entry check that `build/SKILL.md` and the playtester actually use.
 export const DEFAULT_BUDGET = {
   iterations: 8,
   runMs: 4 * 60 * 60 * 1000,
-  iterationMs: 35 * 60 * 1000,
-  spawns: 14
+  iterationMs: 35 * 60 * 1000
 }
 
 // Three, because the repair loop already gets three attempts at one failure before halting — a phase
@@ -163,8 +172,6 @@ export const decide = (state, { payload = {}, signals = null, treeGreen = true, 
     haltIf(state.iteration >= budget.iterations, `iteration budget spent (${budget.iterations}) — resume in a fresh session`),
     haltIf(Number.isFinite(startedAt) && now - startedAt > budget.runMs, 'run wall-clock budget spent'),
     haltIf(Number.isFinite(beatAt) && now - beatAt > budget.iterationMs, 'iteration wall-clock budget spent'),
-    haltIf(state.spawns >= budget.spawns, `subagent spawn budget spent (${budget.spawns})`),
-    haltIf(state.preflightFailures >= 2, `preflight failed twice: ${state.preflightReason ?? 'entry conditions not met'}`),
     haltIf(signals?.verdict?.blockedBecause === 'plan-changed', 'plan changed mid-run'),
     haltIf(signals?.unfalsifiable === true, 'plan is unfalsifiable — its checks cannot fail'),
     haltIf(state.phaseIteration >= PHASE_STUCK_AT, `phase stuck: ${PHASE_STUCK_AT} iterations with no new step passing`),
@@ -205,7 +212,7 @@ export const decide = (state, { payload = {}, signals = null, treeGreen = true, 
 // a dirty tree, which preflight's clean-tree check then refuses to start on — so ONE BAD HALT WOULD
 // BLOCK EVERY FUTURE RUN until someone cleaned up by hand. The report therefore carries a diff summary
 // against `baseSha` and two explicit paths, resume or abandon, with the exact commands for each.
-export const haltReport = (state, reason) => {
+export const haltReport = (state, reason, sessionId = null) => {
   const base = state.baseSha ?? null
   const diff = base ? run('git', ['diff', '--stat', `${base}..HEAD`]) : { ok: false, out: '' }
   const working = run('git', ['status', '--porcelain', '--untracked-files=no'])
@@ -216,7 +223,7 @@ export const haltReport = (state, reason) => {
     `**Run:** \`${state.runId}\``,
     `**Objective:** ${state.objective ?? '(none recorded)'}`,
     `**Started:** ${state.startedAt ?? '?'}`,
-    `**Iterations:** ${state.iteration ?? 0} · **spawns:** ${state.spawns ?? 0}`,
+    `**Iterations:** ${state.iteration ?? 0}`,
     `**Base commit:** \`${base ?? '(not recorded)'}\``,
     '',
     '## What changed',
@@ -256,7 +263,7 @@ export const haltReport = (state, reason) => {
     '',
     '## Attempts',
     '',
-    describeAttempts(state.runId) || '  (none recorded)',
+    describeAttempts(sessionId) || '  (none recorded)',
     ''
   ].join('\n')
 }
@@ -266,9 +273,9 @@ export const haltReport = (state, reason) => {
 // Not a complaint. The reason IS the next action, plus what has already been tried, so the model can
 // read its own failed hypotheses instead of reproducing them. That is the difference between the loop
 // as a brake and the loop as a loop.
-const driveReason = (state, signals) => {
+const driveReason = (state, signals, sessionId = null) => {
   const next = signals?.verdict?.next
-  const attempts = describeAttempts(state.runId)
+  const attempts = describeAttempts(sessionId)
 
   return [
     `TASK LOOP — iteration ${(state.iteration ?? 0) + 1} of ${(state.budget ?? DEFAULT_BUDGET).iterations}.`,
@@ -371,7 +378,7 @@ const main = async () => {
   const verdict = decide(state, { payload, signals, treeGreen })
 
   if (verdict.action === 'halt') {
-    const report = haltReport(state, verdict.why)
+    const report = haltReport(state, verdict.why, payload.session_id)
 
     halt(state.runId, verdict.why, report)
 
@@ -407,7 +414,7 @@ const main = async () => {
     phaseCursor: signals?.verdict?.next ?? null
   })
 
-  block(driveReason(state, signals))
+  block(driveReason(state, signals, payload.session_id))
 
   return 0
 }

@@ -10,7 +10,7 @@
 // ── THE FOUR CASES THAT JUSTIFY THE WHOLE SUITE ────────────────────────────────
 //
 // A driver written as ONE ordered list with `tree red -> release` above the halt conditions silently
-// abandons runs. A run that is red AND stuck — or red and plan-drifted, red and preflight-failed, red
+// abandons runs. A run that is red AND stuck — or red and plan-drifted, red and needing a human, red
 // and out of budget — releases every turn forever: the repair loop eventually steps aside, the tree
 // stays red, the driver keeps releasing, the pointer stays active, and NO HALT REPORT IS EVER WRITTEN.
 //
@@ -34,8 +34,6 @@ const healthy = () => ({
   phaseIteration: 0,
   redIterations: 0,
   planlessIterations: 0,
-  spawns: 2,
-  preflightFailures: 0,
   startedAt: new Date(NOW - 10 * 60 * 1000).toISOString(),
   lastBeatAt: new Date(NOW - 60 * 1000).toISOString(),
   budget: DEFAULT_BUDGET,
@@ -66,7 +64,6 @@ check('an already-active stop hook releases', action(healthy(), { payload: { sto
 
 // ── Halts, each on its own ─────────────────────────────────────────────────────
 check('the iteration budget halts', action({ ...healthy(), iteration: DEFAULT_BUDGET.iterations }), 'halt')
-check('the spawn budget halts', action({ ...healthy(), spawns: DEFAULT_BUDGET.spawns }), 'halt')
 check(
   'the run wall clock halts',
   action({ ...healthy(), startedAt: new Date(NOW - DEFAULT_BUDGET.runMs - 1000).toISOString() }),
@@ -77,7 +74,6 @@ check(
   action({ ...healthy(), lastBeatAt: new Date(NOW - DEFAULT_BUDGET.iterationMs - 1000).toISOString() }),
   'halt'
 )
-check('two preflight failures halt', action({ ...healthy(), preflightFailures: 2 }), 'halt')
 check('a stuck phase halts', action({ ...healthy(), phaseIteration: PHASE_STUCK_AT }), 'halt')
 check(
   'plan drift halts',
@@ -124,7 +120,17 @@ check(
   action(healthy(), { treeGreen: false, signals: signals({ verdict: { next: null, blockedBecause: 'plan-changed' } }) }),
   'halt'
 )
-check('red AND preflight-failed halts', action({ ...healthy(), preflightFailures: 2 }, { treeGreen: false }), 'halt')
+// Was `red AND preflight-failed`. `preflightFailures` was never written by anything, so that case
+// pinned the ordering against a condition that could not occur; this one is the shape the C02-C04 run
+// actually hit — a phase needing a human while the tree was red.
+check(
+  'red AND needing a human halts',
+  action(healthy(), {
+    treeGreen: false,
+    signals: signals({ verdict: { next: null, blockedBecause: 'needs-human', needsHuman: 'phase 7' } })
+  }),
+  'halt'
+)
 check('red AND out of budget halts', action({ ...healthy(), iteration: 99 }, { treeGreen: false }), 'halt')
 
 // ── Releases ───────────────────────────────────────────────────────────────────

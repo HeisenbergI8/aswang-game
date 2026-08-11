@@ -55,21 +55,16 @@ export const parseBuild = prompt => {
   }
 }
 
-// ── The tier is not optional decoration ────────────────────────────────────────
+// ── THE TIER IS NOT GUESSED HERE, DELIBERATELY ─────────────────────────────────
 //
-// Spawning the architect unconditionally over-plans a one-file change, which is exactly what
-// CLAUDE.md's routing table exists to prevent. So: guess from what is observable, and REQUIRE an
-// explicit `--tier` when the guess is Large — the expensive tier is the one a person should confirm.
+// A `suggestTier({ files, milestone })` heuristic lived here, exported and pinned by five self-test
+// cases — and was never called. It read as a working feature in the tests while `main()` took the tier
+// from `--tier` or left it null.
 //
-// A milestone id (M0..M13) always means Large: the spec's §12 milestones each end in something
-// playable, which is a multi-phase deliverable by construction.
-export const suggestTier = ({ files = 0, milestone = null } = {}) => {
-  if (milestone && /^M\d+$/i.test(milestone)) return 'large'
-  if (files > 6) return 'large'
-  if (files > 2) return 'medium'
-
-  return 'small'
-}
+// It is not restored, because the omission was right: sizing is CLAUDE.md's routing table applied by
+// the model, announced in one line so the user can correct it in three words. A hook guessing from a
+// file count would produce a number nobody stated and nobody could challenge, which is the failure
+// mode the announcement rule exists to prevent. When no `--tier` is given, `main()` says so and asks.
 
 const emit = context => {
   // additionalContext is how a UserPromptSubmit hook speaks to the model without blocking the turn.
@@ -118,7 +113,7 @@ const main = async () => {
         `  run: ${existing.runId}\n` +
         `  objective: ${existing.objective}\n` +
         `  plan: ${existing.planPath ?? '(none)'}\n` +
-        `  iteration ${existing.iteration}/${existing.budget?.iterations ?? '?'} · spawns ${existing.spawns}\n` +
+        `  iteration ${existing.iteration}/${existing.budget?.iterations ?? '?'}\n` +
         `  paused: ${existing.paused}\n\n` +
         `This run claims EXCLUSIVE OWNERSHIP of the working tree. Do not start editing while it is live.`
     )
@@ -222,11 +217,7 @@ if (process.argv[1]?.endsWith('build-trigger.mjs')) {
     check('--status is recognised', parseBuild('/build --status').status, true)
     check('--status has no milestone', parseBuild('/build --status').milestone, null)
     check('tier is read', parseBuild('/build M3 --tier large').tier, 'large')
-    check('a milestone id always suggests large', suggestTier({ milestone: 'M3' }), 'large')
-    check('a lowercase milestone id still does', suggestTier({ milestone: 'm11' }), 'large')
-    check('one file suggests small', suggestTier({ files: 1 }), 'small')
-    check('four files suggest medium', suggestTier({ files: 4 }), 'medium')
-    check('a named system with many files suggests large', suggestTier({ milestone: 'salt', files: 9 }), 'large')
+    check('no --tier leaves it null, to be asked for rather than guessed', parseBuild('/build M3').tier, null)
 
     console.log(failures ? `  FAIL  build-trigger: ${ran - failures}/${ran}` : `  PASS  build-trigger: ${ran}/${ran} cases`)
     process.exit(failures ? 1 : 0)

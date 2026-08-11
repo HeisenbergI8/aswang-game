@@ -35,6 +35,26 @@ const RUN_DIR = '.claude/.run'
 // not blocks in a row.
 const MAX_SAME_FAILURE = 3
 
+// ── A READ-ONLY REVIEWER CANNOT REPAIR THE TREE ────────────────────────────────
+//
+// The three auditors have no Edit or Write tool at all (`tools:` in their frontmatter), and
+// `guard-agent-write.mjs` scopes the playtester's writes to `.claude/plans/` and `tests/`. The ordinary
+// reason below tells them to "fix the failure above" — which none of them can do. The fingerprint
+// therefore cannot change, so the ladder reads it as thrashing and escalates to HALT: three full agent
+// turns, each re-reading a six-figure context, spent proving the same impossibility.
+//
+// The signal still matters. A reviewer whose report does not mention the red tree is describing a state
+// the user does not have. So this blocks ONCE, with an instruction that can actually be carried out,
+// and never escalates.
+//
+// The SubagentStop payload carries `agent_type` — confirmed in `.claude/.hook-heartbeat.json`, which
+// records the key set of every payload each hook has seen. Anything else finishing (architect,
+// general-purpose, Explore) keeps the full ladder: those hold Write and a red tree may well be theirs.
+export const READ_ONLY_REVIEWERS = new Set(['playtester', 'auditor', 'change-auditor', 'exploit-auditor'])
+
+export const canRepair = ({ hook_event_name: event, agent_type: agent } = {}) =>
+  event !== 'SubagentStop' || !READ_ONLY_REVIEWERS.has(agent)
+
 const readStdin = async () => {
   const chunks = []
 
@@ -106,7 +126,14 @@ const recentEdits = () => {
   }
 }
 
-const attemptsPath = key => `${RUN_DIR}/${key.replace(/[^\w.-]/g, '_')}.jsonl`
+// Both files are keyed the same way. The halt report used to be a single `${RUN_DIR}/halt-report.md`,
+// which every later halt overwrote — and `run-state.halt()` writes its own at
+// `${RUN_DIR}/<runId>/halt-report.md`, so two mechanisms wrote "the halt report" to two places and one
+// of them clobbered its own history. Keying it means a halt from the main thread and a halt from a
+// subagent no longer overwrite each other either.
+const scopeKey = key => key.replace(/[^\w.-]/g, '_')
+const attemptsPath = key => `${RUN_DIR}/${scopeKey(key)}.jsonl`
+const haltReportPath = key => `${RUN_DIR}/${scopeKey(key)}-halt-report.md`
 
 const recordAttempt = (key, entry) => {
   try {
@@ -137,6 +164,30 @@ const clearAttempts = key => {
   }
 }
 
+// ── THIS IS THE ONLY ATTEMPTS LEDGER ───────────────────────────────────────────
+//
+// `run-state.mjs` carried a second implementation — recordAttempt / recentAttempts / describeAttempts
+// over `.claude/.run/<runId>/attempts.jsonl`. Nothing ever called its WRITER, so `task-driver`'s
+// "Already tried in this run — do not repeat these" line and the "## Attempts" section of every halt
+// report were empty on every run this repo has done. The C02–C04 halt report says it verbatim:
+// `(none recorded)`, and `build/SKILL.md` tells the model to read that list.
+//
+// The ledger below is the one that is genuinely written, so it is the one that survives, and the
+// driver now reads it. `agentId` defaults to `main` because that is where a /build run does its work.
+export const attemptKey = (sessionId, agentId = 'main') => `${sessionId ?? 'unknown'}:${agentId ?? 'main'}`
+
+export const describeAttempts = (sessionId, agentId = 'main') =>
+  priorAttempts(attemptKey(sessionId, agentId))
+    .map((attempt, index) => {
+      const files = (attempt.files ?? []).map(file => file.split('/').pop()).join(', ')
+
+      return (
+        `  ${index + 1}. ${attempt.at ?? '?'} — touched ${files || '(nothing recorded)'}` +
+        (attempt.failing?.length ? `\n     still failing: ${attempt.failing[0]}` : '')
+      )
+    })
+    .join('\n')
+
 const block = reason => {
   process.stdout.write(`${JSON.stringify({ decision: 'block', reason })}\n`)
   process.exit(0)
@@ -162,7 +213,7 @@ const main = async () => {
   if (payload.stop_hook_active === true) process.exit(0)
   if (!existsSync('package.json')) process.exit(0)
 
-  const key = `${payload.session_id ?? 'unknown'}:${payload.agent_id ?? 'main'}`
+  const key = attemptKey(payload.session_id, payload.agent_id)
   const state = readState()
   const previous = typeof state[key] === 'number' ? { count: state[key] } : (state[key] ?? {})
 
@@ -186,6 +237,24 @@ const main = async () => {
     // Already halted on this run: say nothing further. The model was told to stop and report; blocking
     // again would be the trap this gate exists to avoid.
     if (previous.halted) process.exit(0)
+
+    // A read-only reviewer gets ONE truthful block instead of the ladder. See canRepair above.
+    if (!canRepair(payload)) {
+      if (previous.notified) process.exit(0)
+
+      state[key] = { hash, notified: true }
+      writeState(state)
+
+      block(
+        `\`npm run verify:fast\` is red.\n\n${print}\n\n` +
+          `THIS IS NOT YOURS TO FIX. You have no Edit or Write tool for \`src/\`, so do not attempt a ` +
+          `repair and do not route around it with Bash — a reviewer that edits what it reviews makes its ` +
+          `own report worthless.\n\n` +
+          `Put it in your report instead: the failing output above, and whether it is caused by the ` +
+          `change you are reviewing or by debug values the coordinator set for this run. Then finish. ` +
+          `This gate will not ask you again.`
+      )
+    }
 
     const sameFailure = previous.hash === hash
     const count = sameFailure ? (previous.count ?? 0) + 1 : 1
@@ -223,7 +292,7 @@ const main = async () => {
 
       try {
         mkdirSync(RUN_DIR, { recursive: true })
-        writeFileSync(`${RUN_DIR}/halt-report.md`, `${report}\n`)
+        writeFileSync(haltReportPath(key), `${report}\n`)
       } catch {
         /* the message below still carries the essentials */
       }
@@ -232,7 +301,7 @@ const main = async () => {
         `HALT — the same failure has survived ${count} attempts and the loop is stopping.\n\n` +
           `Signature \`${hash}\`:\n${lines.slice(0, 6).join('\n')}\n\n` +
           `DO NOT attempt another fix. Tell the user plainly: the tree is red, what is failing, and what ` +
-          `you tried. The full record is at \`${RUN_DIR}/halt-report.md\`.`
+          `you tried. The full record is at \`${haltReportPath(key)}\`.`
       )
     }
 
@@ -302,6 +371,29 @@ if (process.argv[1]?.endsWith('verify-gate.mjs')) {
     )
 
     check('three different failures produce three fingerprints', new Set(three).size, 3)
+
+    // ── WHO THE LADDER APPLIES TO ─────────────────────────────────────────────
+    //
+    // The ALLOW half is the important half here: narrowing this by one agent too many would silently
+    // exempt something that CAN fix a red tree, and the gate would stop working for the case it exists
+    // for. Every writer must still get the full ladder.
+    check('the main thread gets the ladder', canRepair({ hook_event_name: 'Stop' }), true)
+    check('an architect subagent gets it too — it holds Write', canRepair({ hook_event_name: 'SubagentStop', agent_type: 'architect' }), true)
+    check('a general-purpose subagent gets it', canRepair({ hook_event_name: 'SubagentStop', agent_type: 'general-purpose' }), true)
+    check('an unknown agent type gets it — fail toward the ladder', canRepair({ hook_event_name: 'SubagentStop', agent_type: 'something-new' }), true)
+    check('a missing agent_type gets it', canRepair({ hook_event_name: 'SubagentStop' }), true)
+    check('an empty payload gets it', canRepair(), true)
+
+    // The BLOCK half: the four agents that provably cannot edit `src/`.
+    check('the exploit-auditor is exempt', canRepair({ hook_event_name: 'SubagentStop', agent_type: 'exploit-auditor' }), false)
+    check('the auditor is exempt', canRepair({ hook_event_name: 'SubagentStop', agent_type: 'auditor' }), false)
+    check('the change-auditor is exempt', canRepair({ hook_event_name: 'SubagentStop', agent_type: 'change-auditor' }), false)
+    check('the playtester is exempt', canRepair({ hook_event_name: 'SubagentStop', agent_type: 'playtester' }), false)
+
+    // A reviewer name arriving on the MAIN thread's Stop must not exempt it. `agent_type` is absent
+    // there, but a payload that carried it anyway would otherwise disable the gate for the one thread
+    // that can actually repair anything.
+    check('a reviewer name on a Stop payload does not exempt it', canRepair({ hook_event_name: 'Stop', agent_type: 'playtester' }), true)
 
     console.log(failures ? `  FAIL  verify-gate: ${ran - failures}/${ran}` : `  PASS  verify-gate: ${ran}/${ran} cases`)
     process.exit(failures ? 1 : 0)

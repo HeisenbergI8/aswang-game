@@ -15,10 +15,14 @@
 // looking at code from an hour ago. That is not a subtle failure, but it is an INVISIBLE one, because
 // everything on the filesystem side looks exactly right.
 //
-// TWO CONSECUTIVE FAILURES, THEN HALT. One dropped connection is not evidence Studio is down, and
-// killing a four-hour run over it is its own failure. The COUNTING lives in the run record
-// (`preflightFailures`), not here — this script answers "is it healthy right now", a question with no
-// memory.
+// THIS IS AN ENTRY CHECK, RUN BY HAND. `build/SKILL.md` runs it before the first phase and the
+// playtester runs it before trusting anything it sees in Studio. It answers "is it healthy right now",
+// a question with no memory.
+//
+// It is deliberately NOT a halt condition. The driver once carried a `preflightFailures >= 2` halt, but
+// nothing ever wrote that field, so the halt could not fire — a guard that reads as protection and is
+// not. Rather than add a third `verify:fast` per turn to feed it, the halt was removed and this stayed
+// exactly what it already was: the check you run before starting.
 
 import { execFileSync } from 'node:child_process'
 

@@ -97,9 +97,12 @@ ledger exists to prevent.
 
 ## What stops it
 
-Halts are unconditional and evaluated before anything else — budget, preflight failing twice, plan drift,
+Halts are unconditional and evaluated before anything else — iteration and wall-clock budget, plan drift,
 a plan whose checks cannot fail, a phase stuck for three iterations, a tree red for four, a phase needing
 a human, or `goal-check` reporting done.
+
+Preflight is an **entry** check you run yourself, above — it is not a halt condition. It used to be
+listed as one, but nothing ever recorded its result, so that halt could not fire.
 
 Every halt writes `.claude/.run/<id>/halt-report.md` and blocks once. **When that happens, tell the
 user** — what stopped it, what changed, and which of the two paths in the report you recommend. The run

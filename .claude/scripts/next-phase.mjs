@@ -213,6 +213,10 @@ const titles = phaseTitles()
 // PER PHASE, NOT PER PLAN. A plan-wide ratio is wrong in both directions, and the second is the one
 // that ships: a strong plan carrying one all-grep phase averages out above the threshold, and the
 // cursor walks straight through the phase nobody checked.
+// Per PHASE, not per plan — see the note above. Deliberately a different number from verify-plan's
+// STRICT_MIN_REAL, which gates the whole loop, and from goal-check's WEAK_EVIDENCE, which is advisory.
+const LOW_CONFIDENCE_RATIO = 0.66
+
 const checkable = quality.discriminating + quality.weak
 const isWeak = step => step.shape !== 'real'
 
@@ -240,7 +244,7 @@ const phases = [...byPhase.entries()]
     const executed = list.filter(step => step.result === 'PASS' || step.result === 'FAIL')
     const weak = executed.filter(isWeak).length
     const strong = executed.length - weak
-    const lowConfidence = executed.length > 0 && weak > executed.length * 0.66
+    const lowConfidence = executed.length > 0 && weak > executed.length * LOW_CONFIDENCE_RATIO
 
     let status = 'pending'
 
