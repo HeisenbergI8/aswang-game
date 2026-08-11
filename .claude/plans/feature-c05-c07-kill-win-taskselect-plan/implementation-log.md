@@ -479,3 +479,81 @@ would have caught all three failed attempts.
 `check-secrecy` self-tests: 29 → 33. The clock guard now passes 22 of 23 degenerate cells and the audit
 could not break it on NaN, ±inf, `inf - inf`, or a backwards clock — the first version of this guard
 that survived a full grid.
+
+---
+
+## HALT report — every fix attempted on the two looped files, and the shape question
+
+`guard-fix-rounds.mjs` halted on `RoundService.luau` (5 rounds) and `pure/KillValidation.luau` (4).
+This is the report it demands, and the reason neither file is edited again until it is answered.
+
+### 1. KillValidation's cooldown guard — five attempts, and the shape is RIGHT
+
+| # | What was written | What it was wrong about |
+| --- | --- | --- |
+| 1 | `Cooldown ~= Cooldown` | Covered one input of three. `LastRevertedAt = NaN` and `Now = NaN` both returned OK |
+| 2 | each operand tested individually | `inf - inf` is NaN even though NEITHER operand is. Missed entirely |
+| 3 | `elapsed ~= elapsed` on the result | Subsumed every NaN — but a non-NaN INFINITE result still passed: `Now = inf, Last = 99` gives `elapsed = inf`, and `inf < 30` is false |
+| 4 | `elapsed >= 0 and elapsed < math.huge`, same for `Cooldown` | 22 of 23 degenerate cells. `Cooldown = 0` passed, because it was written `>= 0` while the comment claimed positive |
+| 5 | `Cooldown > 0` | Currently believed correct: 23/23 |
+
+**What it measures:** has `Cooldown` elapsed since the last revert. §4.3 step 5 says the cooldown runs
+from the revert, so this is exactly the right quantity, and the right three inputs.
+
+**Verdict: do not redesign.** Every failure was DOMAIN COVERAGE, not shape — five attempts to enumerate
+`{finite±, 0, ±inf, NaN}` across three inputs one bug at a time. The fix was never a different rule, it
+was the grid, and the grid now exists (35 cases). Nothing here changes what the spec means.
+
+### 2. RoundService — five rounds, and they were five DIFFERENT mechanisms
+
+| # | Fix | What it was wrong about |
+| --- | --- | --- |
+| 1 | `watchForDeath` added | Before it, a death that was not a kill never respawned AND stayed ALIVE — 64s and three rounds measured, dealt into later rounds as a corpse |
+| 2 | `MarkKilled` aborts on a dead Aswang | The Aswang could delete a round with the stock reset button; `onPlayerRemoving` already handled the disconnect twin, and round 1 walked past it |
+| 3 | `RespawnCooldown` throttle | Its `return` fired above `Character = nil`, so it STRANDED players permanently — worse than the bug round 1 closed |
+| 4 | throttle rewritten: detach always, defer the load | — believed correct |
+| 5 | deferred load re-arms on failure | One throw left a player ALIVE with no body for the round: unkillable, still counted, attrition win unreachable |
+
+**What it measures / does:** it owns four things at once — the phase, player round-state, player BODIES,
+and the win check. The recurring failure is not one expression. It is that **"does this player have a
+body" and "what is this player's round state" are two state machines with four entry points (kill,
+death, phase change, disconnect) and no single place that reconciles them.** Every defect above was one
+entry point being handled and its twin not.
+
+**Verdict: the shape is wrong, and the fix is the one this repo already knows.** `pure/PlayerBody`
+encodes the RULE (which states may hold a body) but nothing encodes the TRANSITIONS. The missing piece
+is the body-side analogue of `pure/RoundTransitions.luau`: a table over
+`(PlayerState × cause) -> action`, exhaustive over all four states and all four causes — sixteen cells
+somebody can argue with, in a terminal, instead of four scattered call sites.
+
+**Cost:** moderate, and internal. It changes no spec sentence: every behaviour is already specified,
+just not in one place. It is the same move that made `RoundTransitions` and `KillValidation` the two most
+reliable things in the repo.
+
+### 3. The attrition rule — three attempts, all wrong, and this one IS a spec question
+
+| # | Fix | What it was wrong about |
+| --- | --- | --- |
+| 1 | freeze `DealtInSurvivors` at STARTING | `livingSurvivorCount()` is computed LIVE, so a disconnect dropped one side of the comparison and not the other |
+| 2 | decrement it on a non-kill death | Closed reset-then-reset only |
+| 3 | decrement it on disconnect too | **Arithmetically INERT.** `effective = min(Threshold, DealtIn - 1)`; with `Threshold = 2` that term only binds at `DealtIn <= 3`, so above four survivors the denominator does nothing while the numerator falls anyway. Proven by replaying the shipped module: 8p with three alts quitting wins after 2 kills, with and without the fix |
+
+**What it measures:** how many survivors are *currently alive*. **That is the wrong quantity.** §4.8's
+intent is that the Aswang has KILLED most of them, and counting absence cannot tell a kill from a quit,
+a reset, or a fall out of the map. No amount of bookkeeping on the denominator fixes a numerator that is
+measuring the wrong thing — which is why three fixes in a row failed differently.
+
+**The shape that works:** count the kills. An `AswangKills` counter incremented only by `commitKill`,
+winning when `AswangKills >= DealtInSurvivors - Threshold`, clamped for small rosters. Then a quit, a
+reset, a fall and a disconnect all move neither side — which is what two comments in the tree already
+claim, falsely.
+
+**Cost, and why it is not mine to decide:** §4.8 says *"Aswang wins when living survivors ≤ 2"* — a
+statement about PRESENCE. The replacement is a statement about KILLS. They give different outcomes
+whenever a player leaves, so this is not a repair, it is an amendment, and CLAUDE.md's precedence rule
+puts it with the user. It also wants an exhaustive grid over
+`(kills × resets × disconnects × roster)` — the test that would have caught all three failed attempts
+on the first day.
+
+**Until it is answered the exploit is live:** in an 8-player round, three alt accounts quitting as
+ACTIVE begins turns a five-kill win into a two-kill win.
