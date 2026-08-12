@@ -233,8 +233,11 @@ local Config = {
 		-- Set true in Studio to allow solo testing without MinPlayers.
 		SoloTesting = false,
 		VerboseLogging = false,
-		-- Studio only, solo rounds only. Forces the lone player to be the Aswang so C04 is testable;
-		-- a lone player is otherwise ALWAYS a survivor by construction. Pinned false by check:debug.
+		-- Studio only, and only with SoloTesting on, at MinPlayers or fewer. Forces the LOWEST UserId
+		-- to be the Aswang: solo, because a lone player is otherwise ALWAYS a survivor by
+		-- construction; at 2-3 local clients, because the other windows are idle and a survivor draw
+		-- means no transform and no kill ever happens. A real team test is past the ceiling and
+		-- cannot be rigged by it. Pinned false by check:debug — see RoleService for all four locks.
 		ForceAswangWhenSolo = false,
 	},
 }

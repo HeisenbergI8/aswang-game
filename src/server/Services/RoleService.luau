@@ -137,66 +137,99 @@ function RoleService.AssignRoles(candidates: { number }): number?
 		`check:secrecy` to see. Exactly the failure RoleDraw's header calls "the only leak in this game
 		that leaves no trace".
 
-		So there is no id. The override applies to the ONLY candidate there is, which is the whole
-		situation it was built for, and a boolean discloses nothing about who anyone is.
+		So there is no id. The pick is `candidates[1]` — the LOWEST UserId in a list RoundService has
+		already sorted — which is a rule, not a name, and discloses nothing about who anyone is.
 
-		Three STRUCTURAL guards, not process ones:
+		WHY IT IS NO LONGER "EXACTLY ONE CANDIDATE".
+
+		The original gate was `#candidates == 1`, and the situation it could not serve is the one the
+		kill actually needs: a lone developer running two or three Studio clients, where the OTHER
+		windows are idle and will never transform or press anything. Drawing survivor there does not
+		make the round harder, it makes it empty — nothing happens at all, and C05/C06 cannot be
+		reached. Two consecutive survivor draws is the whole of the developer's afternoon.
+
+		So the count guard becomes a CEILING at `Round.MinPlayers`, and the thing it was protecting —
+		a real team test being silently rigged — is protected better than before, by four locks:
 		  1. `RunService:IsStudio()` — unreachable on a published place whatever shipped.
-		  2. Exactly ONE candidate. `SoloTesting` floors the player COUNT at MinPlayers; it does not
-		     mean one player, so without this an eight-person team test would be silently rigged.
-		  3. The flag, pinned false by `check:debug` — which, unlike `tests/config.test.luau`, runs
-		     inside `verify:fast` and is therefore what `guard-commit.mjs` actually consults.
+		  2. `SoloTesting`, which must ALSO be on. Note that flag does not mean "one player" and never
+		     did (it floors the player COUNT at MinPlayers); in this Debug block "solo" has always
+		     meant one DEVELOPER testing alone, which is exactly the case this serves.
+		  3. `#candidates <= Round.MinPlayers`. The M5 gate is SIX humans and the eight-person team
+		     test this was written to protect is well past the ceiling, so neither can reach here.
+		  4. BOTH flags pinned false by `check:debug` — which, unlike `tests/config.test.luau`, runs
+		     inside `verify:fast` and is therefore what `guard-commit.mjs` actually consults. Two
+		     pinned flags is strictly harder to ship by accident than one.
 
 		`history` is deliberately NOT written: it is the anti-repeat draw input, and feeding it a pick
 		no draw made would distort the next real draw. A forced round therefore cannot exercise
 		anti-repeat weighting — the correct trade, stated so nobody "fixes" it.
 	]]
-	if RunService:IsStudio() and Config.Debug.ForceAswangWhenSolo and #candidates == 1 then
-		local soloUserId = candidates[1]
+	local forcedUserId: number? = nil
 
-		warn(
-			"[RoleService] DEBUG — solo round forced to ASWANG for testing. Never ship with this set."
-		)
-
-		roles[soloUserId] = "ASWANG"
-
-		local player = Players:GetPlayerByUserId(soloUserId)
-
-		if player ~= nil then
-			local payload: Types.RoleAssignedPayload = { Role = "ASWANG" }
-
-			Remotes.Get("RoleAssigned"):FireClient(player, payload)
-		end
-
-		return soloUserId
+	if
+		RunService:IsStudio()
+		and Config.Debug.SoloTesting
+		and Config.Debug.ForceAswangWhenSolo
+		and #candidates <= Config.Round.MinPlayers
+	then
+		forcedUserId = candidates[1]
 	end
-
-	local assignments = RoleDraw.draw(
-		candidates,
-		history,
-		Config.Roles.AswangCount,
-		weights,
-		function(): number
-			return rng:NextNumber()
-		end
-	)
 
 	local aswangUserId: number? = nil
 
-	for userId, drawn in assignments do
-		if drewAswang(drawn) then
-			roles[userId] = "ASWANG"
-			aswangUserId = userId
-		else
-			roles[userId] = "SURVIVOR"
+	if forcedUserId ~= nil then
+		--[[
+			EVERY OTHER CANDIDATE IS WRITTEN AS A SURVIVOR, and that is not decoration.
+
+			The old branch set one entry and returned. At one candidate there was nobody else, so it
+			was complete by accident. At three, leaving the others absent from `roles` would mean
+			`GetRole` returns nil for a live player and no RoleAssigned ever reaches their client —
+			no role card, and every later consumer reading a role would see a hole rather than a
+			SURVIVOR. Fall through to the shared notify loop below instead of hand-rolling a second
+			one, so the forced path and the drawn path tell clients in exactly the same way.
+		]]
+		for _, userId in candidates do
+			roles[userId] = if userId == forcedUserId then "ASWANG" else "SURVIVOR"
 		end
-	end
 
-	if aswangUserId ~= nil then
-		table.insert(history, 1, { aswangUserId })
+		aswangUserId = forcedUserId
 
-		while #history > Config.Roles.RepeatCooldownRounds do
-			table.remove(history)
+		-- NAMES THE PLAYER, unlike every other log in this file, and the exception is safe precisely
+		-- because the round is forced: the Aswang here is "whoever holds the lowest UserId", a rule
+		-- already written above in plaintext. There is no secret to leak — the point of this line is
+		-- that a developer with three identical Studio windows can tell WHICH ONE to drive.
+		-- secrecy-ok: forced Studio-only round; the identity is a stated rule, not a draw result
+		local forced = Players:GetPlayerByUserId(forcedUserId)
+
+		warn(
+			`[RoleService] DEBUG — Aswang FORCED to {forced ~= nil and forced.Name or forcedUserId}. Never ship with this set.`
+		)
+	else
+		local assignments = RoleDraw.draw(
+			candidates,
+			history,
+			Config.Roles.AswangCount,
+			weights,
+			function(): number
+				return rng:NextNumber()
+			end
+		)
+
+		for userId, drawn in assignments do
+			if drewAswang(drawn) then
+				roles[userId] = "ASWANG"
+				aswangUserId = userId
+			else
+				roles[userId] = "SURVIVOR"
+			end
+		end
+
+		if aswangUserId ~= nil then
+			table.insert(history, 1, { aswangUserId })
+
+			while #history > Config.Roles.RepeatCooldownRounds do
+				table.remove(history)
+			end
 		end
 	end
 
