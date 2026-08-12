@@ -33,6 +33,22 @@
 // out by itself. It also means this can never accumulate into a permanent accusation about work from
 // last week — the failure mode that would get it switched off.
 //
+// AND SO IS THE ACKNOWLEDGEMENT. Both halves must agree on scope, and for one release they did not.
+// The ledger carries no session field — it is one repo-level file every concurrent session appends to
+// — while the state file was read only when `state.session` matched the current session. With two
+// chats open on the same repo that inverted the ladder completely:
+//
+//   session A reaches 6 rounds  -> HALT, writes {session: A, ...}
+//   session B stops, same ledger, same count of 6, but A's record is discarded as another session's
+//     -> rungFor(6, undefined) -> HALT again, from the bottom, overwriting A's record
+//   session A stops             -> B's record is now the foreign one -> HALT again
+//
+// Two sessions ping-ponged one state file forever, each getting its own "first" HALT for one loop that
+// had already been reported and answered. So acknowledgement is keyed on FILE + COUNT and nothing
+// else; `rungFor`'s existing rule — the count must ADVANCE to climb — is what reopens it. A session id
+// is still written, purely as a breadcrumb for whoever is reading the state file by hand. Nothing
+// reads it back, and `acknowledged()` exists to make that testable rather than merely stated.
+//
 // A LADDER, NOT A BRAKE — the correction that matters
 // ---------------------------------------------------
 // The first version of this file blocked ONCE per file and then stood aside forever. That is exactly
@@ -142,6 +158,21 @@ export const rungFor = (count, previous) => {
   return { rung: RUNGS[Math.max(rung, priorIndex + 1)], count }
 }
 
+//  Every acknowledgement already on record, whoever wrote it. Deliberately ignores `session` — see the
+//  header. A state file this cannot parse yields no acknowledgements, which means the ladder reopens at
+//  the rung the count deserves rather than silently standing down: failing open here would be failing
+//  SILENT, and that is the one direction this guard must not fail in.
+export const acknowledged = state => state?.files ?? {}
+
+//  The whole decision — which files climb, and to what — given the ledger's counts and the record.
+//  Pure, so both directions are testable: that a fresh round still climbs, and that a count already
+//  reported stays silent no matter which session is asking.
+export const climbingFor = (counts, seen) =>
+  [...counts.entries()]
+    .map(([file, count]) => ({ file, count, next: rungFor(count, seen[file]) }))
+    .filter(entry => entry.next !== null)
+    .sort((a, b) => b.count - a.count)
+
 const main = async () => {
   let payload
 
@@ -158,13 +189,8 @@ const main = async () => {
   const counts = fixRounds(parseRows(readFileSync(LEDGER, 'utf8')))
 
   const session = payload?.session_id ?? 'unknown'
-  const state = readJson(STATE, {})
-  const seen = state.session === session ? (state.files ?? {}) : {}
-
-  const climbing = [...counts.entries()]
-    .map(([file, count]) => ({ file, count, next: rungFor(count, seen[file]) }))
-    .filter(entry => entry.next !== null)
-    .sort((a, b) => b.count - a.count)
+  const seen = acknowledged(readJson(STATE, {}))
+  const climbing = climbingFor(counts, seen)
 
   if (climbing.length === 0) process.exit(0)
 
@@ -173,7 +199,9 @@ const main = async () => {
   for (const entry of climbing) files[entry.file] = { rung: entry.next.rung, count: entry.count }
 
   mkdirSync(dirname(STATE), { recursive: true })
-  writeFileSync(STATE, `${JSON.stringify({ session, files })}\n`)
+  // `lastSession` is a breadcrumb for a human reading this file, NOT a key. It was one once, and the
+  // header records what that cost. Renaming it is the cheap way to stop it becoming one again.
+  writeFileSync(STATE, `${JSON.stringify({ lastSession: session, files })}\n`)
 
   const worst = climbing[0]
   const list = climbing.map(entry => `  · ${entry.file} — ${entry.count} fix rounds`).join('\n')
@@ -189,8 +217,9 @@ const main = async () => {
           // exact failure the lesson behind it is about.
           `HALT — ${worst.count} fix rounds on one file, which is past the point where another patch ` +
           `is worth attempting:\n${list}\n\n` +
-          `This gate stops here and will not block for these files again this session. That is not a ` +
-          `verdict that the work is finished — it means this gate has said everything it can.\n\n` +
+          `This gate stops here and will not block for these files again — in this session or any ` +
+          `other — unless a further fix round lands on them. That is not a verdict that the work is ` +
+          `finished; it means this gate has said everything it can.\n\n` +
           `WRITE DOWN, for the user, in this order:\n` +
           `  1. every fix already attempted on this file and what each one turned out to be wrong ` +
           `about — a list, not a summary;\n` +
@@ -237,7 +266,8 @@ const main = async () => {
     `expression usually means the expression is measuring the wrong thing.\n` +
     `  3. If the shape is wrong and changing it changes what the SPEC means, put that to the user ` +
     `instead of deciding it — docs/MVP-SPEC.md wins over an instinct.\n\n` +
-    `This fires once per file per session. See .claude/lessons/green-after-each-patch-hides-a-loop.md.`
+    `This fires once per file per fix round, across every session on this repo. See ` +
+    `.claude/lessons/green-after-each-patch-hides-a-loop.md.`
 
   process.stdout.write(`${JSON.stringify({ decision: 'block', reason })}\n`)
   process.exit(0)
@@ -323,6 +353,47 @@ const selfTest = () => {
   //  dishonest about how far gone it already is, and would spend two more rounds getting to the point.
   check('first seen one past the limit opens at escalate', rung(4, undefined), 'escalate')
   check('first seen three past the limit opens at halt', rung(6, undefined), 'halt')
+
+  //  ACKNOWLEDGEMENT IS CROSS-SESSION. The ledger has no session field — every concurrent chat on this
+  //  repo appends to one file — so a record read back per-session let two sessions ping-pong one state
+  //  file, each issuing its own "first" HALT for a loop already reported. See the header.
+  const ack = { rung: 'halt', count: 6 }
+
+  check('a record written by another session is still honoured', acknowledged({ session: 'other', files: { [A]: ack } }), {
+    [A]: ack
+  })
+  check('a state file with no files key acknowledges nothing', acknowledged({ session: 'other' }), {})
+  check('an unreadable state acknowledges nothing', acknowledged(undefined), {})
+
+  //  ALLOW — THE case this change exists for. Same counts, a different session asking, nothing new
+  //  patched: silent. Before the fix this returned a full HALT every time a second session stopped.
+  check(
+    'a reported count stays silent however many sessions stop',
+    climbingFor(new Map([[A, 6]]), acknowledged({ session: 'other', files: { [A]: ack } })),
+    []
+  )
+  check(
+    'an escalation already issued does not re-fire in a fresh session',
+    climbingFor(new Map([[B, 4]]), acknowledged({ session: 'other', files: { [B]: { rung: 'escalate', count: 4 } } })),
+    []
+  )
+
+  //  DENY — and the count advancing must still climb, or this has traded a loud gate for a dead one.
+  check(
+    'a further fix round reopens it across sessions',
+    climbingFor(new Map([[B, 5]]), acknowledged({ session: 'other', files: { [B]: { rung: 'escalate', count: 4 } } })),
+    [{ file: B, count: 5, next: { rung: 'halt', count: 5 } }]
+  )
+  check(
+    'a file with no record at all still fires',
+    climbingFor(new Map([[A, 3]]), acknowledged({})),
+    [{ file: A, count: 3, next: { rung: 'block', count: 3 } }]
+  )
+  check(
+    'the worst file sorts first',
+    climbingFor(new Map([[A, 3], [B, 5]]), {}).map(entry => entry.file),
+    [B, A]
+  )
 
   console.log(failures ? `  FAIL  guard-fix-rounds: ${ran - failures}/${ran}` : `  PASS  guard-fix-rounds: ${ran}/${ran} cases`)
 
