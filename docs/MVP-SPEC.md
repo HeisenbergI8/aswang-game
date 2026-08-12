@@ -1,8 +1,8 @@
 # ASWANG — MVP Specification
 
 **Working title:** `ASWANG: Survive the Night` (Filipino folklore co-op horror)
-**Version:** MVP v1.0 spec
-**Date:** August 2026
+**Version:** MVP v1.1 spec — v1.0 plus Amendment A1 (§4.8)
+**Date:** August 2026 · last amended 2026-08-12
 **Author's context:** Solo developer. Strong software engineer, zero game-dev experience, no art budget, no deadline. Goal is profit.
 
 ---
@@ -98,7 +98,7 @@ This is your **single source of truth for v1**. Rules:
 | Role | Count (8 players) | Goal |
 |---|---|---|
 | Survivor | 7 | Complete 5 tasks → escape gate opens → reach it |
-| Aswang | 1 | Kill until survivors ≤ 2, or run out the clock with tasks unfinished |
+| Aswang | 1 | Kill until survivors ≤ 2, or run out the clock with tasks unfinished — *counted as kills; see Amendment A1, §4.8* |
 
 **Role assignment rules:**
 - Server-side only. **Never** replicate the Aswang's identity to any other client. Not in a tag, not in a name colour, not in an attribute, not "hidden" in a value the client can read. Assume every client is compromised.
@@ -181,6 +181,33 @@ This is the folklore weakness turned into a mechanic — the differentiator you 
 |---|---|
 | **Survivors win** | 5/5 tasks done AND at least 1 survivor reaches the escape gate |
 | **Aswang wins** | Living survivors ≤ 2, **or** sunrise timer hits 0 with tasks incomplete |
+
+> **Amendment A1 — 2026-08-12 · spec v1.0 → v1.1 · implemented in `0b46597`**
+>
+> The row above stands as the design intent and is unchanged. What follows is how it is **measured**,
+> because the sentence as written is ambiguous in two situations it was not thinking about.
+>
+> **The shipped rule counts the Aswang's KILLS, not the survivors present.** The Aswang wins when
+> `AswangKills ≥ DealtInSurvivors − 2`, floored at one kill, where `DealtInSurvivors` is frozen at
+> `STARTING`. The sunrise-timeout half is unchanged.
+>
+> **Why.** "Living survivors" counts *absence*, and absence has four causes: killed, disconnected,
+> hit the reset button, fell out of the map. Only the first is the Aswang's doing, so the literal
+> reading hands it the other three. Measured: an 8-player round where three alt accounts quit as
+> `ACTIVE` begins turns a five-kill win into a two-kill win. A second problem is smaller but arrives
+> sooner — at `Round.MinPlayers = 3` a round is one Aswang and two survivors, so "survivors ≤ 2" is
+> already true on tick one, with nobody dead.
+>
+> **What this does and does not change.** With a full roster and nobody leaving, the two formulations
+> produce **identical outcomes** — 8 players still needs five kills, killing everyone still wins. The
+> only behaviour that changed is that a player *leaving* no longer advances the Aswang. If enough quit
+> that the bar becomes unreachable the round simply runs to sunrise, which this table already scores as
+> an Aswang win, so neither side is rewarded for disconnects.
+>
+> **Where it lives.** `src/shared/pure/WinConditions.luau`, with the roster × kills grid in
+> `tests/win-conditions.test.luau`. Three earlier patches tried to preserve the presence formulation and
+> each failed differently; the third was arithmetically inert. That history is in
+> `.claude/plans/feature-c05-c07-kill-win-taskselect-plan/implementation-log.md`.
 
 End screen: reveal the Aswang (big dramatic moment — **this is the screenshot people share**), show per-player stats, award XP and coins.
 
