@@ -148,17 +148,26 @@ function RoleService.AssignRoles(candidates: { number }): number?
 		make the round harder, it makes it empty — nothing happens at all, and C05/C06 cannot be
 		reached. Two consecutive survivor draws is the whole of the developer's afternoon.
 
-		So the count guard becomes a CEILING at `Round.MinPlayers`, and the thing it was protecting —
-		a real team test being silently rigged — is protected better than before, by four locks:
-		  1. `RunService:IsStudio()` — unreachable on a published place whatever shipped.
-		  2. `SoloTesting`, which must ALSO be on. Note that flag does not mean "one player" and never
-		     did (it floors the player COUNT at MinPlayers); in this Debug block "solo" has always
-		     meant one DEVELOPER testing alone, which is exactly the case this serves.
-		  3. `#candidates <= Round.MinPlayers`. The M5 gate is SIX humans and the eight-person team
-		     test this was written to protect is well past the ceiling, so neither can reach here.
-		  4. BOTH flags pinned false by `check:debug` — which, unlike `tests/config.test.luau`, runs
-		     inside `verify:fast` and is therefore what `guard-commit.mjs` actually consults. Two
-		     pinned flags is strictly harder to ship by accident than one.
+		So the count guard becomes a CEILING at `Round.MinPlayers`. BE PRECISE ABOUT WHAT THAT COST,
+		because the first version of this comment claimed the opposite and an audit caught it:
+
+		  `RunService:IsStudio()` IS THE ONLY PRODUCTION LOCK. It always was the strongest one, and it
+		  is now the only one that cannot be true on a published place. The old `== 1` was a SECOND
+		  independent impossibility — a round cannot start below `MinPlayers`, so exactly one candidate
+		  could never happen in production. `<= MinPlayers` is satisfied by every minimum-size round
+		  there is. The count is now a CONVENIENCE BOUND, not a lock, and anyone reasoning about this
+		  branch's safety should reason about `IsStudio()` alone.
+
+		  That trade was made deliberately and cannot be avoided: the local test this exists for runs
+		  three Studio clients, which is numerically identical to the smallest legal production roster.
+		  No count rule admits the first and excludes the second. Tightening to `< MinPlayers` would
+		  restore the second impossibility at the price of the 2-3 client case — the whole point.
+
+		The two flags remain, and both are pinned false by `check:debug`. Note where that is actually
+		enforced: NOT in `verify:fast`, which is `analyze + check:remotes + check:secrecy +
+		check:toolchain` and does not include it. `guard-commit.mjs` invokes `check-debug.mjs`
+		DIRECTLY, and that call is the only thing keeping either flag out of history. Two pinned flags
+		is still harder to ship by accident than one, but the mechanism is that invocation.
 
 		`history` is deliberately NOT written: it is the anti-repeat draw input, and feeding it a pick
 		no draw made would distort the next real draw. A forced round therefore cannot exercise
@@ -198,11 +207,20 @@ function RoleService.AssignRoles(candidates: { number }): number?
 		-- because the round is forced: the Aswang here is "whoever holds the lowest UserId", a rule
 		-- already written above in plaintext. There is no secret to leak — the point of this line is
 		-- that a developer with three identical Studio windows can tell WHICH ONE to drive.
-		-- secrecy-ok: forced Studio-only round; the identity is a stated rule, not a draw result
+		--
+		-- NO `secrecy-ok` WAIVER, deliberately. One was written here and an audit found it decorative:
+		-- `check-secrecy.mjs` has no rule matching `warn` or `print` at all, so it suppressed nothing
+		-- while implying a check had objected and a human had overruled it. A waiver that adjudicates
+		-- nothing is worse than none, because the next reader takes it for a decision already made.
 		local forced = Players:GetPlayerByUserId(forcedUserId)
 
+		-- STATES THE REASON, not just the name. A 4-6 client Studio session draws fairly until the
+		-- roster falls to MinPlayers, at which point every subsequent round is forced to the same
+		-- person — silently, if this line only prints a name. The roster count is what makes that
+		-- switch visible in the log the moment it happens.
 		warn(
-			`[RoleService] DEBUG — Aswang FORCED to {forced ~= nil and forced.Name or forcedUserId}. Never ship with this set.`
+			`[RoleService] DEBUG — Aswang FORCED to {forced ~= nil and forced.Name or forcedUserId} `
+				.. `(roster {#candidates} <= MinPlayers {Config.Round.MinPlayers}). Never ship with this set.`
 		)
 	else
 		local assignments = RoleDraw.draw(

@@ -18,8 +18,18 @@
 // An audit found this while reviewing a FORCE-ROLE switch that had been written on the strength of
 // that false guarantee. The flag would have shipped, and on a published place it rigs the draw.
 //
-// So the assertion moved to where the guard can see it. This runs in BOTH `verify:fast` and `verify`,
-// costs a file read, and needs no Lune.
+// So the assertion moved to where the guard can see it. It costs a file read and needs no Lune.
+//
+// WHERE IT ACTUALLY RUNS, since an earlier version of this line got it wrong and a comment in
+// `RoleService.luau` was written on the strength of it: NOT `verify:fast`, which is
+// `analyze && check:remotes && check:secrecy && verify:harness:fast`. It runs in the full `npm run
+// verify`, and — the part that matters — `guard-commit.mjs` invokes this script DIRECTLY, right after
+// `verify:fast`. That direct call is the only thing standing between a debug flag and history.
+//
+// It is deliberately NOT in `verify:fast`, and `guard-commit.mjs`'s own comment explains why:
+// `verify-gate.mjs` runs `verify:fast` on every Stop, so putting it there would block every turn of a
+// Studio session for having testing values set — the exact state a Studio session is supposed to be
+// in. The guard would make the thing it guards untestable. A commit is where the question belongs.
 //
 // The Luau test stays. It is not redundant: it pins the same values with the reasons attached, and it
 // is what a person reads when they want to know WHY the flag must be off. This one is what stops the
