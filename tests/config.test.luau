@@ -237,8 +237,112 @@ check(
 	`RespawnCooldown={Config.Round.RespawnCooldown}, Intermission={Config.Round.Intermission}`
 )
 
+--[[
+	Spec §4.4. `RequestTaskProgress` carries no arguments, so the server resolves which task point a
+	player is at from their position alone. Keeping the presence radius under half the spacing means
+	two selected points are normally not in range at once.
+
+	THIS IS DEFENCE IN DEPTH, NOT THE GUARANTEE. An earlier version of this comment said two selected
+	points "are guaranteed to be MinSpacingStuds apart" — they are not. `TaskSelection.select`'s
+	fallback pass drops spacing rather than return a short round, and an audit measured 2000/2000 draws
+	violating it for a pool packed into one room. The real protection is `taskPointAt` resolving to the
+	nearest INCOMPLETE point, which makes an overlap untidy instead of an unwinnable round. Keep this
+	invariant anyway: it is what keeps the overlap rare enough to be a warning rather than the norm.
+]]
+check(
+	"a player can only ever be present at one task point at a time",
+	Config.Tasks.PresenceRangeStuds * 2 < Config.Tasks.MinSpacingStuds,
+	`PresenceRangeStuds={Config.Tasks.PresenceRangeStuds}, MinSpacingStuds={Config.Tasks.MinSpacingStuds}`
+)
+
+-- A holding player must not blink out of presence between two heartbeats, or an 8-second hold becomes
+-- a stutter of accumulation with gaps in it and the task takes visibly longer than HoldTime.
+check(
+	"a continuously held task never lapses between heartbeats",
+	Config.Tasks.PresenceGraceSeconds > Config.Tasks.HeartbeatInterval * 2,
+	`Grace={Config.Tasks.PresenceGraceSeconds}, Heartbeat={Config.Tasks.HeartbeatInterval}`
+)
+
+--[[
+	The honest client must fit inside its own budget. C02's comment on RequestTaskProgress already says
+	the budget "must out-pace the snapshot tick or a player holding a task is throttled while doing
+	exactly what the game asked of them" — this is that sentence, pinned against the number that
+	actually drives the sends.
+]]
+check(
+	"a holding client stays inside its own rate-limit budget",
+	Config.Tasks.HeartbeatInterval > 0
+		and 1 / Config.Tasks.HeartbeatInterval
+			< Config.AntiCheat.Budgets.RequestTaskProgress.RefillPerSecond,
+	`{1 / Config.Tasks.HeartbeatInterval}/s vs refill={Config.AntiCheat.Budgets.RequestTaskProgress.RefillPerSecond}/s`
+)
+
+--[[
+	§4.4, C09. A green zone that runs off either end of the track is not a skill moment, it is a
+	button — and it fails invisibly, because the bar still sweeps and stops still land.
+]]
+check(
+	"the timing green zone sits inside the bar",
+	Config.Tasks.TimingGreenCenter - Config.Tasks.TimingGreenHalfWidth > 0
+		and Config.Tasks.TimingGreenCenter + Config.Tasks.TimingGreenHalfWidth < 1,
+	`center={Config.Tasks.TimingGreenCenter}, half={Config.Tasks.TimingGreenHalfWidth}`
+)
+
+--[[
+	THE LATENCY ALLOWANCE MUST STAY SMALLER THAN THE ZONE IT WIDENS.
+
+	The grace is in SECONDS and the zone is in BAR UNITS, so they are not comparable until the sweep
+	speed converts one to the other: the bar crosses the whole 0..1 track twice per period, so it
+	moves at `2 / TimingBarPeriod` bar units per second. This is exactly the conversion inside
+	`server/pure/TimingWindow.luau`, restated here against Config's own numbers — which is the point.
+	Lower the period at M12 and the same grace in seconds silently becomes a much wider window; this
+	is the line that notices.
+]]
+check(
+	"the timing grace widens the zone rather than replacing it",
+	Config.Tasks.TimingBarPeriod > 0
+		and Config.Tasks.TimingGraceSeconds * (2 / Config.Tasks.TimingBarPeriod)
+			< Config.Tasks.TimingGreenHalfWidth,
+	`grace={Config.Tasks.TimingGraceSeconds * (2 / Config.Tasks.TimingBarPeriod)} bar units `
+		.. `vs half={Config.Tasks.TimingGreenHalfWidth}`
+)
+
+-- §4.4, C09: the cost of a fetch is the TRAVEL. A deliver hold approaching the whole errand budget
+-- has quietly turned the task into a Hold with a walk in front of it.
+check(
+	"the fetch deliver hold is a small part of the errand",
+	Config.Tasks.FetchDeliverTime > 0 and Config.Tasks.FetchDeliverTime * 2 < Config.Tasks.FetchTime,
+	`deliver={Config.Tasks.FetchDeliverTime}, errand={Config.Tasks.FetchTime}`
+)
+
+--[[
+	§4.4 asks a two-person task for "2 survivors present"; §4.7 asks ghosts to "still matter", not to
+	substitute. C10 derives its participant count from TaskWeight, so what separates those two
+	sentences is this single relation between two numbers in this file — and nothing else. If a ghost
+	ever weighed a full contribution, two dead players would open the game's most social task and
+	nobody would see a test go red.
+]]
+check(
+	"a ghost is not a two-person participant",
+	Config.Ghost.TaskContributionMult < Config.Tasks.FullContributionWeight
+		and Config.Tasks.TwoPersonParticipants >= 2,
+	`ghost={Config.Ghost.TaskContributionMult}, full={Config.Tasks.FullContributionWeight}, `
+		.. `required={Config.Tasks.TwoPersonParticipants}`
+)
+
+--[[
+	§4.8's finale (C11). The Aswang camping an open gate is the last thirty seconds of a good round;
+	a gate that triggers from beyond the monster's reach deletes it, and the symptom is "the endings
+	feel flat" rather than anything a log would show.
+]]
+check(
+	"the escape gate stays inside the Aswang's reach",
+	Config.Tasks.GateRangeStuds > 0 and Config.Tasks.GateRangeStuds <= Config.Monster.KillRange,
+	`gate={Config.Tasks.GateRangeStuds}, kill={Config.Monster.KillRange}`
+)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end
 
-print("  PASS  config: 26 balance invariants")
+print("  PASS  config: 34 balance invariants")

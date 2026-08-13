@@ -60,7 +60,7 @@
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { hasWaiver, listLuau, lineOf, readSource, report } from './lib/luau-source.mjs'
 
@@ -166,6 +166,22 @@ export const strayFields = (remote, fields) => {
 //  tag names — never general server code. `commitKill(killer, victim)` is untouched; a `killer` field
 //  crossing to every client is not, and the `-- secrecy-ok: <reason>` waiver is there for the case
 //  that turns out to be deliberate.
+//[ Rule 5 ] Server files that must never branch on who the Aswang is.
+//
+// Not "files that must not leak the secret" — every server file must not leak it, and rules 0-4 cover
+// the crossing. This is narrower and stricter: these files must not be ABLE to tell, because their
+// observable output is world state that any player can read by standing next to it.
+//
+// `TaskService` is here because Amendment A2 rests on it. Task progress belongs to the world, its fill
+// is legible to anyone standing at the point, and standing at a point costs one keypress — so the
+// instant any task's rate varies by role, a survivor reads the monster's identity off a frozen bar in
+// two seconds. `pure/TaskWeight.luau` proves the WEIGHT function is role-blind; this proves its callers
+// are, which is the half a grid cannot reach.
+//
+// Adding a file here is a claim that its output is bystander-observable. Removing one needs a reason
+// better than "the check is inconvenient".
+const ROLE_BLIND = ['TaskService.luau']
+
 const SECRET = /\b(aswang\w*|imposter|impostor|monsteruserid|killer\w*|iskiller|isaswang|secretrole)\b/i
 const ROLE_TOKEN = /\b(role|roles)\b/i
 
@@ -363,6 +379,40 @@ export const scan = files => {
       }
     }
 
+    // 5. A ROLE-BLIND SERVICE READING THE ROLE.
+    //
+    // Amendment A2 (docs/MVP-SPEC.md §4.4) makes the Aswang's task progress identical to a survivor's,
+    // and `src/server/pure/TaskWeight.luau` holds that as an enumerated PlayerState x Role grid. But a
+    // grid guarantees exactly ONE function, and an exploit audit made the consequence concrete: the
+    // oracle's natural home moved to TaskWeight's CALLERS, where nothing looked. All four of these
+    // reintroduce it, none is executable-visible to rules 0-4, and each is one import away:
+    //
+    //   weightFor         `if RoleService.IsAswang(player) then return 0 end`
+    //   the tick loop     skip the Aswang's presence entry, never build it a bucket
+    //   notePresence      refuse the Aswang's stamp
+    //   publishProgress   send the Aswang a different YourTaskProgress
+    //
+    // Rules 0-4 are all about the secret CROSSING to a client. This one is different in kind: it is
+    // about a server file being able to branch on the secret at all. That is what makes the grid mean
+    // what its header claims, rather than being true of one function nobody would edit.
+    //
+    // THE WAIVER IS THE POINT, NOT AN ESCAPE HATCH. C12 sends the Aswang a fake task list and must
+    // therefore know who it is. That is a legitimate read, it will need `-- secrecy-ok: <why>`, and it
+    // will show up in a diff where it can be argued with — which is the whole design.
+    if (ROLE_BLIND.some(name => file.endsWith(name))) {
+      for (const match of code.matchAll(/\b(IsAswang|GetAswangUserId|AswangUserId|GetRole)\b/g)) {
+        add(
+          match.index,
+          `${basename(file)} reads the role via \`${match[1]}\` — this file must be role-blind`,
+          'Task progress must not vary by role (Amendment A2): the fill is world state, and standing ' +
+            'at a point costs one keypress, so a frozen bar would name the Aswang to any bystander. ' +
+            'pure/TaskWeight.luau proves weightFor is role-blind; nothing proves its callers are, ' +
+            'which is what this rule is for. If the read is legitimate — C12 must know who to send a ' +
+            'fake list to — waive it with `-- secrecy-ok: <why>` so it lands in a diff.'
+        )
+      }
+    }
+
     // 4. The secret written into a replicated container.
     for (const match of code.matchAll(/\b(ReplicatedStorage|Workspace)\b[^\n]{0,80}/g)) {
       if (!SECRET.test(match[0])) continue
@@ -387,10 +437,12 @@ const selfTest = () => {
   let failures = 0
   let ran = 0
 
-  const check = (label, source, shouldFlag, subdir = 'src/server') => {
+  // `filename` matters for rule 5, which is scoped by file name rather than by directory. Defaulting
+  // it keeps all the pre-existing cases untouched.
+  const check = (label, source, shouldFlag, subdir = 'src/server', filename = 'file.luau') => {
     ran += 1
 
-    const path = join(dir, 'file.luau')
+    const path = join(dir, filename)
 
     writeFileSync(path, source)
 
@@ -546,6 +598,68 @@ const selfTest = () => {
   check('a waived deliberate broadcast', 'Remotes.Get("Custom"):FireAllClients({ Role = r }) -- secrecy-ok: debug build only', false)
   check('an unrelated attribute', 'character:SetAttribute("Stunned", true)', false)
   check('a phase broadcast with no secret', 'Remotes.Get("PhaseChanged"):FireAllClients(phase, seconds)', false)
+
+  // ── Rule 5: a role-blind service reading the role ───────────────────────────
+  //
+  // The ALLOW half is the half that matters here, and the last case is the sharpest: the SHIPPED
+  // `weightFor` passes `Enums.Role.Survivor` as a literal. A rule that matched the word `Role` would
+  // fire on correct code on the day it landed, and would be disabled within the hour.
+  check(
+    'TaskService asking who the Aswang is',
+    'local isIt = RoleService.IsAswang(player)',
+    true,
+    'src/server',
+    'TaskService.luau'
+  )
+  check(
+    'TaskService reading the secret off RoundService',
+    'local id = RoundService.GetAswangUserId()',
+    true,
+    'src/server',
+    'TaskService.luau'
+  )
+  check(
+    'TaskService branching on a fetched role',
+    'if RoleService.GetRole(player) == Enums.Role.Aswang then return 0 end',
+    true,
+    'src/server',
+    'TaskService.luau'
+  )
+  check(
+    'the same read in a service that is allowed it',
+    'local isIt = RoleService.IsAswang(player)',
+    false,
+    'src/server',
+    'MonsterService.luau'
+  )
+  check(
+    'a waived read, which C12 will need to send the fake list',
+    'local id = RoundService.GetAswangUserId() -- secrecy-ok: C12 addresses the fake task list',
+    false,
+    'src/server',
+    'TaskService.luau'
+  )
+  check(
+    "the SHIPPED weightFor, which names a role constant and reads nobody's",
+    'return TaskWeight.forPlayer(RoundService.GetPlayerState(player), Enums.Role.Survivor, mult)',
+    false,
+    'src/server',
+    'TaskService.luau'
+  )
+  check(
+    'a comment in TaskService explaining the rule',
+    '-- do not add a role branch here; see pure/TaskWeight.luau\nlocal x = 1',
+    false,
+    'src/server',
+    'TaskService.luau'
+  )
+  check(
+    'TaskService requiring RoleService without reading a role',
+    'local RoleService = require(script.Parent.RoleService)',
+    false,
+    'src/server',
+    'TaskService.luau'
+  )
 
   rmSync(dir, { recursive: true, force: true })
 

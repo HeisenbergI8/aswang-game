@@ -23,6 +23,15 @@ local EVENTS_DOWN = {
 	"PhaseChanged",
 	"RoleAssigned", -- C03. FireClient ONLY, to the one player it concerns. Never FireAllClients.
 	"TaskProgressChanged",
+	-- C09. FireClient to the ONE player standing at a TIMING point. Carries a task point's bar, never
+	-- a player: the server owns the phase and re-derives it on every stop, so this is a rendering
+	-- hint and not an input to any decision.
+	"TimingBarChanged",
+	-- C12. FireClient to EVERY player, at STARTING, one loop, one payload shape. Survivors get this
+	-- round's real five; the Aswang gets a decoy five. The uniformity is the design — see
+	-- Types.TaskListPayload. Deliberately NOT on check-secrecy's REVEAL_ALLOWLIST: it carries no role,
+	-- so it must keep being scanned like any other remote.
+	"TaskListAssigned",
 	"PlayerKilled",
 	"MonsterTransformed", -- C04. Public by design: this is the tell, and broadcasting it is correct.
 	"SaltEffect",
@@ -34,6 +43,10 @@ local EVENTS_DOWN = {
 -- Client -> Server (the client asks; the server decides)
 local EVENTS_UP = {
 	"RequestTaskProgress",
+	-- C09. NO ARGUMENTS, and that is the whole security design: the server resolves which task from
+	-- the player's own position and reads the bar's phase off its own clock at the moment this lands.
+	-- There is no argument in which a client could name a moment, a position or an outcome.
+	"RequestTimingStop",
 	"RequestTransform", -- C04. The first handler in this repo to consult AntiCheatService.
 	"RequestKill",
 	"RequestThrowSalt",

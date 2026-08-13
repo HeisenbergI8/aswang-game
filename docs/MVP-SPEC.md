@@ -142,6 +142,47 @@ Four task types (build each once, reuse across all 12 spawn points):
 
 **Aswang and tasks:** the Aswang sees a fake task list and can fake-perform the animation, but its progress does not count. This is essential — otherwise "who is standing at tasks" trivially identifies it.
 
+> **Amendment A2 — 2026-08-12 · spec v1.1 → v1.2 · C08**
+>
+> **The goal of the paragraph above is kept and its mechanism is reversed.** The Aswang's task
+> progress now **counts, in full, exactly like a survivor's**. Only what the Aswang is *shown* is
+> deceptive.
+>
+> **Why the original mechanism produced the outcome it was written to prevent.** Task progress belongs
+> to the world (§4.4 anti-frustration), so its fill is legible to anyone standing at the point — and
+> standing at a point costs one keypress, which is not a privilege. If the Aswang's holds contributed
+> nothing, then any survivor could walk to a point where somebody was holding, tap the interact key,
+> watch the bar sit frozen, and read the monster's identity straight off it. No inference, no timing
+> skill, repeatable on every player in the round. The two-person task (§4.4) makes it worse: a pair
+> that produces no progress is an instantaneous reveal with nothing to deduce.
+>
+> So the sentence "its progress does not count" is what would make *"who is standing at tasks"*
+> identify it. Counting the progress is what makes standing at a task say nothing about who you are.
+>
+> **What the Aswang gives up instead.** The deception moves entirely to the information channel, which
+> is what "sees a fake task list" already says: the Aswang is shown a task list that is not the real
+> five. It can be sent to points nobody needs, and it cannot tell from its own HUD which objectives
+> actually matter. That costs it real time and real position, and none of it is readable by a bystander.
+>
+> **The cost, stated plainly:** an Aswang that ignores its fake list and helps sincerely does advance
+> the survivors' win. That is a real strategic concession and it is the intended trade — helping is a
+> disguise the monster pays for, which is the genre's oldest and best tension. §4.8 is unaffected: the
+> Aswang still wins by kills or by the clock.
+>
+> **The Two-person task (C10) follows the same rule, and it is the sharpest case.** The Aswang counts
+> as a full participant: a survivor and the Aswang together satisfy "2 survivors present" and the task
+> completes normally. A pair that stood there producing nothing would be an instantaneous reveal with
+> nothing to deduce — strictly worse than the frozen bar this amendment exists to remove.
+>
+> This is also what makes §4.4's own description of the task work: *"the Aswang can 'help' you and then
+> betray you."* The betrayal only lands if the help was real. A monster that cannot help is a monster
+> everyone can identify by asking it to.
+>
+> **The enforceable form of this rule** is `src/server/pure/TaskWeight.luau` and its exhaustive
+> `PlayerState × Role` grid: for any given player state, weight must not vary by role. A future change
+> that special-cases the Aswang fails that test rather than shipping a role oracle. C10's participant
+> count must be derived from the same weights, so that it inherits the property instead of restating it.
+
 ### 4.5 Communication — the piece almost everyone gets wrong
 
 Your accusation gameplay is worthless if players can't communicate. Reality check:

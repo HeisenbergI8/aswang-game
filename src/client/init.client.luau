@@ -19,6 +19,10 @@ local CONTROLLER_ORDER = {
 	"CameraFXController",
 	"UIController",
 	"QuickChatController",
+	-- Before InputController, deliberately. The order governs Init/Start rather than requires — the
+	-- require is direct — but InputController.Start binds a key that calls into this controller, and a
+	-- bind that can fire before Init has run is a race worth not having.
+	"TaskController",
 	"InputController",
 }
 

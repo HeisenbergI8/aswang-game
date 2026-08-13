@@ -97,7 +97,7 @@ function TaskSelection.select(
 	count: number,
 	minSpacing: number,
 	nextFloat: () -> number
-): { Point }
+): ({ Point }, boolean)
 	local shuffled = table.clone(pool)
 
 	-- Fisher-Yates, back to front. nextFloat returns [0, 1), so the index is in [i, #shuffled].
@@ -122,17 +122,39 @@ function TaskSelection.select(
 		end
 	end
 
-	-- The fallback pass. Still in shuffled order, so it is still a random selection — just an unspaced
-	-- one. Reached only when the pool cannot satisfy the spacing at all.
+	--[[
+		The fallback pass. Still in shuffled order, so it is still a random selection — just an unspaced
+		one. Reached only when the pool cannot satisfy the spacing at all.
+
+		IT REPORTS ITSELF NOW, AND THAT IS THE SECOND RETURN VALUE. An exploit audit measured what this
+		silence cost: twelve points in one 30x30 room produced a spacing violation in 2000 of 2000
+		draws, every one of them placing two selected points inside a single presence radius — while
+		`Config.Tasks.MinSpacingStuds` and a passing `tests/config.test.luau` invariant both said the
+		spread was guaranteed. It was never guaranteed; it was requested, and this loop is where the
+		request quietly fails.
+
+		`spacingRespected` is what lets TaskService say so out loud. It does NOT make the caller safe on
+		its own — see `taskPointAt`, which was rewritten to resolve the NEAREST INCOMPLETE point so that
+		two overlapping selections are merely untidy rather than an unwinnable round.
+	]]
+	--[[
+		A non-empty `skipped` is NOT a violation on its own: the first pass may have filled `count`
+		before running out of pool, in which case every chosen point is properly spaced and the skipped
+		ones simply were not needed. Only an actual insertion below breaks the spread — and a point that
+		was rejected earlier stays rejected, because `chosen` only ever grows.
+	]]
+	local spacingRespected = true
+
 	for _, point in skipped do
 		if #chosen >= count then
 			break
 		end
 
 		table.insert(chosen, point)
+		spacingRespected = false
 	end
 
-	return chosen
+	return chosen, spacingRespected
 end
 
 return TaskSelection

@@ -24,6 +24,7 @@ local Config = require("../src/shared/Config")
 -- Hand copy of Remotes.EVENTS_UP as of C02. See the header for why.
 local UP_REMOTES = {
 	"RequestTaskProgress",
+	"RequestTimingStop",
 	"RequestTransform",
 	"RequestKill",
 	"RequestThrowSalt",
@@ -110,6 +111,20 @@ check(
 	Config.AntiCheat.Budgets.RequestGhostSpook.Capacity >= Config.Ghost.SpooksPerRound
 )
 
+--[[
+	§4.4, C09. The honest cadence at a timing bar is one stop per sweep, so a refill slower than that
+	throttles a player for playing the minigame at the only rate the minigame allows. This is the same
+	failure the RequestTaskProgress budget's comment warns about, one remote over.
+]]
+check(
+	"an honest timing player out-paces nothing but the bar",
+	Config.Tasks.TimingBarPeriod > 0
+		and 1 / Config.Tasks.TimingBarPeriod
+			< Config.AntiCheat.Budgets.RequestTimingStop.RefillPerSecond,
+	`{1 / Config.Tasks.TimingBarPeriod}/s vs refill=`
+		.. `{Config.AntiCheat.Budgets.RequestTimingStop.RefillPerSecond}/s`
+)
+
 --------------------------------------------------------------------------------
 -- The policy switches
 --------------------------------------------------------------------------------
@@ -127,4 +142,4 @@ if failures > 0 then
 	error(`{failures} anti-cheat budget failure(s)`, 0)
 end
 
-print(`  PASS  anti-cheat-budgets: {#UP_REMOTES} remotes budgeted + 7 invariants`)
+print(`  PASS  anti-cheat-budgets: {#UP_REMOTES} remotes budgeted + 8 invariants`)

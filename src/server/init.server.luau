@@ -27,6 +27,7 @@ local SERVICE_ORDER = {
 	-- Gameplay
 	"RoleService",
 	"TaskService",
+	"GateService",
 	"MonsterService",
 	"ItemService",
 	"GhostService",
