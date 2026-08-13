@@ -11,8 +11,11 @@
 local Config = require("../src/shared/Config")
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -87,6 +90,100 @@ check(
 	"ghosts contribute, but less than the living",
 	Config.Ghost.TaskContributionMult > 0 and Config.Ghost.TaskContributionMult < 1,
 	`TaskContributionMult={Config.Ghost.TaskContributionMult}`
+)
+
+-- Spec §4.6, C13: four pouches cannot be placed at three points. This is the relation that turns a
+-- map defect into a startable round with less salt than the design assumes, and the only symptom
+-- otherwise is "salt feels rarer than it should" six playtests later.
+check(
+	"there are at least as many salt spawn points as pouches",
+	Config.Salt.PouchPoolSize >= Config.Salt.SpawnCount,
+	`PouchPoolSize={Config.Salt.PouchPoolSize}, SpawnCount={Config.Salt.SpawnCount}`
+)
+
+--[[
+	Spec §4.6: "Recharge: none in MVP. Once used, it's gone. SCARCITY MAKES IT A DECISION."
+
+	At `SpawnCount >= MaxPlayers` every player can hold one and the decision disappears — salt stops
+	being a resource and becomes a button. This is the numeric form of the sentence, and it is the
+	first thing an M12 balance pass will be tempted to break.
+]]
+check(
+	"salt is scarcer than the roster",
+	Config.Salt.SpawnCount < Config.Round.MaxPlayers,
+	`SpawnCount={Config.Salt.SpawnCount}, MaxPlayers={Config.Round.MaxPlayers}`
+)
+
+-- Spec §4.6, C14: a half-angle of 90 degrees is a hemisphere and anything above it hits what is
+-- BEHIND the thrower. Zero is a raycast, which §5's mobile audience cannot aim.
+check(
+	"the throw cone is a cone",
+	Config.Salt.ThrowConeDegrees > 0 and Config.Salt.ThrowConeDegrees < 90,
+	`ThrowConeDegrees={Config.Salt.ThrowConeDegrees}`
+)
+
+-- C13: a pickup radius wider than the presence radius picks pouches up through walls and from across
+-- a task point. See Config.Salt.PickupRangeStuds.
+check(
+	"a pouch is picked up closer than a task is held",
+	Config.Salt.PickupRangeStuds < Config.Tasks.PresenceRangeStuds,
+	`PickupRangeStuds={Config.Salt.PickupRangeStuds}, `
+		.. `PresenceRangeStuds={Config.Tasks.PresenceRangeStuds}`
+)
+
+-- Spec §5's mobile budget, C15: the ghost roster only changes when somebody dies, so pushing it
+-- faster than the HUD snapshot is a per-player per-tick cost with nothing behind it.
+check(
+	"the ghost roster is not pushed faster than the snapshot",
+	Config.Ghost.RosterInterval >= Config.Round.SnapshotInterval,
+	`RosterInterval={Config.Ghost.RosterInterval}, SnapshotInterval={Config.Round.SnapshotInterval}`
+)
+
+-- Spec §4.7, C16: "one spook per round". At zero the feature is silently off, and the symptom is a
+-- dead player pressing a button that does nothing — which reads as a bug, not as a balance choice.
+check(
+	"a ghost gets at least one spook",
+	Config.Ghost.SpooksPerRound >= 1,
+	`SpooksPerRound={Config.Ghost.SpooksPerRound}`
+)
+
+--[[
+	Spec §4.7, C16: a spook nobody perceives is a button that does nothing, which reads as a bug rather
+	than as a balance choice — the same argument `SpooksPerRound >= 1` already makes for the count.
+
+	The upper bound matters too and is the less obvious half: a flicker lasting longer than the salt
+	reveal would make the ghost's flavour effect more visually persistent than the game's one real
+	reveal, which inverts what a player learns to pay attention to.
+]]
+check(
+	"a spook lasts long enough to notice and not longer than the reveal",
+	Config.Ghost.SpookDuration > 0 and Config.Ghost.SpookDuration < Config.Salt.RevealDuration,
+	`SpookDuration={Config.Ghost.SpookDuration}, RevealDuration={Config.Salt.RevealDuration}`
+)
+
+--[[
+	C14/C15, and this relationship became load-bearing for a SECRECY invariant rather than for balance.
+
+	An exploit audit traced the one path that would reproduce the permanent-WalkSpeed brand: transform
+	while stunned, so the transform captures `BaseWalkSpeed = 0`. It is closed only because `revert()`
+	stamps `LastRevertedAt` and the kill cooldown outlasts the stun, so a salted Aswang cannot
+	re-transform before the stun has lifted. Nothing pinned that, and the two numbers are exactly the
+	kind an M12 balance pass moves independently.
+]]
+check(
+	"the kill cooldown outlasts the salt stun",
+	Config.Monster.KillCooldown > Config.Salt.StunDuration,
+	`KillCooldown={Config.Monster.KillCooldown}, StunDuration={Config.Salt.StunDuration}`
+)
+
+-- Spec §4.7, C16: the spook must not localise the ghost. Larger than both the Aswang's reach and the
+-- task presence radius, so "a light flickered near me" narrows nothing a player could act on.
+check(
+	"a spook does not point at the ghost that caused it",
+	Config.Ghost.SpookRangeStuds > Config.Monster.KillRange
+		and Config.Ghost.SpookRangeStuds > Config.Tasks.PresenceRangeStuds,
+	`SpookRangeStuds={Config.Ghost.SpookRangeStuds}, KillRange={Config.Monster.KillRange}, `
+		.. `PresenceRangeStuds={Config.Tasks.PresenceRangeStuds}`
 )
 
 -- Spec §4.1: total cycle ≈ 7.5 min, and §2 demands "under 8 minutes, back in within 30 seconds".
@@ -345,4 +442,10 @@ if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end
 
-print("  PASS  config: 34 balance invariants")
+--[[
+	COUNTED, NOT TYPED. This line read `34 balance invariants` as a literal for long enough that it
+	survived the seven checks C13–C16 added without moving, and a suite that reports the same total
+	whatever it contains cannot tell you a check was dropped — the number is exactly the thing you
+	would glance at to find out. `check` now bumps `checked`, so the figure is a measurement.
+]]
+print(`  PASS  config: {checked} balance invariants`)

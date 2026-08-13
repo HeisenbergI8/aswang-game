@@ -31,6 +31,7 @@ local TRANSFORM_ACTION = "AswangTransform"
 local KILL_ACTION = "AswangKill"
 local TASK_ACTION = "TaskHold"
 local TIMING_ACTION = "TaskTimingStop"
+local THROW_ACTION = "SaltThrow"
 
 local function onTransformAction(
 	_actionName: string,
@@ -212,6 +213,37 @@ local function onTimingAction(
 	return Enum.ContextActionResult.Sink
 end
 
+--[[
+	THE SALT THROW (§4.6, C14). The client's entire contribution to this mechanic is a direction.
+
+	It sends `camera.CFrame.LookVector` and stops. It does not raycast, does not pick a target, does
+	not check range, does not check whether anyone is in front of it, and — critically — does not
+	predict a hit and render one optimistically. A client that renders a hit the server refused is a
+	client that has told its player the monster is stunned when it is not, which is worse than latency.
+
+	IT DOES NOT GATE ITSELF ON A POUCH COUNT EITHER, beyond hiding the button. The server owns
+	`carried` and refuses with NO_POUCH; a client-side check here would be a second copy of a rule and
+	the two would disagree the first time a pickup and a throw crossed on the wire.
+]]
+local function onThrowAction(
+	_actionName: string,
+	inputState: Enum.UserInputState
+): Enum.ContextActionResult
+	if inputState ~= Enum.UserInputState.Begin then
+		return Enum.ContextActionResult.Pass
+	end
+
+	local camera = workspace.CurrentCamera
+
+	if camera == nil then
+		return Enum.ContextActionResult.Pass
+	end
+
+	Remotes.Get("RequestThrowSalt"):FireServer(camera.CFrame.LookVector)
+
+	return Enum.ContextActionResult.Sink
+end
+
 function InputController.Init() end
 
 function InputController.Start()
@@ -231,6 +263,25 @@ function InputController.Start()
 	-- proves `R` is not similarly claimed. `attachPrompt` sets `Enum.KeyCode.None`, which removes the
 	-- known collision — but "the known one" is all that can be established statically. Playtester.
 	ContextActionService:BindAction(TIMING_ACTION, onTimingAction, false, Enum.KeyCode.R)
+
+	--[[
+		`Q`, and `true` for createTouchButton — THE FIRST BIND IN THIS FILE THAT ASKS FOR ONE.
+
+		The other four pass `false` and call mobile a known hole deferred to C27. Salt is the case
+		where that trade stops being defensible: §5 puts ~60% of players on a phone, and §4.6 is the
+		ONLY counterplay in the game. A mobile player with no throw button is not missing a
+		convenience, they are playing a version of the round with no answer to the monster at all —
+		which is Appendix C's failure mode, not a polish item.
+
+		It is also the bind that survives a touch button best: the throw is aimed by the CAMERA, which
+		a phone player is already controlling, so the button carries no aiming burden. That is why
+		`Config.Salt.ThrowConeDegrees` exists rather than a raycast.
+
+		⚠ `Q` is NOT confirmed free of a CoreScript claim, the same caveat `R` carries above. C08
+		shipped unreachable because ProximityPrompt's default `E` silently swallowed an identical
+		bind, and nothing static can prove `Q` is unclaimed. Playtester.
+	]]
+	ContextActionService:BindAction(THROW_ACTION, onThrowAction, true, Enum.KeyCode.Q)
 end
 
 return InputController

@@ -283,12 +283,86 @@ local Config = {
 		RevealDuration = 10,
 		ThrowRange = 25,
 		CarryLimit = 1,
+
+		--[[
+			How close a player must be to a pouch for the server to hand it over (C13).
+
+			THERE IS NO PICKUP REMOTE, and this number is why. `RequestTaskProgress` established the
+			shape: the server resolves what you are standing at from your own character's position, and
+			the client names nothing. A pickup that took an argument would be a free "give me salt"
+			handler needing its own budget, its own validation and its own verdict union; a proximity
+			tick needs none of those and cannot be spammed, because there is nothing to spam.
+
+			Deliberately smaller than `Tasks.PresenceRangeStuds` (9). Presence is a thing you do on
+			purpose and should tolerate standing near; a pickup is a thing that happens TO you as you
+			walk past, and one that fires from nine studs away picks pouches up through walls.
+		]]
+		PickupRangeStuds = 6,
+
+		--[[
+			The half-angle, in degrees, of the cone a throw sweeps (C14). The server picks the nearest
+			valid target inside it; the client sends only a direction.
+
+			IT IS A CONE RATHER THAN A RAYCAST ON PURPOSE. A ray demands the accuracy of a shooter from
+			a player on a phone (§5: ~60% of players), and §4.6 is buying counterplay, not aim. It is
+			also why the throw cannot be a probe: widening it does not make salt tell you MORE, because
+			a miss and a hit on a survivor are the same silent outcome.
+
+			`tests/config.test.luau` pins it under 90. At 90 the cone is a hemisphere and at more than
+			90 you hit things behind you, which is not a throw.
+		]]
+		ThrowConeDegrees = 20,
+
+		--[[
+			How many `SaltSpawn` points the map is expected to carry, against which `SpawnCount` pouches
+			are placed. The analogue of `Tasks.PoolSize`, and it feeds the SAME verdict module —
+			`server/pure/TaskPool.evaluate` — rather than a second copy of it.
+
+			It must be at least `SpawnCount` or the round cannot place its pouches; the test pins that.
+			C17 owns the actual count in the map.
+		]]
+		PouchPoolSize = 6,
+
+		-- The pouch, and the reveal glow. RGB TRIPLES, NEVER Color3 — same reason as Monster's palette
+		-- and Tasks' markers. `RevealGlow*` is a Highlight's two colours.
+		PouchRgb = { 240, 238, 225 },
+		RevealGlowFillRgb = { 255, 250, 235 },
+		RevealGlowOutlineRgb = { 190, 235, 255 },
 	},
 
 	Ghost = {
 		TaskContributionMult = 0.25, -- ghosts progress tasks at 25% speed
 		SpooksPerRound = 1,
 		FlySpeed = 24,
+
+		--[[
+			How often the server tells each ghost who the other ghosts are (C15).
+
+			It must not be FASTER than `Round.SnapshotInterval`. A ghost already receives a snapshot
+			twice a second on the same connection, and §5's mobile budget counts sends per player per
+			tick — a roster arriving faster than the HUD does is a cost with nothing behind it, because
+			the roster only changes when somebody dies. `tests/config.test.luau` pins the relation.
+		]]
+		RosterInterval = 1,
+
+		--[[
+			The spook (§4.7, C16). `SpookRangeStuds` is how far from the ghost the server looks for
+			something to flicker; `SpookDuration` is how long the flicker lasts.
+
+			IT CARRIES NO INFORMATION AND THAT IS A CONSTRAINT ON THESE TWO NUMBERS, not a description
+			of them. A range small enough to pinpoint the ghost's position would tell a living player
+			where a dead one is standing, and a dead player standing beside the Aswang is the leak
+			§4.7's last bullet is about. Thirty studs is comfortably larger than `Monster.KillRange` (8)
+			and than `Tasks.PresenceRangeStuds` (9), so "a light flickered near me" narrows nothing.
+		]]
+		SpookRangeStuds = 30,
+		SpookDuration = 2,
+
+		-- How far behind its own body a ghost's camera sits (C15). Presentation, and client-side only —
+		-- the ghost's body exists on nobody else's machine, so this number is visible to exactly one
+		-- player and can never leak anything. It is here because it is a number somebody will want to
+		-- change after the first time they fly.
+		CameraDistance = 12,
 	},
 
 	Economy = {
@@ -372,6 +446,10 @@ local Config = {
 			RequestKill = { Capacity = 3, RefillPerSecond = 0.25 },
 			RequestThrowSalt = { Capacity = 3, RefillPerSecond = 0.2 },
 			RequestQuickChat = { Capacity = 4, RefillPerSecond = 0.5 },
+			-- A ghost reports its position on a fixed client tick, so the sustained rate is what matters
+			-- and the burst only has to cover a hitch. Generous on purpose: a throttled report degrades
+			-- into a ghost whose contribution silently stops, which reads as a broken feature.
+			ReportGhostPosition = { Capacity = 10, RefillPerSecond = 5 },
 			RequestGhostSpook = { Capacity = 2, RefillPerSecond = 0.05 },
 			RequestEquipCosmetic = { Capacity = 5, RefillPerSecond = 0.5 },
 			RequestClaimDaily = { Capacity = 2, RefillPerSecond = 0.1 },

@@ -38,6 +38,19 @@ local EVENTS_DOWN = {
 	"RoundEnded", -- includes the reveal
 	"QuickChatBroadcast",
 	"ProfileUpdated",
+	--[[
+		C15. FireClient to ghosts ONLY, one payload per recipient, NEVER FireAllClients.
+
+		It carries the UserIds of dead players, and what makes that safe is its AUDIENCE rather than its
+		contents — the mirror of RoleAssigned, which is safe because its payload is minimal. Being dead
+		is not a role, but WHICH of the eight are dead is precisely the death oracle Amendment A3
+		removed `AlivePlayerCount` to close, so a living client must never receive this.
+
+		`check-secrecy.mjs` cannot police that: it reads payload fields and call shapes, and
+		`FireClient(player, roster)` inside a loop over the wrong list is textually identical to one
+		over the right list. The state test therefore lives at the fire site in GhostService.
+	]]
+	"GhostRoster",
 }
 
 -- Client -> Server (the client asks; the server decides)
@@ -51,6 +64,24 @@ local EVENTS_UP = {
 	"RequestKill",
 	"RequestThrowSalt",
 	"RequestQuickChat",
+	--[[
+		C15. A ghost tells the server where its LOCAL body is.
+
+		THIS IS THE ONE PLACE IN THE GAME WHERE THE CLIENT OWNS A POSITION, and it is a deliberate
+		trade. Ghosts have no server character — a replicated body per dead player named the dead set
+		to every client, which is Amendment A3's death oracle — so the two things that needed a ghost's
+		position (`TaskService` presence at 25%, and the spook's origin) read it from here instead.
+
+		WHAT A LYING CLIENT BUYS, stated plainly because it is the cost of the trade: a ghost can claim
+		to stand at a task point it is not at, and contribute 25% of one player's rate from anywhere.
+		It cannot claim to be ALIVE, cannot be seen, cannot kill, cannot be killed, and cannot make the
+		claim at all unless the server already believes it is a ghost. Compare what the server body was
+		leaking in exchange and this is not a close call.
+
+		Continuity is checked server-side against `Config.Ghost.FlySpeed`, so the lie has to be walked
+		rather than teleported.
+	]]
+	"ReportGhostPosition",
 	"RequestGhostSpook",
 	"RequestEquipCosmetic",
 	"RequestClaimDaily",

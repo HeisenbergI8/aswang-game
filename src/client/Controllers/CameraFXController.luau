@@ -68,11 +68,26 @@ local function onPlayerKilled(payload: Types.PlayerKilledPayload)
 	-- position is already here, so gating buys atmosphere, not secrecy.
 end
 
+--[[
+	A throw happened somewhere (C14). Renders a burst; concludes nothing.
+
+	`payload.Hit` says salt struck something salt can strike. It does NOT name who, and this handler
+	must never start inferring it — the nearest-character-to-Impact computation is one line away and
+	would hand every player the answer that §4.6 charges a pouch for. The same warning is on
+	`onPlayerKilled` above, for the same reason, and it has held so far.
+]]
+local function onSaltEffect(payload: Types.SaltEffectPayload)
+	print(`[Client] Salt {if payload.Hit then "HIT" else "thrown"} at {payload.Impact}`)
+
+	-- TODO(M7): a white particle burst along Origin -> Impact, and a distinct crackle on Hit.
+end
+
 function CameraFXController.Init() end
 
 function CameraFXController.Start()
 	Remotes.Get("MonsterTransformed").OnClientEvent:Connect(onTransformed)
 	Remotes.Get("PlayerKilled").OnClientEvent:Connect(onPlayerKilled)
+	Remotes.Get("SaltEffect").OnClientEvent:Connect(onSaltEffect)
 end
 
 return CameraFXController
