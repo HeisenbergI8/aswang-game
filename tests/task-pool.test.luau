@@ -17,8 +17,11 @@ local REQUIRED = 5
 local EXPECTED = 12
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -110,4 +113,4 @@ if failures > 0 then
 	error(`{failures} task-pool assertion(s) failed`, 0)
 end
 
-print("  PASS  task-pool: 14 assertions across 8 pools")
+print(`  PASS  task-pool: {checked} assertions across the pool set`)

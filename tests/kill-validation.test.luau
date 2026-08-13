@@ -17,8 +17,11 @@ type PlayerState = KillValidation.PlayerState
 type Verdict = KillValidation.Verdict
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -288,4 +291,4 @@ if failures > 0 then
 	error(`{failures} failure(s)`, 0)
 end
 
-print("  PASS  kill-validation: 16 grid cells + 35 cases")
+print(`  PASS  kill-validation: {checked} grid cells and cases`)

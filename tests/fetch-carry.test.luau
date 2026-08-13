@@ -183,4 +183,4 @@ if failures > 0 then
 	error(`{failures} fetch-carry failure(s)`, 0)
 end
 
-print(`  PASS  fetch-carry: {assertions} assertions over the full 512-cell grid`)
+print(`  PASS  fetch-carry: {assertions} assertions over the full 512-cell grid`) -- count-ok: 512 is the size of the input domain this suite enumerates, not a tally of work

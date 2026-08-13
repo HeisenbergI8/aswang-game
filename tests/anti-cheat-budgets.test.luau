@@ -21,7 +21,7 @@
 
 local Config = require("../src/shared/Config")
 
--- Hand copy of Remotes.EVENTS_UP as of C02. See the header for why.
+-- Hand copy of Remotes.EVENTS_UP, last synced at C15. See the header for why.
 local UP_REMOTES = {
 	"RequestTaskProgress",
 	"RequestTimingStop",
@@ -29,14 +29,21 @@ local UP_REMOTES = {
 	"RequestKill",
 	"RequestThrowSalt",
 	"RequestQuickChat",
+	-- C15. The one up-remote that is not a Request: a ghost REPORTS where its client-side body is,
+	-- because ghosts have no server character. Named differently on purpose — it is the only remote in
+	-- the game whose payload the server cannot independently verify, and the name should say so.
+	"ReportGhostPosition",
 	"RequestGhostSpook",
 	"RequestEquipCosmetic",
 	"RequestClaimDaily",
 }
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -142,4 +149,4 @@ if failures > 0 then
 	error(`{failures} anti-cheat budget failure(s)`, 0)
 end
 
-print(`  PASS  anti-cheat-budgets: {#UP_REMOTES} remotes budgeted + 8 invariants`)
+print(`  PASS  anti-cheat-budgets: {#UP_REMOTES} remotes budgeted, {checked} assertions`)

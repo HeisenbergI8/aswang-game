@@ -91,6 +91,7 @@ export const SUITES = [
   ['check-config', ['.claude/scripts/check-config.mjs', '--self-test']],
   ['check-scope', ['.claude/scripts/check-scope.mjs', '--self-test']],
   ['check-ratelimit', ['.claude/scripts/check-ratelimit.mjs', '--self-test']],
+  ['check-testcount', ['.claude/scripts/check-testcount.mjs', '--self-test']],
   ['check-toolchain', ['.claude/scripts/check-toolchain.mjs', '--self-test']],
   ['check-analyze', ['.claude/scripts/check-analyze.mjs', '--self-test']],
   ['run-luau-tests', ['.claude/scripts/run-luau-tests.mjs', '--self-test']]

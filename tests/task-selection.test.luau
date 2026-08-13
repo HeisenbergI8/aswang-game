@@ -17,8 +17,11 @@ local TaskSelection = require("../src/shared/pure/TaskSelection")
 type Point = TaskSelection.Point
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -227,4 +230,6 @@ if failures > 0 then
 	error(`{failures} failure(s)`, 0)
 end
 
-print(`  PASS  task-selection: {DRAWS} draws, 12 distribution bands, spacing + 6 edge cases`)
+print(
+	`  PASS  task-selection: {DRAWS} draws, {checked} assertions over bands, spacing and edge cases`
+)

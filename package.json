@@ -22,10 +22,11 @@
     "check:scope": "node .claude/scripts/check-scope.mjs",
     "check:ratelimit": "node .claude/scripts/check-ratelimit.mjs",
     "check:debug": "node .claude/scripts/check-debug.mjs",
+    "check:testcount": "node .claude/scripts/check-testcount.mjs",
     "test:unit": "node .claude/scripts/run-luau-tests.mjs",
 
     "verify:fast": "npm run --silent analyze && npm run --silent check:remotes && npm run --silent check:secrecy && npm run --silent verify:harness:fast",
-    "verify": "npm run --silent analyze && npm run --silent lint && npm run --silent fmt:check && npm run --silent check:remotes && npm run --silent check:secrecy && npm run --silent check:config && npm run --silent check:scope && npm run --silent check:ratelimit && npm run --silent check:debug && npm run --silent test:unit && npm run --silent verify:harness",
+    "verify": "npm run --silent analyze && npm run --silent lint && npm run --silent fmt:check && npm run --silent check:remotes && npm run --silent check:secrecy && npm run --silent check:config && npm run --silent check:scope && npm run --silent check:ratelimit && npm run --silent check:debug && npm run --silent check:testcount && npm run --silent test:unit && npm run --silent verify:harness",
 
     "verify:harness": "node .claude/scripts/harness-selftest.mjs && node .claude/scripts/lessons.mjs audit && node .claude/scripts/hook-heartbeat.mjs && node .claude/scripts/candidates.mjs status",
     "verify:harness:fast": "node .claude/scripts/check-toolchain.mjs --quiet",

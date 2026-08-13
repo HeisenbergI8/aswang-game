@@ -17,8 +17,11 @@ local TaskResolve = require("../src/server/pure/TaskResolve")
 local RANGE = 9
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -191,4 +194,6 @@ if failures > 0 then
 	error(`{failures} task-resolve assertion(s) failed`, 0)
 end
 
-print("  PASS  task-resolve: 33 assertions — overlap in both orders, NaN and both infinities")
+print(
+	`  PASS  task-resolve: {checked} assertions — overlap in both orders, NaN and both infinities`
+)

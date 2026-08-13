@@ -20,8 +20,11 @@ local HOLD = Config.Tasks.HoldTime
 local TICK = 0.25
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -129,4 +132,4 @@ if failures > 0 then
 	error(`{failures} task-progress assertion(s) failed`, 0)
 end
 
-print("  PASS  task-progress: 20 assertions, incl. the non-scaling property")
+print(`  PASS  task-progress: {checked} assertions, incl. the non-scaling property`)

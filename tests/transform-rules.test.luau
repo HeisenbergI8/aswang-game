@@ -15,8 +15,11 @@ local Config = require("../src/shared/Config")
 local TransformRules = require("../src/shared/pure/TransformRules")
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -173,5 +176,5 @@ if failures > 0 then
 end
 
 print(
-	"  PASS  transform-rules: 6 verdicts, 5 phases, 4 player states, cooldown boundary, precedence"
+	`  PASS  transform-rules: {checked} assertions over verdicts, phases, states, cooldown and precedence`
 )

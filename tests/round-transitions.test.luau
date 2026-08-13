@@ -16,8 +16,11 @@ local RoundTransitions = require("../src/shared/pure/RoundTransitions")
 type RoundPhase = RoundTransitions.RoundPhase
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -147,4 +150,4 @@ if failures > 0 then
 	error(`{failures} round-transition failure(s)`, 0)
 end
 
-print(`  PASS  round-transitions: {#CASES} exhaustive cases + 3 invariants`)
+print(`  PASS  round-transitions: {checked} assertions over {#CASES} exhaustive cases`)

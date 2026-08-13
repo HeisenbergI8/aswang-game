@@ -104,4 +104,4 @@ if failures > 0 then
 	error(`{failures} gate-escape failure(s)`, 0)
 end
 
-print(`  PASS  gate-escape: {assertions} assertions over the full 64-cell grid`)
+print(`  PASS  gate-escape: {assertions} assertions over the full 64-cell grid`) -- count-ok: 64 is the size of the input domain this suite enumerates, not a tally of work

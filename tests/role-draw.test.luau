@@ -22,8 +22,11 @@ local Config = require("../src/shared/Config")
 local RoleDraw = require("../src/server/pure/RoleDraw")
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -264,4 +267,6 @@ if failures > 0 then
 	error(`{failures} role-draw failure(s)`, 0)
 end
 
-print("  PASS  role-draw: shape, determinism, weighting, 10000 rounds, degenerate rosters")
+print(
+	`  PASS  role-draw: {checked} assertions — shape, determinism, weighting, degenerate rosters`
+)
