@@ -45,6 +45,10 @@ local Remotes = require(Shared.Remotes)
 -- in IDLE forever looking exactly like "nobody has joined yet". MonsterService already sits on this
 -- side of the same rule.
 local AntiCheatService = require(script.Parent.AntiCheatService)
+-- C15: ghosts have no server character, so a ghost's position comes from GhostService rather than from
+-- `player.Character`. One direction only — GhostService requires RoundService and AntiCheatService and
+-- must never require this file back, for the same load-order reason the comment above gives.
+local GhostService = require(script.Parent.GhostService)
 local RoundService = require(script.Parent.RoundService)
 local FetchCarry = require(script.Parent.Parent.pure.FetchCarry)
 local TaskListView = require(script.Parent.Parent.pure.TaskListView)
@@ -535,16 +539,40 @@ local function weightFor(player: Player): number
 	)
 end
 
+--[[
+	WHERE A PLAYER IS, FROM WHICHEVER SOURCE OWNS IT — and there are two, because ghosts have no server
+	character.
+
+	A living player's position comes from their replicated `HumanoidRootPart`, which the server owns
+	and a client cannot lie about. A GHOST's comes from `GhostService`, which holds what that ghost's
+	own client last reported — because C15 removed server bodies for ghosts once an audit showed a
+	replicated body per dead player names the dead set to every client.
+
+	THE TRUST BOUNDARY MOVES FOR GHOSTS AND ONLY FOR GHOSTS, and it is worth being explicit that this
+	function is where it moves. A ghost can claim to stand at a task point it is not at, and collect
+	`TaskWeight`'s 0.25 from anywhere. `GhostService` bounds the lie — the report is refused unless the
+	caller is a ghost, and refused again if it jumped further than `FlySpeed` allows — but it cannot
+	eliminate it, and no design that keeps a ghost's position off the wire can.
+
+	The living path is unchanged and must stay that way: if a future edit ever routes a LIVING player
+	through a reported position, kills, task completion and the escape gate all become client-claimed.
+]]
 local function positionOf(player: Player): Vector3?
 	local character = player.Character
 
-	if character == nil then
-		return nil
+	if character ~= nil then
+		local root = character:FindFirstChild("HumanoidRootPart")
+
+		if root ~= nil and root:IsA("BasePart") then
+			return root.Position
+		end
 	end
 
-	local root = character:FindFirstChild("HumanoidRootPart")
+	if RoundService.GetPlayerState(player) == Enums.PlayerState.Ghost then
+		return GhostService.GetGhostPosition(player.UserId)
+	end
 
-	return if root ~= nil and root:IsA("BasePart") then root.Position else nil
+	return nil
 end
 
 --[[
@@ -668,7 +696,20 @@ local function publishBar(player: Player, taskId: string)
 		Period = Config.Tasks.TimingBarPeriod,
 		GreenCenter = Config.Tasks.TimingGreenCenter,
 		GreenHalfWidth = Config.Tasks.TimingGreenHalfWidth,
-		Hits = state.Hits,
+		--[[
+			CEILED, AND THE ROUNDING IS A SECRECY FIX RATHER THAN A COSMETIC ONE.
+
+			C16 made `state.Hits` FRACTIONAL, because a ghost's stop counts at `TaskContributionMult`
+			(0.25). Sent raw, any non-integral value told a living client standing at this task point
+			that a GHOST had contributed — i.e. at least one player is dead, and one of them is within
+			`PresenceRangeStuds` of me right now. Amendment A3 says a client learns about a death by
+			finding the body; this was a death bit and a ghost locator on a remote, with no body.
+
+			The bar only ever renders "how many segments are lit", so the ceiling is what it wanted all
+			along. It is the honest field: it rounds UP so a partial contribution is visible as
+			progress rather than vanishing, and it carries no fractional part to read a state off.
+		]]
+		Hits = math.ceil(state.Hits),
 		HitsRequired = Config.Tasks.TimingHitsRequired,
 	}
 
@@ -805,7 +846,25 @@ local function tickFetch()
 			for _, player in Players:GetPlayers() do
 				local position = positionOf(player)
 
-				if position ~= nil then
+				--[[
+					THE WEIGHT FILTER IS IN THE SELECTION, NOT DOWNSTREAM, AND THAT IS A C16 REGRESSION FIX.
+
+					This loop picks ONE candidate — the nearest — and `FetchCarry.decide` then refuses it
+					unless `CandidateWeight >= FullWeight`. There is no fallback to the next-nearest. That
+					was safe while `positionOf` returned nil for anyone without a character, because only
+					living players could ever enter the loop.
+
+					C16 admitted ghosts to `positionOf`, and a ghost weighs 0.25. So a ghost standing at
+					the fetch source won the nearest-candidate comparison and the decision came back NONE
+					— **the item could never be picked up, 5/5 was unreachable, the gate never opened, and
+					the survivors' win was gone for the round**. Deliberately, by reporting the source's
+					own position (distance 0 beats any real HumanoidRootPart, which sits studs off the
+					part centre); or by accident, whenever an honest ghost drifted near the source.
+
+					Filtering here means a ghost is simply not a carrier candidate, and the nearest player
+					who CAN carry is chosen instead.
+				]]
+				if position ~= nil and weightFor(player) >= Config.Tasks.FullContributionWeight then
 					local distance = (position - source.Position).Magnitude
 
 					if distance <= bestDistance then
@@ -1016,17 +1075,23 @@ end
 	is how the two answers drift apart. The verdict is for the LOG ONLY — read Types.TaskProgressVerdict
 	before echoing any of it anywhere.
 
-	NOT_ALIVE is where C15 will change: §4.7 wants a GHOST to contribute at a reduced rate, so this line
-	becomes an allowlist of ALIVE and GHOST and `weightFor` supplies the difference. Today a ghost is
-	refused, which is correct for C08 and wrong for §4.7 — named here so it is found rather than
-	rediscovered.
+	NOT_ALIVE CHANGED AT C16, exactly as this comment predicted it would. §4.7 wants a GHOST to
+	contribute at a reduced rate, so the gate is now an ALLOWLIST of ALIVE and GHOST and `weightFor`
+	supplies the 25% difference — which it has been able to do since C08, unreachably, because this
+	line refused ghosts before `weightFor` was ever consulted.
+
+	AN ALLOWLIST, NOT `~= "SPECTATOR"`. The denylist form reads identically today and admits LOBBY, and
+	a lobby player holding a task point between rounds would advance a bar for a round that has not
+	been drawn.
 ]]
 local function evaluatePresence(player: Player): (Types.TaskProgressVerdict, string?)
 	if RoundService.GetPhase() ~= Enums.RoundPhase.Active then
 		return "WRONG_PHASE", nil
 	end
 
-	if RoundService.GetPlayerState(player) ~= Enums.PlayerState.Alive then
+	local presenceState = RoundService.GetPlayerState(player)
+
+	if presenceState ~= Enums.PlayerState.Alive and presenceState ~= Enums.PlayerState.Ghost then
 		return "NOT_ALIVE", nil
 	end
 
@@ -1094,7 +1159,15 @@ local function evaluateTimingStop(player: Player): (Types.TimingVerdict, string?
 		return "WRONG_PHASE", nil
 	end
 
-	if RoundService.GetPlayerState(player) ~= Enums.PlayerState.Alive then
+	-- The SAME allowlist as evaluatePresence, changed in the same edit. These two functions are
+	-- deliberately the same shape and the same order; a ghost admitted to one and refused by the other
+	-- would be able to hold a bar but never stop it, which reads as a broken task rather than a rule.
+	-- NOT `timingState` — that name is already a module-level table of TimingState, and selene caught
+	-- the shadow. A local that quietly hides a service's own state table is how two things called the
+	-- same thing start being edited as though they were one.
+	local stopperState = RoundService.GetPlayerState(player)
+
+	if stopperState ~= Enums.PlayerState.Alive and stopperState ~= Enums.PlayerState.Ghost then
 		return "NOT_ALIVE", nil
 	end
 
@@ -1147,8 +1220,57 @@ local function noteTimingStop(player: Player)
 		GraceSeconds = Config.Tasks.TimingGraceSeconds,
 	})
 
-	state.Hits = if hit then state.Hits + 1 else 0
-	task.Progress = math.clamp(state.Hits / Config.Tasks.TimingHitsRequired, 0, 1)
+	--[[
+		WEIGHTED, SINCE C16, AND UNWEIGHTED WAS A LIVE BUG.
+
+		This line read `state.Hits + 1`. Step 8.1 opened `evaluateTimingStop` to ghosts, which meant a
+		dead player's stop counted at FULL rate — routing around §4.7's 25% entirely, and around
+		`pure/TaskWeight`, `TaskParticipants` and the `config.test.luau` pin that all encode it. The
+		presence path was correctly weighted (`weightFor` at its accrual); only timing was not, so
+		ghosts could complete TIMING tasks at a living player's speed and hand the survivors the
+		escape win.
+
+		FRACTIONAL HITS ARE THE POINT. `Hits` is compared against `TimingHitsRequired` and divided by
+		it for the bar, so a ghost needs four successful stops where a survivor needs one, and both
+		read as a bar that fills at the rate their contribution deserves. A miss still resets to zero
+		for everybody — the penalty is not scaled, because failing the window is failing the window.
+	]]
+	--[[
+		A GHOST'S MISS IS A NO-OP, NOT A RESET, AND THIS IS A SABOTAGE FIX.
+
+		`state.Hits` is PER TASK and shared by everyone working it, so `else 0` zeroed the survivors'
+		accumulated progress whoever missed. Once Step 8.1 admitted ghosts to this handler, that made
+		a dead player a denial-of-service: fly to a timing point, press stop about once a second —
+		inside the sustained rate-limit budget, no exploit needed — and at a 1.8s sweep at least one
+		press lands outside the green zone every sweep, so the bar can never be completed while the
+		ghost stands there. Invisible, unkillable, untargetable, and it denies the escape win for the
+		whole round.
+
+		§4.7 gives a ghost the ability to CONTRIBUTE. It does not give them the ability to sabotage,
+		and "a dead player affecting a living fight" is the exact line the corpse raycast exclusion and
+		the whole `CanQuery` argument exist to hold.
+
+		Zero is the penalty for failing the window as a participant who can be punished for it. A ghost
+		cannot be punished — they are already dead — so their miss simply does not count, the same way
+		their hit counts for a quarter.
+	]]
+	local weight = weightFor(player)
+
+	if hit then
+		state.Hits += weight
+	elseif RoundService.GetPlayerState(player) == Enums.PlayerState.Alive then
+		state.Hits = 0
+	end
+	--[[
+		QUANTISED FOR THE SAME REASON `publishBar` CEILS `Hits`, and this is the sibling field that fix
+		missed. `task.Progress` rides `YourTaskProgress` to every player standing at this point, and
+		`state.Hits / 3` with a ghost's 0.25 in it yields 0.0833… where every living hit yields a
+		multiple of 1/3. Reading a non-multiple off that remote proved at least one player was dead AND
+		within `PresenceRangeStuds` of you — a death signal and a ghost locator, which A3 forbids.
+
+		Ceil the hits, then divide: the bar renders lit segments, so this is the number it wanted.
+	]]
+	task.Progress = math.clamp(math.ceil(state.Hits) / Config.Tasks.TimingHitsRequired, 0, 1)
 
 	local completed = false
 

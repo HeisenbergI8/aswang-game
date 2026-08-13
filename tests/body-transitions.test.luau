@@ -23,8 +23,11 @@ type Cause = BodyTransitions.Cause
 type Action = BodyTransitions.Action
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -66,12 +69,24 @@ local EXPECTED: { [string]: Action } = {
 	["ALIVE/DIED"] = "REVOKE", -- a round death is a death; RoundService then makes them a GHOST
 	["ALIVE/LOAD_FAILED"] = "DEFER", -- ALIVE with no body is unkillable AND counted: the worst cell
 
-	-- GHOST: dead. Their old character is the corpse; a second body would be two bodies.
-	["GHOST/JOINED"] = "REVOKE",
-	["GHOST/PHASE_CHANGE"] = "REVOKE",
-	["GHOST/KILLED"] = "REVOKE",
-	["GHOST/DIED"] = "REVOKE",
-	["GHOST/LOAD_FAILED"] = "KEEP", -- nothing was owed, so nothing to retry
+	--[[
+		GHOST: dead, and KEEP ON EVERY CAUSE. Their body is the CORPSE, and MonsterService owns it.
+
+		This row has now moved three times and the history is the point. It was REVOKE (C05, no ghost body),
+		then GRANT (C15, ghosts got real characters so they had a position), then REVOKE again (an audit
+		found a replicated hidden body names the dead set), and now KEEP — because removing the body did not
+		remove the tell, it INVERTED it. `Character == nil` enumerates the dead exactly as well as a tagged
+		body did, and the Aswang is never in that set.
+
+		KEEP is what makes `player.Character ~= nil` true for everyone. REVOKE would destroy the corpse that
+		§4.7 and Amendment A3 both rely on as the death signal; GRANT would spawn a fresh WALKING body for a
+		dead player; DEFER would retry that forever.
+	]]
+	["GHOST/JOINED"] = "KEEP",
+	["GHOST/PHASE_CHANGE"] = "KEEP",
+	["GHOST/KILLED"] = "KEEP",
+	["GHOST/DIED"] = "KEEP",
+	["GHOST/LOAD_FAILED"] = "KEEP", -- the corpse is not a load that can fail
 
 	-- SPECTATOR: joined mid-round. THE C04 REMNANT — uncounted, so it must also be bodiless.
 	["SPECTATOR/JOINED"] = "REVOKE",
@@ -105,56 +120,29 @@ for _, cause in CAUSES do
 	)
 end
 
--- A ghost must never get a second body: their first one is standing in the world as the corpse.
+--[[
+	A GHOST'S BODY IS NEVER TOUCHED, on any cause — asserted as a property over every cause rather than
+	as five cells, so a future edit that acts on one of them fails here.
+
+	GRANT would give a dead player a walking body. REVOKE would destroy the corpse, which is the ONLY
+	thing a living player is supposed to learn a death from (§4.7, Amendment A3) — and destroying it
+	would also make `Character == nil`, which is the enumerable death oracle this whole row exists to
+	avoid. Both directions are wrong, so the answer is neither.
+]]
 for _, cause in CAUSES do
 	check(
-		`a ghost is never granted a body ({cause})`,
-		BodyTransitions.actionFor("GHOST", cause) ~= "GRANT"
+		`a ghost's body is left alone ({cause})`,
+		BodyTransitions.actionFor("GHOST", cause) == "KEEP",
+		"the corpse IS their character; MonsterService owns it"
 	)
 end
 
---[[
-	THE FIVE-ROUND BUG, STATED AS A PROPERTY.
-
-	Every state that MAY hold a body must eventually get one, whatever the cause. The permanent-strand
-	bug was exactly this property failing for one cell: a throttled respawn returned without granting
-	or deferring, so LOBBY/DIED silently became "nothing", and no later phase change repaired it
-	because the dead character was still attached.
-
-	`KEEP` is not an acceptable answer for a state that may hold a body and currently does not — that
-	is the hole. Only GRANT or DEFER discharge the obligation.
-]]
-for _, state in STATES do
-	for _, cause in CAUSES do
-		if not BodyTransitions.mayHaveBody(state) then
-			continue
-		end
-
-		local action = BodyTransitions.actionFor(state, cause)
-
-		check(
-			`an embodied state is never left stranded ({state}/{cause})`,
-			action == "GRANT" or action == "DEFER" or action == "REVOKE",
-			`got {action} — a state that may hold a body must be granted, deferred or explicitly revoked`
-		)
-	end
-end
-
--- A load failure must never be silently dropped for someone owed a body. This is the round-4 defect.
 check(
-	"a failed load for an ALIVE player is retried",
-	BodyTransitions.actionFor("ALIVE", "LOAD_FAILED") == "DEFER"
-)
-check(
-	"a failed load for a LOBBY player is retried",
-	BodyTransitions.actionFor("LOBBY", "LOAD_FAILED") == "DEFER"
+	"a failed load for a GHOST is NOT retried",
+	BodyTransitions.actionFor("GHOST", "LOAD_FAILED") == "KEEP"
 )
 
 -- And must NOT be retried for someone owed nothing, or the retry loops forever on a spectator.
-check(
-	"a failed load for a GHOST is not retried",
-	BodyTransitions.actionFor("GHOST", "LOAD_FAILED") == "KEEP"
-)
 check(
 	"a failed load for a SPECTATOR is not retried",
 	BodyTransitions.actionFor("SPECTATOR", "LOAD_FAILED") == "KEEP"
@@ -181,4 +169,4 @@ if failures > 0 then
 	error(`{failures} failure(s)`, 0)
 end
 
-print("  PASS  body-transitions: 20 cells + 4 properties")
+print(`  PASS  body-transitions: {checked} cells and properties`)

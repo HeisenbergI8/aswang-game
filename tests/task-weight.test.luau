@@ -22,8 +22,11 @@ local STATES: { TaskWeight.PlayerState } = { "LOBBY", "ALIVE", "GHOST", "SPECTAT
 local ROLES: { TaskWeight.Role } = { "SURVIVOR", "ASWANG" }
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -61,6 +64,36 @@ for _, role in ROLES do
 		TaskWeight.forPlayer("GHOST", role, GHOST) == GHOST,
 		`{TaskWeight.forPlayer("GHOST", role, GHOST)} vs {GHOST}`
 	)
+	--[[
+		THE TWO BOUNDS ON THE GHOST RATE, stated as relationships rather than as the literal 0.25.
+
+		Step 8.2 of the C13–C16 plan asked for exactly this and it was missed on the first pass — the
+		suite passed because the equality above predates the step, so nothing failed and nothing was
+		proven. `> 0` is §4.7's retention half: at zero a ghost is a spectator again and the whole
+		reason the ghost system exists is gone. `< ALIVE` is the balance half: at parity, dying costs
+		nothing and the living have no reason to protect anyone.
+	]]
+	check(
+		`{role}: a ghost contributes MORE than nothing`,
+		TaskWeight.forPlayer("GHOST", role, GHOST) > 0,
+		"at zero, §4.7's retention fix does not exist"
+	)
+	check(
+		`{role}: a ghost contributes LESS than the living`,
+		TaskWeight.forPlayer("GHOST", role, GHOST) < TaskWeight.forPlayer("ALIVE", role, GHOST),
+		"at parity, dying is free"
+	)
+	--[[
+		AND FOUR GHOSTS DO NOT OUTPACE ONE SURVIVOR. The literal 0.25 says this today; the assertion
+		says it will keep being true if M12 tunes the rate. A lobby full of dead players finishing the
+		tasks faster than the living ever could is the shape this refuses.
+	]]
+	check(
+		`{role}: three ghosts fall short of one full contributor`,
+		TaskWeight.forPlayer("GHOST", role, GHOST) * 3 < TaskWeight.forPlayer("ALIVE", role, GHOST),
+		"a crowd of ghosts must not outpace a survivor"
+	)
+
 	check(`{role}: LOBBY contributes nothing`, TaskWeight.forPlayer("LOBBY", role, GHOST) == 0)
 	check(
 		`{role}: SPECTATOR contributes nothing (§6.4, joined mid-round)`,
@@ -86,4 +119,4 @@ if failures > 0 then
 	error(`{failures} task-weight assertion(s) failed`, 0)
 end
 
-print("  PASS  task-weight: 8-cell PlayerState × Role grid + 10 value assertions")
+print(`  PASS  task-weight: {checked} assertions over the PlayerState × Role grid`)

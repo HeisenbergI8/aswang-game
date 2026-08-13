@@ -12,8 +12,11 @@ local PlayerBody = require("../src/shared/pure/PlayerBody")
 type PlayerState = PlayerBody.PlayerState
 
 local failures = 0
+local checked = 0
 
 local function check(label: string, ok: boolean, detail: string?)
+	checked += 1
+
 	if ok then
 		return
 	end
@@ -31,7 +34,11 @@ local ALL: { PlayerState } = { "LOBBY", "ALIVE", "GHOST", "SPECTATOR" }
 local BODY: { [PlayerState]: boolean } = {
 	LOBBY = true, -- waiting between rounds, walking around the plaza
 	ALIVE = true, -- dealt into the round
-	GHOST = false, -- dead; their old character is the corpse (Step 4.2). C15 revisits this row.
+	-- C15 flipped this row to true and an exploit audit flipped it back. A SERVER body replicates, and
+	-- a player-named Model per dead player names the dead set to every client — the Aswang is never a
+	-- ghost, so each one eliminates a candidate. The position §4.7 needs comes from the ghost's own
+	-- client instead. `mayBeKilled(GHOST)` stayed false through both flips; that is the assertion below.
+	GHOST = false,
 	SPECTATOR = false, -- joined mid-round. THE C04 REMNANT.
 }
 
@@ -81,4 +88,4 @@ if failures > 0 then
 	error(`{failures} failure(s)`, 0)
 end
 
-print("  PASS  player-body: 8 cells + 3 properties")
+print(`  PASS  player-body: {checked} cells and properties`)

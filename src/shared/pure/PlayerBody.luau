@@ -33,9 +33,22 @@ local PlayerBody = {}
 --[[
 	Whether the server should load a character for this player.
 
-	GHOST returns false and that is deliberate for C05 rather than final: a killed player's character
-	becomes the corpse (Step 4.2), so re-spawning them would put two bodies in the world. C15 gives
-	ghosts their own body and will change this row — in this file, with this test, which is the point.
+	GHOST RETURNS FALSE, AND THIS ROW HAS NOW MOVED THREE TIMES. The history is the useful part.
+
+	The C05-era comment predicted C15 would flip it: "C15 gives ghosts their own body and will change
+	this row." It did — §4.7 needs a ghost to have a position. An exploit audit flipped it back, because
+	a hidden server character still replicates and enumerating it named the dead set. Then a SECOND audit
+	found that removing the body did not remove the tell, it INVERTED it: `Character == nil` enumerates
+	the dead exactly as well, and the Aswang is never among them. Absence is as observable as presence.
+
+	SO THE ANSWER STOPPED BEING ABOUT THIS PREDICATE. A dead player DOES have a character — the corpse,
+	kept attached for the round — but it is not GRANTED by the body rule; `MonsterService` made it and
+	owns it. `BodyTransitions.actionFor` short-circuits GHOST to KEEP before ever consulting this
+	function, so "may the body rule give a ghost a body" is false while "does a ghost have one" is true.
+	Those are different questions and this one answers the first.
+
+	`mayBeKilled` DID NOT MOVE through either flip. That is the whole reason these were two allowlists
+	rather than one predicate.
 ]]
 function PlayerBody.mayHaveBody(state: PlayerState): boolean
 	return state == "LOBBY" or state == "ALIVE"
