@@ -87,6 +87,12 @@ function RoundService.GetPlayerState(player: Player): PlayerState
 	return state.PlayerStates[player.UserId] or Enums.PlayerState.Lobby
 end
 
+-- §4.8, C11. Read by GateService, which never writes it — the gate is derived in one place, from the
+-- task count and the phase. See `SetTasksCompleted`, which moved below `broadcastSnapshot` for C11.
+function RoundService.IsGateOpen(): boolean
+	return state.GateOpen
+end
+
 --[[
 	THE BODY RULE, applied. C04's carried-over warning from C01 (BUILD-PLAN lines ~203–219).
 
@@ -497,6 +503,62 @@ local function broadcastSnapshot()
 	end
 end
 
+--[[
+	How many of this round's tasks are done (§4.4, C08) AND, since C11, whether the gate is open.
+	WRITTEN BY TaskService, READ BY THE SNAPSHOT.
+
+	This service owns the counter for the same reason it owns PlayerStates: `buildSnapshot` is the only
+	thing that sends it, and a counter living next to its sender cannot drift from what the HUD shows.
+	TaskService owns the TASKS; this owns the NUMBER on the bar.
+
+	NOT A PHASE, AND DELIBERATELY NOT GUARDED LIKE ONE. `setPhase` stays private and stays this
+	service's alone; a count is data, and TaskService legitimately writes it in three situations —
+	a completion during ACTIVE, a reset when it clears the round's tasks on the way into INTERMISSION,
+	and the same reset again at IDLE. Refusing the call outside ACTIVE would break the middle one, and
+	that one is a real fix: `enterIdle` resets this counter and `enterIntermission` never has, so until
+	now the HUD showed last round's 4/5 for the whole intermission.
+
+	The clamp is the only validation worth having. A count above TotalRequired would render as 7/5 and
+	a negative one as -1/5, and neither is worth a caller having to remember.
+
+	THE GATE IS DERIVED HERE AND NOWHERE ELSE (§4.8, C11). It is not a second piece of state anybody
+	sets — it is a function of the count and the phase, computed at the one moment the count can
+	change. That is deliberate: a `GateOpen` with its own writer is a `GateOpen` that can disagree
+	with the task bar, and "the HUD says 5/5 but the gate is shut" is a bug report with no thread to
+	pull.
+
+	THE PHASE CONDITION IS NOT DECORATION. `clearTasks` calls this with 0 on the way into both
+	INTERMISSION and IDLE, so the count alone would already close the gate — but `enterEnding` does
+	not touch the count, and a gate left open across ENDING would be visibly open on the end screen of
+	a round the Aswang won on the clock.
+
+	THIS FUNCTION MOVED for C11: it now calls `broadcastSnapshot`, a local declared several hundred
+	lines below where it used to sit, and Luau resolves locals in declaration order.
+]]
+function RoundService.SetTasksCompleted(count: number)
+	state.TasksCompleted = math.clamp(count, 0, Config.Tasks.TotalRequired)
+
+	local open = state.Phase == Enums.RoundPhase.Active
+		and state.TasksCompleted >= Config.Tasks.TotalRequired
+
+	if open == state.GateOpen then
+		return
+	end
+
+	state.GateOpen = open
+
+	-- Immediately, rather than waiting up to SnapshotInterval. This is the single most dramatic
+	-- moment in a round (§4.8, "the finale, and the best clip moment in the game") and half a second
+	-- of every HUD lagging the world is half a second nobody gets back. MarkKilled pushes for the
+	-- same reason.
+	broadcastSnapshot()
+
+	if Config.Debug.VerboseLogging then
+		-- Safe to log: it names a round, never a player.
+		print(`[RoundService] Escape gate {if open then "OPEN" else "shut"}.`)
+	end
+end
+
 --------------------------------------------------------------------------------
 -- Transitions
 --------------------------------------------------------------------------------
@@ -527,7 +589,10 @@ end
 -- Phase handlers
 --
 -- TODO(C03): assign roles via RoleService in STARTING
--- TODO(C07): pick tasks via TaskService in STARTING; TODO(C11): win conditions in ACTIVE
+-- TODO(C11): win conditions in ACTIVE
+-- Tasks are NOT drawn from here. TaskService subscribes to PhaseChanged and draws on STARTING, because
+-- it needs SetTasksCompleted above and requiring it back from here would be a load-time require cycle
+-- — see this file's header on RoleService for what that costs.
 -- TODO(C15): convert dead players to ghosts via GhostService
 --------------------------------------------------------------------------------
 
@@ -547,6 +612,10 @@ end
 
 local function enterIntermission()
 	RoleService.ClearRoles()
+	-- Belt and braces. `clearTasks` closes the gate via SetTasksCompleted(0) on this same transition,
+	-- but that depends on TaskService being loaded and subscribed. A lobby showing an open gate from
+	-- last round is a lie the HUD tells before anybody can act on it, so this service closes it too.
+	RoundService.SetTasksCompleted(0)
 	setAllPlayerStates(Enums.PlayerState.Lobby)
 	setPhase(Enums.RoundPhase.Intermission, Config.Round.Intermission)
 end
@@ -574,8 +643,17 @@ local function enterStarting()
 	state.DealtInSurvivors = livingSurvivorCount()
 	state.AswangKills = 0
 
+	--[[
+		TaskService DRAWS ON THE PhaseChanged FIRE, and this file must not call it. The TODO that used
+		to sit on the next line asked for `TaskService.SelectTasksForRound()` right here, and following
+		it is a require cycle: TaskService needs GetPlayerState, GetPhase and SetTasksCompleted from
+		this file, so a require in this direction closes the loop. That errors at load, init.server.luau
+		swallows it into a single warn, and the server sits in IDLE looking exactly like an empty lobby.
+
+		MonsterService already subscribes rather than being called, for the same reason. One direction
+		only, and this is the wrong one.
+	]]
 	setPhase(Enums.RoundPhase.Starting, Config.Round.StartingDelay)
-	-- TODO(C07): TaskService.SelectTasksForRound()
 end
 
 local function enterActive()

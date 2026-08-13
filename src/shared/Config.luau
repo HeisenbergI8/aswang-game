@@ -111,9 +111,91 @@ local Config = {
 		TotalRequired = 5, -- how many must be completed to open the gate
 		PoolSize = 12, -- how many possible spawn points exist on the map
 		HoldTime = 8,
-		TimingAttempts = 3,
+
+		--[[
+			THE TIMING TASK (§4.4, C09). Three successful stops in the green zone, and a miss puts you
+			back to zero.
+
+			`TimingHitsRequired` was called `TimingAttempts` until C09 and the rename is the honest
+			half of a decision, not tidying. §4.4 says "3 attempts" against a "~10s" duration; three
+			REQUIRED HITS at a 1.8s sweep is roughly ten seconds, and three ALLOWED MISSES is roughly
+			two. The row's own duration column picks the reading, and a knob named for the wrong one
+			is a knob M12 tunes in the wrong direction.
+
+			A MISS RESETS PROGRESS AND THAT DOES NOT CONTRADICT §4.4's ANTI-FRUSTRATION RULE. That
+			rule ("progress belongs to the world") is about ABSENCE — a survivor who dies at 90% leaves
+			90% behind, and `TaskProgress.tick` freezes rather than decays for exactly that reason. A
+			miss is an ACTION, taken by a present player, and the whole of what makes the bar a skill
+			moment is that it can be failed. The task never becomes unwinnable: the next stop is
+			always available.
+		]]
+		TimingHitsRequired = 3,
+
+		--[[
+			The bar's sweep, its green zone, and the allowance for the trip the keypress makes.
+
+			`TimingGreenCenter` and `TimingGreenHalfWidth` are in BAR UNITS (0..1 across the visible
+			track), not seconds, because that is what a player is aiming at. The centre is deliberately
+			0.5 — a zone anywhere else makes one sweep direction easier than the other, and the bar
+			passes every position twice.
+
+			`TimingGraceSeconds` IS THE LATENCY ALLOWANCE AND IT IS THE ONLY HONEST PLACE TO PUT ONE.
+			The server decides the hit from its own clock at the instant the request lands, so a
+			player on a 90 ms connection is judged ~90 ms after they pressed. The alternatives are both
+			worse: trusting a client-supplied timestamp hands the task away outright, and no allowance
+			at all makes the task a ping test. `tests/config.test.luau` pins the grace SMALLER than the
+			zone it widens, so it stays an allowance rather than becoming the mechanic.
+		]]
+		TimingBarPeriod = 1.8,
+		TimingGreenCenter = 0.5,
+		TimingGreenHalfWidth = 0.1,
+		TimingGraceSeconds = 0.05,
+
+		--[[
+			THE FETCH TASK (§4.4, C09). `FetchTime` is the budget for the WHOLE errand — walk to the
+			source, carry the item back — and no line of code reads it, which is why this comment
+			exists. It is the number M12 tunes when the errand feels long, and what it actually tunes
+			is the distance between a source anchor and its task point in the map. C17 owns that
+			distance.
+
+			`FetchDeliverTime` is the part the server can time: how long a carrier stands at the
+			destination once they have arrived. It is short on purpose — the cost of a fetch is the
+			TRAVEL, which is what §4.4's "forces travel across the map — creates isolation" is buying.
+			A long deliver hold would just be a Hold task with extra steps.
+		]]
 		FetchTime = 25,
+		FetchDeliverTime = 3,
+
+		--[[
+			THE TWO-PERSON TASK (§4.4, C10) — and per Amendment A2, the Aswang is a full participant.
+
+			`TwoPersonParticipants` is a COUNT OF FULL CONTRIBUTORS, and `FullContributionWeight` is
+			what "full" means, measured against what `server/pure/TaskWeight.luau` returns. Deriving
+			the count from the weights is the entire design: an ALIVE survivor and an ALIVE Aswang both
+			weigh 1, so a survivor-plus-Aswang pair satisfies the requirement and the task completes
+			normally — not because a rule says so, but because there is nowhere for a rule to say
+			otherwise. See A2's own words: "C10's participant count must be derived from the same
+			weights, so that it inherits the property instead of restating it."
+
+			It also settles C15 in advance without a second decision: a ghost weighs
+			`Ghost.TaskContributionMult` (0.25), so two ghosts do not open a two-person task. §4.4 says
+			"2 survivors present", and §4.7 says ghosts "still matter", not that they substitute.
+		]]
 		TwoPersonTime = 12,
+		TwoPersonParticipants = 2,
+		FullContributionWeight = 1,
+
+		--[[
+			How close a survivor must get to the open escape gate to win the round (§4.8, C11).
+
+			IT MUST NOT EXCEED `Monster.KillRange`, and `tests/config.test.luau` pins that. The finale
+			§4.8 is describing is a survivor running for a gate with the Aswang between them and it; if
+			the gate could be triggered from further away than the Aswang can reach, camping it would
+			stop working and the last thirty seconds of every round would lose its only tension. The
+			relation is a design constraint, not a safety margin — tune the gate down or the kill range
+			up, never past each other.
+		]]
+		GateRangeStuds = 6,
 
 		--[[
 			The minimum distance between two SELECTED task points (§4.4, "spread"). C07's draw honours it
@@ -124,6 +206,75 @@ local Config = {
 			stop players (and the monster) memorising a route. tests/config.test.luau pins that.
 		]]
 		MinSpacingStuds = 20,
+
+		--[[
+			How close a player must be to a selected task point for the server to count them present.
+
+			IT SHOULD STAY UNDER HALF `MinSpacingStuds`, and the reason is worth stating accurately
+			because an earlier version of this comment overstated it.
+
+			`RequestTaskProgress` takes no arguments: the server decides which task point the player is
+			at from their own character's position. Keeping this under half the spacing means two
+			selected points are normally never in range at once, so "which one" has an obvious answer.
+
+			**THE DRAW DOES NOT GUARANTEE THE SPACING** — that claim used to sit here and it was false.
+			`MinSpacingStuds` is a request to `pure/TaskSelection.select`, whose fallback pass drops
+			spacing entirely rather than return a round with too few tasks. An audit measured twelve
+			points in one 30x30 room: 2000 of 2000 draws violated it. So this relation is defence in
+			depth, not an invariant. What actually makes the resolution safe is `taskPointAt` picking
+			the NEAREST INCOMPLETE point in range, and TaskService warning loudly when the draw reports
+			the fallback fired.
+
+			It is also the distance at which a player is safe to stand still, which is the Aswang's
+			whole opportunity (§4.4, "forces you to stand still and vulnerable"). Tuning it up makes
+			tasks safer; that is an M12 conversation, not a correctness one.
+		]]
+		PresenceRangeStuds = 9,
+
+		--[[
+			How long one presence heartbeat stays valid. A player holding continuously must never fall
+			out of the window between two heartbeats, so this has to exceed `HeartbeatInterval` with room
+			to spare — the interval is a client-side timer, on a phone, over the same connection that is
+			already carrying a snapshot twice a second.
+
+			It is short deliberately. It is the window in which a player who has walked away still
+			counts, and Step 3.3 closes most of that hole a second way by re-measuring distance on every
+			server tick rather than trusting the stamp.
+		]]
+		PresenceGraceSeconds = 0.75,
+
+		-- How often a HOLDING client reports presence. Its reciprocal must stay under
+		-- AntiCheat.Budgets.RequestTaskProgress.RefillPerSecond, or an honest client rate-limits itself
+		-- for doing exactly what the game asked of it — the failure that budget's own comment warns
+		-- about. 4/s against a refill of 6/s leaves headroom for a retry after a dropped packet.
+		HeartbeatInterval = 0.25,
+
+		--[[
+			THE TASK MARKER (C08's affordance, rendered client-side).
+
+			A ProximityPrompt used to do this and could not: freeing the `E` key required
+			`KeyboardKeyCode = None`, and Roblox's CoreScript refuses to render a prompt without a
+			keycode. TaskController draws these instead, off the `ActiveTaskPoint` /
+			`CompletedTaskPoint` tags. See the note where `attachPrompt` used to live.
+
+			`MarkerVisibleStuds` IS DELIBERATELY MUCH LARGER THAN `PresenceRangeStuds`, and the two
+			answer different questions. Presence range (9) is how close you must be for the server to
+			count you. Marker range is how far away you can SEE that a task exists — a player who can
+			only find a task by standing on it cannot plan a route, which is the failure a manual
+			playtest hit: three rounds, 68 refusals, two tasks finished.
+
+			Showing the real five to everyone is not a leak and is not new. `server/pure/TaskListView`
+			records that `ActiveTaskPoint` already replicates and that C12 is "an information-channel
+			lie… NOT a secret". The Aswang's FAKE LIST is unaffected: it lies about which points it is
+			told to visit, never about what the world looks like.
+
+			RGB TRIPLES, NEVER Color3 — same reason as Monster's palette. Lune has no Roblox datatypes
+			and `tests/config.test.luau` requires this file.
+		]]
+		MarkerVisibleStuds = 220,
+		MarkerHeightStuds = 5,
+		MarkerActiveRgb = { 255, 214, 92 },
+		MarkerCompleteRgb = { 96, 220, 120 },
 	},
 
 	Salt = {
@@ -202,6 +353,20 @@ local Config = {
 			-- A presence heartbeat while standing at a task point. Must out-pace the snapshot tick or
 			-- a player holding a task is throttled while doing exactly what the game asked of them.
 			RequestTaskProgress = { Capacity = 12, RefillPerSecond = 6 },
+			--[[
+				A deliberate keypress at a moving bar (C09). Looser than legitimate play, as this
+				table's header requires: an honest player fires once per sweep — about 0.55/s at a
+				1.8s period — against a sustained 1/s, and the burst covers a player mashing at the
+				zone through one sweep plus a reconnect retry.
+
+				It is deliberately far tighter than RequestTaskProgress next door, because the shapes
+				are opposite. A presence heartbeat is CONTINUOUS and idempotent; a stop is DISCRETE and
+				changes state every time it lands. Spamming it is the closest thing C09 has to an
+				exploit — enough stops per sweep and one of them is inside the zone by arithmetic
+				rather than by skill — so the limiter is the second line here and the first is that a
+				miss resets the hit count.
+			]]
+			RequestTimingStop = { Capacity = 5, RefillPerSecond = 1 },
 			-- Deliberate, rare acts. Capacity covers a double-tap and a reconnect retry; nothing more.
 			RequestTransform = { Capacity = 3, RefillPerSecond = 0.2 },
 			RequestKill = { Capacity = 3, RefillPerSecond = 0.25 },
