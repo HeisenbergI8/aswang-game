@@ -28,6 +28,7 @@ local Remotes = require(Shared.Remotes)
 -- like "nobody has joined yet".
 local RoleService = require(script.Parent.RoleService)
 local BodyTransitions = require(Shared.pure.BodyTransitions)
+local RejoinResolve = require(Shared.pure.RejoinResolve)
 local RoundTransitions = require(Shared.pure.RoundTransitions)
 local Types = require(Shared.Types)
 local WinConditions = require(Shared.pure.WinConditions)
@@ -404,8 +405,13 @@ local function aliveCount(): number
 end
 
 --[[
-	Living SURVIVORS — alive, and not the Aswang. Distinct from aliveCount(), which is what the client
-	snapshot carries, and the difference is exactly one player.
+	Living SURVIVORS — alive, and not the Aswang. Distinct from aliveCount(), which is a SERVER-ONLY
+	headcount, and the difference is exactly one player.
+
+	`aliveCount()` used to be described here as "what the client snapshot carries". Amendment A3 removed
+	that field; the function survives only for the VerboseLogging line below and for future server-side
+	bookkeeping. Neither number reaches a client, and re-attaching either to a payload reopens the death
+	oracle A3 closed.
 
 	Reads state.AswangUserId, which is why this cannot live in the pure module: the count is derived
 	from the secret. What crosses to WinConditions is a NUMBER, and a number is not a hint — the
@@ -434,10 +440,110 @@ local function isRoundUnderway(): boolean
 		or state.Phase == Enums.RoundPhase.Ending
 end
 
+--[[
+	WHO WAS DEALT INTO THIS ROUND (§6.4, C15). Its OWN table, and that is not a style choice.
+
+	It cannot live inside `state.PlayerStates`, because `setAllPlayerStates` opens with `table.clear`
+	— so the set would be wiped by the very function that should be populating it. Populated in
+	`enterStarting`, cleared in `enterIntermission`, `enterIdle` and `Init`.
+
+	It is keyed by UserId and survives a disconnect ON PURPOSE: that is the entire point. `PlayerStates`
+	is also keyed by UserId and now survives one too, and the two together are what let a returning
+	player be resolved by `pure/RejoinResolve` instead of being blanket-marked SPECTATOR.
+]]
+local dealtIn: { [number]: boolean } = {}
+
+--[[
+	THE HUSKS. A disconnected player's body, left standing in the Barrio (§6.4, C15).
+
+	Roblox removes a player's character when the Player object goes, so a body that outlives its owner
+	has to be taken from them first — `player.Character = nil` and re-parent — which is exactly what
+	`MonsterService.makeCorpse` already does for a kill. This is the same move for a different reason.
+
+	WHY THIS EXISTS. Without it a survivor could Alt-F4 the moment they heard the transform and return
+	invulnerable, because C01 marked every mid-round arrival SPECTATOR and a SPECTATOR cannot be killed.
+	Resolving them to GHOST would close that but still pay the quitter — they would land with the full
+	ghost feature set having never been caught. The husk makes quitting NEUTRAL: the body stays, the
+	Aswang can kill it, and the owner comes back to whatever is true when they come back.
+
+	THE HOLE THIS DOES NOT CLOSE, stated here so nobody discovers it as a surprise: Roblox does not
+	guarantee a rejoining player the server they left. A quitter who lands on a different server never
+	meets their husk. This deters the player who comes back HERE and does nothing about one who comes
+	back anywhere.
+]]
+type Husk = {
+	Character: Model,
+	UserId: number,
+}
+
+local husks: { [number]: Husk } = {}
+local husksFolder: Folder? = nil
+
+local function clearHusk(userId: number)
+	local husk = husks[userId]
+
+	if husk == nil then
+		return
+	end
+
+	husks[userId] = nil
+	husk.Character:Destroy()
+end
+
+local function clearAllHusks()
+	for userId in husks do
+		clearHusk(userId)
+	end
+
+	table.clear(husks)
+end
+
 local function setAllPlayerStates(newState: PlayerState)
+	--[[
+		A PLAYER LEAVING GHOST LOSES THEIR BODY EXPLICITLY, AND THIS IS A C15 REGRESSION FIX.
+
+		Until C15, `mayHaveBody("GHOST")` was false, so a ghost had no body and this function had
+		nothing to clean up. C15 gave ghosts bodies — and quietly removed the only thing that was
+		destroying them, because `applyBodyRule`'s GRANT branch is gated on `player.Character == nil`
+		and a ghost body is very much not nil. GRANT therefore no-ops and the ghost body SURVIVES the
+		transition to LOBBY.
+
+		What that shipped, before this fix: die in round N; in round N+1 you are ALIVE, invisible,
+		non-collidable and still tagged `GhostBody` — and if the draw picks you, an INVISIBLE ASWANG,
+		because `applyFullLook` writes Colour and Material and never Transparency. Two audits found it
+		independently; `npm run verify` was green over it, which is this repo's recurring lesson.
+
+		Detaching here rather than teaching GRANT to replace a body is deliberate: GRANT cannot tell a
+		stale body from a correct one without knowing what state the character was BUILT for, and
+		threading that through is a bigger change than the one bug needs. This function is the single
+		place every player's state is rewritten at once, so it is the honest place for "your old body
+		is no longer valid".
+	]]
+	local hadGhostBody: { Player } = {}
+
+	if newState ~= Enums.PlayerState.Ghost then
+		for _, player in Players:GetPlayers() do
+			if state.PlayerStates[player.UserId] == Enums.PlayerState.Ghost then
+				table.insert(hadGhostBody, player)
+			end
+		end
+	end
+
 	table.clear(state.PlayerStates)
 	for _, player in Players:GetPlayers() do
 		state.PlayerStates[player.UserId] = newState
+	end
+
+	-- BEFORE applyBodyRule, so the GRANT below finds `Character == nil` and builds a fresh, visible,
+	-- collidable body rather than declining to act.
+	for _, player in hadGhostBody do
+		local character = player.Character
+
+		player.Character = nil
+
+		if character ~= nil then
+			character:Destroy()
+		end
 	end
 
 	-- After the whole table is written, not inside the loop: applyBodyRule reads GetPlayerState, and a
@@ -490,7 +596,6 @@ local function buildSnapshot(player: Player): Types.ClientRoundSnapshot
 		TasksCompleted = state.TasksCompleted,
 		TasksRequired = Config.Tasks.TotalRequired,
 		GateOpen = state.GateOpen,
-		AlivePlayerCount = aliveCount(),
 		YourState = RoundService.GetPlayerState(player),
 	}
 end
@@ -605,6 +710,10 @@ local function enterIdle()
 	-- The live assignments go; RoleService's HISTORY deliberately survives, because it is the whole
 	-- anti-repeat mechanism and a server that reset it every lobby would have no memory at all.
 	RoleService.ClearRoles()
+	-- The round is over, so nobody is dealt into it and no body should be standing in for anyone.
+	-- Cleared here as well as in enterIntermission because IDLE is reachable directly (too few players).
+	table.clear(dealtIn)
+	clearAllHusks()
 	-- Spectator status lifts here: whoever is on the server is a candidate for the next round.
 	setAllPlayerStates(Enums.PlayerState.Lobby)
 	setPhase(Enums.RoundPhase.Idle)
@@ -616,6 +725,15 @@ local function enterIntermission()
 	-- but that depends on TaskService being loaded and subscribed. A lobby showing an open gate from
 	-- last round is a lie the HUD tells before anybody can act on it, so this service closes it too.
 	RoundService.SetTasksCompleted(0)
+	--[[
+		The dealt-in set and every husk go here, and the ORDER matters relative to setAllPlayerStates.
+
+		A husk left standing into INTERMISSION is a body in the lobby with no owner, and — worse — the
+		next round's `enterStarting` would deal its owner in fresh while their old body still stood in
+		the plaza. Both tables describe ONE round and neither may outlive it.
+	]]
+	table.clear(dealtIn)
+	clearAllHusks()
 	setAllPlayerStates(Enums.PlayerState.Lobby)
 	setPhase(Enums.RoundPhase.Intermission, Config.Round.Intermission)
 end
@@ -623,8 +741,21 @@ end
 local function enterStarting()
 	state.RoundNumber += 1
 	-- Everyone present when the round is drawn is dealt in. Anyone arriving from here until the
-	-- next INTERMISSION becomes a SPECTATOR in onPlayerAdded.
+	-- next INTERMISSION and who is NOT in `dealtIn` becomes a SPECTATOR in onPlayerAdded.
 	setAllPlayerStates(Enums.PlayerState.Alive)
+
+	--[[
+		AFTER setAllPlayerStates, not before, and this is the trap the plan called out by name:
+		`setAllPlayerStates` opens with `table.clear(state.PlayerStates)`, so anything written into
+		that table beforehand is destroyed. `dealtIn` is a separate table for exactly this reason, and
+		populating it here — after the states are written, from the same roster — keeps the two in step.
+	]]
+	table.clear(dealtIn)
+	clearAllHusks()
+
+	for _, player in Players:GetPlayers() do
+		dealtIn[player.UserId] = true
+	end
 
 	-- BEFORE setPhase, deliberately. setPhase fires PhaseChanged and pushes a snapshot to every
 	-- client; drawing first means no subscriber can observe a STARTING round that has no Aswang yet.
@@ -742,7 +873,24 @@ function RoundService.MarkKilled(player: Player, causedByKill: boolean?)
 
 	state.PlayerStates[player.UserId] = Enums.PlayerState.Ghost
 
-	applyBodyRule(player)
+	--[[
+		KILLED, AND IT IS NOW A NO-OP FOR A GHOST — deliberately, and the cause is still passed.
+
+		`BodyTransitions` answers KEEP for every GHOST cause since the C15 redesign, because a dead
+		player's character IS THE CORPSE and `MonsterService` owns it. So this call changes nothing
+		today. It stays for two reasons: the cause is the truthful description of what happened, and an
+		audit found `"KILLED"` was previously passed by NOBODY, which made a tested cell unreachable
+		from the running system.
+
+		What it protects against is the reset/fall path. There, the dead character is still attached and
+		the player becomes a GHOST — KEEP leaves that body exactly where it is, which is what a corpse
+		is. Before the redesign this path left a player wearing a visible corpse that no rule owned; now
+		the rule owns it by name.
+
+		NO SECOND CALL, and no `lastRespawnAt` stamp. Both existed to make a ghost body spawn, and there
+		is no ghost body to spawn any more.
+	]]
+	applyBodyRule(player, "KILLED")
 
 	--[[
 		THE ASWANG DIED, SO THE ROUND IS OVER. Mirrors onPlayerRemoving's abort exactly.
@@ -785,9 +933,24 @@ function RoundService.MarkKilled(player: Player, causedByKill: boolean?)
 		state.AswangKills += 1
 	end
 
-	-- Immediately, rather than waiting up to SnapshotInterval: AlivePlayerCount and the victim's own
-	-- YourState both just changed, and the victim's HUD is the one screen guaranteed to be looked at.
-	broadcastSnapshot()
+	--[[
+		THE VICTIM ONLY. Not `broadcastSnapshot()`, and the difference is Amendment A3's whole point.
+
+		This line used to broadcast, on the reasoning that a bystander's payload was unchanged so the
+		extra send carried nothing. An exploit audit showed that is false, and the attack is clean:
+		snapshots otherwise arrive on a fixed `SnapshotInterval` cadence, so a client stamps arrivals
+		and flags any gap under the interval as off-cadence. The only other off-cadence triggers are
+		SELF-IDENTIFYING — a phase change ships `PhaseChanged` in the same frame, a gate flip changes
+		`GateOpen`, a task completion changes `TasksCompleted`. So: an early snapshot with none of
+		those three changed means SOMEBODY JUST DIED, to the millisecond, delivered to all eight
+		clients. That is precisely the global sub-second death signal A3 removed `AlivePlayerCount`
+		to kill; A3 deleted the payload and left the trigger.
+
+		The victim is the only client whose snapshot actually changed — their own `YourState` is now
+		GHOST — and they are the one screen guaranteed to be looked at. Everyone else waits for the
+		next tick, which is what "death is not public" means.
+	]]
+	snapshotRemote:FireClient(player, buildSnapshot(player))
 
 	if Config.Debug.VerboseLogging then
 		-- A UserId and a count. Never a role, and never who did it — this line is read while a round is
@@ -863,11 +1026,41 @@ end
 --------------------------------------------------------------------------------
 
 local function onPlayerAdded(player: Player)
-	-- Joined mid-round → spectator until the next round is drawn. Without this a late arrival is
-	-- indistinguishable from a survivor and would be counted alive by every win check from C06 on.
-	state.PlayerStates[player.UserId] = if isRoundUnderway()
-		then Enums.PlayerState.Spectator
-		else Enums.PlayerState.Lobby
+	--[[
+		WHAT A MID-ROUND ARRIVAL BECOMES (§6.4, C15), decided by `pure/RejoinResolve` rather than here.
+
+		This used to be an unconditional SPECTATOR for anyone arriving mid-round, and that was a live
+		exploit: a SPECTATOR is uncounted, has no body and — since C05's "both alive" rule — CANNOT BE
+		KILLED. Hear the transform, Alt-F4, come back, and you are invulnerable for the rest of the
+		round. `tests/rejoin-resolve.test.luau` pins the cell that closes it.
+
+		The rule is "stay as you were": a returning player who was dealt in resumes whatever state the
+		server still holds for them. Their husk decides which one that is — untouched and they are
+		still ALIVE, killed while they were gone and they are a GHOST. `onPlayerRemoving` preserves the
+		entry rather than deleting it, which is what makes that lookup meaningful.
+	]]
+	local resolved = RejoinResolve.evaluate({
+		Phase = state.Phase,
+		WasDealtIn = dealtIn[player.UserId] == true,
+		StoredState = state.PlayerStates[player.UserId],
+	})
+
+	-- The cast crosses a pure-module boundary: `RejoinResolve.PlayerState` and `Types.PlayerState` are
+	-- the same structural union, but the analyzer widens the returned literals to plain `string` on the
+	-- way out. Same bite CLAUDE.md documents for `Enums.RoundPhase.Idle`.
+	state.PlayerStates[player.UserId] = resolved :: PlayerState
+
+	--[[
+		THE HUSK IS CONSUMED, NOT MERELY DISCARDED. It has served its purpose the moment its owner is
+		back and re-stated: leaving it standing would put two bodies in the Barrio for one player, and
+		the spare would still be killable, which is a second life rather than a deterrent.
+	]]
+	clearHusk(player.UserId)
+
+	if Config.Debug.VerboseLogging and isRoundUnderway() then
+		-- A UserId and a state. Never a role.
+		print(`[RoundService] {player.UserId} arrived mid-round as {resolved}.`)
+	end
 
 	--[[
 		BEFORE applyBodyRule, so the very first character this player gets is already watched. Connecting
@@ -892,7 +1085,60 @@ local function onPlayerAdded(player: Player)
 end
 
 local function onPlayerRemoving(player: Player)
-	state.PlayerStates[player.UserId] = nil
+	--[[
+		THE HUSK (§6.4, C15). A disconnect during a live round leaves the body behind and CHANGES
+		NOTHING about the player's state.
+
+		This is the half that used to read `state.PlayerStates[player.UserId] = nil`, and dropping the
+		entry is what made the returning player unaccountable — `onPlayerAdded` then had nothing to
+		resolve against and marked them SPECTATOR, which is uncounted and unkillable. The entry now
+		survives, and so does the body.
+
+		The body has to be TAKEN before the Player object goes, because Roblox removes a character with
+		its owner. `player.Character = nil` then re-parent is the same move `MonsterService.makeCorpse`
+		makes for a kill, for a different reason: this body is still alive and still killable.
+
+		A player who never returns leaves a husk standing until the round ends, and that is correct —
+		they were dealt in, they are still counted, and the Aswang can still come for them. It is the
+		absence of a free escape, which is the whole point.
+	]]
+	local dealtInThisRound = dealtIn[player.UserId] == true
+	local shouldLeaveHusk = isRoundUnderway()
+		and dealtInThisRound
+		and state.PlayerStates[player.UserId] == Enums.PlayerState.Alive
+
+	if shouldLeaveHusk then
+		local character = player.Character
+		local folder = husksFolder
+
+		if character ~= nil and folder ~= nil then
+			player.Character = nil
+			character.Name = `Husk_{player.UserId}`
+			character.Parent = folder
+
+			--[[
+				ANCHORED AND NON-COLLIDABLE, the same treatment `MonsterService.makeCorpse` gives a
+				body and for the same reasons. A husk is a full rig with no owner: left collidable it
+				is a wall players can stand on and hide behind, and left unanchored it is ragdoll
+				physics the server simulates for nothing.
+
+				It stays QUERYABLE on purpose — the Aswang has to be able to find and kill it, and the
+				kill's own raycast excludes the husk folder wholesale rather than relying on the parts.
+			]]
+			for _, part in character:GetDescendants() do
+				if part:IsA("BasePart") then
+					part.Anchored = true
+					part.CanCollide = false
+				end
+			end
+
+			husks[player.UserId] = { Character = character, UserId = player.UserId }
+		end
+		-- `state.PlayerStates` is deliberately NOT cleared on this path.
+	else
+		state.PlayerStates[player.UserId] = nil
+	end
+
 	-- The in-flight load (if any) will fail in its own pcall and clear this itself; dropping the key
 	-- here as well keeps the table bounded by the players actually on the server.
 	pendingLoads[player.UserId] = nil
@@ -965,9 +1211,99 @@ end
 -- Lifecycle
 --------------------------------------------------------------------------------
 
+--[[
+	THE HUSK SEAM FOR C15's KILL PATH. Two functions, deliberately narrow.
+
+	A husk is a body with no `Player`, and `MonsterService.validateAndKill` opens with
+	`Players:GetPlayerByUserId`, which returns nil for one. Without these the husk would be scenery and
+	quitting would still be a free escape — the body would stand there unkillable, which is the exact
+	exploit the husk exists to close, wearing a different shape.
+
+	A HUSK IS ALWAYS A SURVIVOR, and that is guaranteed rather than assumed: `onPlayerRemoving` aborts
+	the round outright when the Aswang leaves (see its comment), so the Aswang has no husk case at all.
+	Callers may take `TargetIsAswang = false` for any husk, and `MonsterService` does.
+]]
+--[[
+	The husk folder, for `MonsterService.hasLineOfSight`'s raycast filter.
+
+	Exposed as the FOLDER rather than as a list of bodies so the exclusion is wholesale and cannot go
+	stale between a husk being created and the next kill attempt — the same shape the corpse folder
+	uses, for the same reason.
+]]
+function RoundService.GetHusksFolder(): Folder?
+	return husksFolder
+end
+
+function RoundService.GetHuskCharacter(userId: number): Model?
+	local husk = husks[userId]
+
+	return if husk ~= nil then husk.Character else nil
+end
+
+--[[
+	A husk was killed (§4.3, §6.4). The owner's stored state becomes GHOST, so when they reconnect
+	`RejoinResolve` returns GHOST and they come back dead — which is what actually happened to them.
+
+	The body is left in the world for `MonsterService` to turn into a corpse, exactly as a live
+	player's is: the husk entry is dropped so nothing else claims it, but the Model is NOT destroyed
+	here. Destroying it would delete the corpse before the corpse existed.
+]]
+function RoundService.MarkHuskKilled(userId: number)
+	if husks[userId] == nil then
+		return
+	end
+
+	husks[userId] = nil
+	state.PlayerStates[userId] = Enums.PlayerState.Ghost
+
+	--[[
+		The kill counts. §4.8's win condition is `AswangKills >= DealtInSurvivors - 2`, and a husk was
+		dealt in and counted in `DealtInSurvivors` — so a husk kill that did not increment this would
+		make the round unwinnable by exactly the number of people who quit. Amendment A1's whole point
+		is that the win counts KILLS rather than presence, and this is a kill.
+	]]
+	state.AswangKills += 1
+
+	if Config.Debug.VerboseLogging then
+		print(`[RoundService] Husk of {userId} killed; {state.AswangKills} kill(s).`)
+	end
+
+	--[[
+		NO SNAPSHOT PUSH AT ALL HERE, and that is not an omission.
+
+		`MarkKilled` pushes to the victim because the victim's own `YourState` changed and they are
+		watching. A husk's owner is DISCONNECTED — there is no client to send to. Broadcasting instead
+		would be strictly worse than the bug the audit found in `MarkKilled`: an off-cadence snapshot
+		to all eight clients announcing the death of somebody who was not even in the server, which no
+		amount of "you had to find the body" covers. The corpse `makeCorpse` leaves behind is the
+		signal, exactly as it is for a live kill.
+	]]
+
+	--[[
+		THE SAME ATTRITION CHECK MarkKilled RUNS, and it has to be here rather than factored out,
+		because factoring it out is what the comment in MarkKilled warns has already been wrong twice.
+		The rule reads `state.AswangKills`, nothing but a validated kill writes it, and a husk kill IS
+		a validated kill — it went through KillValidation, range and line of sight exactly as a live
+		one does.
+	]]
+	if
+		WinConditions.aswangWinsByKills({
+			AswangKills = state.AswangKills,
+			DealtInSurvivors = state.DealtInSurvivors,
+			Threshold = Config.Round.AswangWinSurvivorThreshold,
+		})
+	then
+		RoundService.EndRound(Enums.RoundResult.AswangWins)
+	end
+end
+
 function RoundService.Init()
 	state.Phase = Enums.RoundPhase.Idle
 	table.clear(state.PlayerStates)
+	-- The dealt-in set is round-scoped and a fresh server is between rounds by definition. Cleared here
+	-- as well as on both round exits, so a reloaded service cannot inherit a previous round's roster.
+	table.clear(dealtIn)
+	table.clear(husks)
 end
 
 function RoundService.Start()
@@ -981,6 +1317,17 @@ function RoundService.Start()
 		— see `artifacts/spectator-premise.md`.
 	]]
 	Players.CharacterAutoLoads = false
+
+	--[[
+		One parent for every husk, so a round change clears them wholesale — the same shape
+		`MonsterService`'s `Corpses` folder uses, and for the same reason: a body with no owner must
+		never survive into the next round's lobby.
+	]]
+	local folder = Instance.new("Folder")
+
+	folder.Name = "Husks"
+	folder.Parent = workspace
+	husksFolder = folder
 
 	-- ORDER MATTERS. init.server.luau wraps Start() in a pcall that only warns, so anything throwing
 	-- part-way through leaves a server with whatever had been registered so far — and a server with

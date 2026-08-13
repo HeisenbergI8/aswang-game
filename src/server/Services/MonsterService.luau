@@ -25,8 +25,9 @@
 	a client `NOT_ASWANG` would be a free role oracle for anyone willing to spam the remote.
 
 	`PlayerKilled` (C05) carries a victim and a position, and NOTHING ELSE — no killer, no name, no
-	direction, no distance, no "you were seen". Three things about that are worth knowing before anyone
-	adds a field:
+	direction, no distance, no "you were seen". SINCE AMENDMENT A3 IT ALSO GOES TO ONE CLIENT: the
+	victim, via FireClient. Broadcast, it was the strongest death oracle in the game — see the comment
+	at the fire site. Three things about the payload are worth knowing before anyone adds a field:
 
 	  · A killer field here IS now caught — `check-secrecy.mjs` was repaired after an audit found this
 	    exact hole. Two things were wrong: its broadcast rule read the ARGUMENT TEXT, so a typed local
@@ -294,9 +295,16 @@ end
 	the age rating to 13+ and cuts off the audience that plays and spends the most. A body that lies
 	there and fades is the whole effect.
 ]]
-local function makeCorpse(victim: Player, character: Model)
-	victim.Character = nil
+--[[
+	TAKES A UserId, NOT A Player, SINCE C15. A husk — the body of a player who disconnected mid-round —
+	has no `Player` object at all, and it is a legitimate kill target. The only thing this function ever
+	wanted from the Player was the id for the corpse's name.
 
+	DETACHING IS THE CALLER'S JOB for the same reason. A live victim's character must be taken from them
+	(`player.Character = nil`) before it becomes a corpse, or Roblox removes it with its owner; a husk
+	was detached when it was created. `commitKill` does the detach; this function does the body.
+]]
+local function makeCorpse(victimUserId: number, character: Model)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 
 	if humanoid ~= nil then
@@ -315,7 +323,7 @@ local function makeCorpse(victim: Player, character: Model)
 		end
 	end
 
-	character.Name = `Corpse_{victim.UserId}`
+	character.Name = `Corpse_{victimUserId}`
 	character.Parent = corpses
 
 	--[[
@@ -336,9 +344,19 @@ local function makeCorpse(victim: Player, character: Model)
 			end
 		end
 
-		task.delay(Config.Monster.CorpseFadeTime, function()
-			character:Destroy()
-		end)
+		--[[
+			IT FADES BUT IS NOT DESTROYED. §4.3's "corpse remains for 45s, then fades" is honoured
+			visually; the Model itself survives until `clearCorpses` takes it at the end of the round.
+
+			WHY: since C15's redesign the corpse IS the dead player's `player.Character`, and that is
+			what keeps `Character ~= nil` true for everybody. Destroying it here would set that property
+			to nil for exactly the dead, and `Character == nil` is one line for any client to enumerate —
+			the death oracle Amendment A3 removed two other channels to close. The body going invisible
+			is the intended §4.3 behaviour; the body ceasing to exist is a leak with a 45-second fuse.
+
+			`clearCorpses` runs on the way into INTERMISSION and IDLE, at which point every player's
+			state is being rewritten anyway and the distinction carries nothing.
+		]]
 	end)
 end
 
@@ -570,6 +588,24 @@ local function hasLineOfSight(killerRoot: BasePart, targetRoot: BasePart): boole
 		table.insert(filter, folder)
 	end
 
+	--[[
+		HUSKS TOO, SINCE C15, AND FOR THE IDENTICAL REASON THE CORPSE FOLDER IS HERE: a body is not
+		cover. The comment above already states that a raycast hits parts regardless of CanCollide —
+		which is why anchoring husks and clearing their collision (`RoundService.onPlayerRemoving`) is
+		NOT sufficient on its own and this exclusion is still required.
+
+		Without this, quitting while standing in a doorway leaves permanent cover for every survivor
+		for the rest of the round — the ray stops on your abandoned body — and two alts turn a
+		chokepoint into a safe room. A disconnected player affecting a live fight is precisely what
+		the corpse exclusion exists to prevent, arriving through a folder that did not exist when that
+		rule was written.
+	]]
+	local husks = RoundService.GetHusksFolder()
+
+	if husks ~= nil then
+		table.insert(filter, husks)
+	end
+
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = filter
 	params.IgnoreWater = true
@@ -593,7 +629,25 @@ end
 	  4. The broadcast, last, so no client is told about a kill the server has not finished committing.
 ]]
 local function commitKill(killer: Player, victim: Player, victimCharacter: Model, position: Vector3)
-	makeCorpse(victim, victimCharacter)
+	--[[
+		THE CHARACTER IS **NOT** DETACHED, AND THAT IS THE C15 REDESIGN IN ONE LINE.
+
+		This used to read `victim.Character = nil`, so a dead player had no character for the rest of
+		the round. An exploit audit found that `Character == nil` is itself the death oracle — one line
+		to enumerate, a `GetPropertyChangedSignal` away from a timestamped death alert, and since the
+		Aswang is never a ghost, each nil eliminates a candidate. Amendment A3 deleted two channels to
+		close exactly that.
+
+		So the corpse STAYS as `victim.Character`. Every player has a character at all times, and what a
+		client can still learn is what §4.7 and A3 always intended: a body lying in the Barrio is a dead
+		player, and you have to look at it. Under §5's `StreamingEnabled` (C17) a distant corpse does not
+		replicate at all, which makes that literally true. Before C17 it is PARTIAL — everything
+		replicates, so a property scan still tells a corpse from a walker.
+
+		`RoundService.MarkKilled` is safe with the body attached because `BodyTransitions` answers KEEP
+		for every GHOST cause: nothing downstream revokes or replaces it.
+	]]
+	makeCorpse(victim.UserId, victimCharacter)
 
 	-- `true` = this death was a validated kill, so it counts towards §4.8's attrition win. Every other
 	-- caller passes nothing: a reset or a fall makes the player a GHOST but must NOT credit the Aswang,
@@ -602,18 +656,147 @@ local function commitKill(killer: Player, victim: Player, victimCharacter: Model
 
 	revert(killer)
 
-	-- TWO FIELDS. See Types.PlayerKilledPayload: the killer appears nowhere in it, in any form, and
-	-- nothing in this repo would catch it if it did. Built as a typed local rather than an inline table
-	-- because FireAllClients takes `...any` and an inline literal is checked against nothing at all.
+	--[[
+		TWO FIELDS AND ONE RECIPIENT. See Types.PlayerKilledPayload: the killer appears nowhere in it,
+		in any form, and nothing in this repo would catch it if it did. Built as a typed local rather
+		than an inline table because FireClient takes `...any` and an inline literal is checked against
+		nothing at all.
+
+		FireClient, NOT FireAllClients, SINCE AMENDMENT A3 — and the change is not cosmetic.
+
+		Broadcast, this was a stronger death oracle than the `AlivePlayerCount` field that A3 removed:
+		that field made an attacker infer the position from replicated character logs, and this handed
+		it over directly, timestamped, with the victim named. Removing one while keeping the other
+		would have been theatre.
+
+		THE OLD DEFENCE WAS "THE CORPSE REPLICATES ANYWAY", AND §5 MAKES IT FALSE. The corpse is a
+		Model in `workspace.Corpses`, and C17 turns `StreamingEnabled` on from the start — under which
+		a corpse 200 studs away does not reach a client and this remote did. The two were never
+		equivalent; they only looked it on an unstreamed baseplate.
+
+		The victim keeps it because the victim is the one client with a use for it:
+		`CameraFXController.onPlayerKilled` plays a first-person death reaction, which was until now
+		firing on seven screens belonging to people who had not died. That controller needs no change —
+		its `isMine` branch simply becomes the only branch it ever takes.
+	]]
 	local payload: Types.PlayerKilledPayload = { VictimUserId = victim.UserId, Position = position }
 
-	killedRemote:FireAllClients(payload)
+	killedRemote:FireClient(victim, payload)
+end
+
+--[[
+	KILLING A HUSK (§6.4, C15) — a body whose owner disconnected mid-round.
+
+	Separate from `validateAndKill` because a husk has no `Player`, and every input that function
+	reaches for through one — `RoleService.IsAswang(target)`, `RoundService.GetPlayerState(target)`,
+	`target.Character` — has to come from somewhere else. Sharing the path would mean threading a
+	`Player?` through all of it and nil-checking at five sites, which is how the target half of the
+	rule quietly stops being validated.
+
+	WHAT IS GUARANTEED RATHER THAN CHECKED, and why:
+
+	  · `TargetIsAswang = false`. `RoundService.onPlayerRemoving` ABORTS the round when the Aswang
+	    leaves, so the Aswang never has a husk. This is the one assumption here and it is enforced
+	    somewhere a reader can go and look at.
+	  · `TargetState = ALIVE`. `RoundService` only creates a husk for a player whose stored state was
+	    ALIVE at the moment they left.
+
+	Everything else — phase, killer role, transform, cooldown, range, line of sight — runs through the
+	SAME `KillValidation.evaluate` and the SAME raycast a live kill does. A husk is not an easier
+	target, it is the same target with nobody watching the screen.
+]]
+local function validateAndKillHusk(
+	killer: Player,
+	targetUserId: number,
+	huskCharacter: Model
+): boolean
+	local killerCharacter = killer.Character
+
+	if killerCharacter == nil then
+		return false
+	end
+
+	local killerRoot = rootOf(killerCharacter)
+	local targetRoot = rootOf(huskCharacter)
+
+	if killerRoot == nil or targetRoot == nil then
+		return false
+	end
+
+	local monster = stateFor(killer.UserId)
+
+	local verdict = KillValidation.evaluate({
+		Phase = RoundService.GetPhase(),
+		KillerUserId = killer.UserId,
+		TargetUserId = targetUserId,
+		KillerIsAswang = RoleService.IsAswang(killer),
+		TargetIsAswang = false,
+		KillerState = RoundService.GetPlayerState(killer),
+		TargetState = Enums.PlayerState.Alive,
+		Transformed = monster.Announced,
+		KillerPos = vec(killerRoot.Position),
+		TargetPos = vec(targetRoot.Position),
+		Range = Config.Monster.KillRange,
+		Now = os.clock(),
+		LastRevertedAt = monster.LastRevertedAt,
+		Cooldown = Config.Monster.KillCooldown,
+	})
+
+	if verdict ~= "OK" then
+		if Config.Debug.VerboseLogging then
+			print(`[MonsterService] Refused husk kill by {killer.Name}: {verdict}`)
+		end
+
+		return false
+	end
+
+	if not hasLineOfSight(killerRoot, targetRoot) then
+		if Config.Debug.VerboseLogging then
+			print(`[MonsterService] Refused husk kill by {killer.Name}: NO_LINE_OF_SIGHT`)
+		end
+
+		return false
+	end
+
+	--[[
+		STATE FIRST, THEN THE BODY. `MarkHuskKilled` drops the husk entry and stamps the owner's stored
+		state to GHOST — so a player reconnecting one frame later is resolved as dead, which is what
+		happened to them. It deliberately does NOT destroy the Model, because the next line turns that
+		same Model into the corpse.
+
+		No `PlayerKilled` remote fires. Since Amendment A3 that remote goes to the VICTIM alone, and the
+		victim is not connected — there is nobody to send it to. The corpse is the signal, exactly as it
+		is for everyone else.
+	]]
+	RoundService.MarkHuskKilled(targetUserId)
+
+	--[[
+		THE REVERT, and it is not optional garnish. §4.3 step 4 reverts after a kill, and `revert()` is
+		what stamps `LastRevertedAt` — which IS the kill cooldown, per KillValidation's inputs above.
+		Omitting it here would let the Aswang clear a plaza full of husks with no cooldown between them,
+		which is the exact opposite of what the husk is for.
+	]]
+	revert(killer)
+
+	makeCorpse(targetUserId, huskCharacter)
+
+	return true
 end
 
 local function validateAndKill(killer: Player, targetUserId: number)
 	local target = Players:GetPlayerByUserId(targetUserId)
 
+	--[[
+		NO PLAYER? IT MAY STILL BE A HUSK. Falling straight out here is what made a disconnect a free
+		escape: the body stood in the Barrio and nothing could touch it.
+	]]
 	if target == nil then
+		local husk = RoundService.GetHuskCharacter(targetUserId)
+
+		if husk ~= nil then
+			validateAndKillHusk(killer, targetUserId, husk)
+		end
+
 		return
 	end
 
@@ -764,6 +947,47 @@ end
 
 local function onPlayerRemoving(player: Player)
 	monsters[player.UserId] = nil
+end
+
+--------------------------------------------------------------------------------
+-- The C14 seam. Two functions, and the reason they are here rather than in ItemService.
+--------------------------------------------------------------------------------
+
+--[[
+	Is this player currently in the monster form? (C14)
+
+	SERVER ONLY, AND IT IS NOT A ROLE QUERY. It answers a question about a FORM, and the form is
+	already public — `MonsterTransformed` broadcasts it to every client by design. What makes it safe
+	to expose is that the caller must already hold a UserId it got from somewhere else; this function
+	never enumerates, never returns the Aswang, and returns false for every player who is not
+	transformed including the Aswang.
+
+	ItemService ANDs this with `RoundService.GetAswangUserId()` before handing a single boolean to
+	`pure/SaltThrow`, so the role never enters the pure module at all.
+]]
+function MonsterService.IsTransformed(userId: number): boolean
+	local monster: MonsterState? = monsters[userId]
+
+	return monster ~= nil and monster.Transformed
+end
+
+--[[
+	Salt forces a revert (§4.6, C14). A thin wrapper over the private `revert`, and thin ON PURPOSE.
+
+	Everything C14 needs from a revert already happens in there: the generation bump that invalidates
+	the in-flight forced-revert timer, the Announced gate that stops a mid-windup revert broadcasting a
+	transform nobody saw, the LastRevertedAt stamp that charges the kill cooldown, and the look
+	restoration that resolves `AppliedTo` rather than `player.Character`. A second implementation in
+	ItemService would have to get all four right and would silently get at least one wrong — C04's own
+	audit found the revert restoring hardcoded defaults instead of captured state, which is precisely
+	the class of bug a duplicate path reintroduces.
+
+	NO GUARD ON WHO CALLS THIS, deliberately: `revert` early-returns for a player who is not
+	transformed, so a mistaken call is a no-op rather than a state change. The validation that a hit
+	happened at all lives in ItemService, next to the request that claimed it.
+]]
+function MonsterService.ForceRevert(player: Player)
+	revert(player)
 end
 
 function MonsterService.Init()

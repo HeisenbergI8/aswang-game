@@ -1,8 +1,8 @@
 # ASWANG — MVP Specification
 
 **Working title:** `ASWANG: Survive the Night` (Filipino folklore co-op horror)
-**Version:** MVP v1.1 spec — v1.0 plus Amendment A1 (§4.8)
-**Date:** August 2026 · last amended 2026-08-12
+**Version:** MVP v1.3 spec — v1.0 plus Amendments A1 (§4.8), A2 (§4.4) and A3 (§4.7)
+**Date:** August 2026 · last amended 2026-08-13
 **Author's context:** Solo developer. Strong software engineer, zero game-dev experience, no art budget, no deadline. Goal is profit.
 
 ---
@@ -215,6 +215,44 @@ This is the folklore weakness turned into a mechanic — the differentiator you 
 - Can **contribute**: hold a task point to add a small amount of progress (say 25% speed) — they still matter.
 - Can trigger one **spook** per round (flicker a nearby light, rustle a bush) — no information, pure flavour, but it keeps them playing with the living.
 - **Cannot** reveal the Aswang's identity to living players. Enforce server-side; ghost chat must be a separate channel.
+
+> **Amendment A3 — 2026-08-13 · spec v1.2 → v1.3 · C15**
+>
+> §4.7 stands unchanged. What follows is a rule about **what a death is allowed to tell a living
+> client**, added here because C15 is the chunk that makes deaths common enough for it to matter.
+>
+> **Death is not public. There is no global death signal, and the round snapshot no longer carries a
+> live player count.** A client learns that someone died by *finding the body* — a corpse standing
+> where the victim fell, for `Monster.CorpseDuration`, discovered by walking into it.
+>
+> **Why.** `ClientRoundSnapshot.AlivePlayerCount` was pushed to every client twice a second, plus an
+> immediate extra push the instant a kill landed. That is a sub-second global death signal, and a
+> death signal is the missing input to an attack this genre does not survive: record replicated
+> character positions, timestamp each kill from the decrement, then ask who was within
+> `Monster.KillRange` of the victim's last position at that instant. In the open that is frequently a
+> single candidate — the Aswang, identified without anybody witnessing a transform. In a group it
+> narrows the field, which is damaging enough on its own. The same reasoning removed the
+> `PlayerKilled` broadcast, which was strictly worse: it handed over the victim and the position
+> directly rather than requiring the attacker to infer them. Its old defence in `Types.luau` — "the
+> corpse replicates to every client anyway" — is false under §5's `StreamingEnabled`, where a distant
+> corpse does not replicate and the remote did.
+>
+> **Delaying the count was considered and rejected.** A fixed delay is a constant an attacker
+> subtracts. A jittered one is a statistical claim of safety, which is not a claim this document is
+> willing to make about the one secret the whole design rests on (§6.2).
+>
+> **What this costs.** A survivor cannot see at a glance how many of them are left, and neither can
+> the Aswang. That is the intended trade: §2's pillars ask for paranoia, and a HUD number that
+> answers "is it getting bad?" for free is the opposite of it. **C18's planned HUD alive-count
+> element has no data source and must not be given one** — not under this name and not under another
+> (`SurvivorsRemaining`, `DeadCount`, a roster the client can count). If the playtest at C19 says
+> players are lost without it, the answer to reach for is a *diegetic*, latency-bearing one — a
+> tally the quick-chat wheel can assert, a board in the plaza someone has to walk to — and it is a
+> design decision for GATE 1, not a field.
+>
+> **Where it lives.** The absent field is documented in place in `src/shared/Types.luau`'s
+> `ClientRoundSnapshot`, with the list of names it must not come back under. The narrowed broadcast
+> is `MonsterService.commitKill`.
 
 ### 4.8 Win / lose conditions
 

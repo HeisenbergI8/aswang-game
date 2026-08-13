@@ -194,8 +194,14 @@ export type KillVerdict =
 	cannot follow data flow, and a leak that avoids the word "killer" avoids it entirely. That is what
 	`exploit-auditor` is for, and neither replaces the other.
 
-	Position is a Vector3 and that is safe: the corpse model stands at that position and replicates to
-	every client on its own. The payload states nothing the workspace does not state one frame later.
+	Position is a Vector3, and THE DEFENCE THAT USED TO SIT HERE WAS FALSE. It read: "the corpse model
+	stands at that position and replicates to every client on its own. The payload states nothing the
+	workspace does not state one frame later." That holds only on an unstreamed baseplate. §5 requires
+	`StreamingEnabled`, under which a corpse 200 studs away does NOT reach a client — and this remote
+	did. The two were never equivalent; they only looked it during development.
+
+	Since Amendment A3 this payload is `FireClient(victim, …)`, and the field is safe for the reason it
+	always should have been: the only recipient is the player it describes, who watched it happen.
 ]]
 export type PlayerKilledPayload = {
 	VictimUserId: number,
@@ -356,6 +362,92 @@ export type TaskListPayload = {
 ]]
 export type FetchAction = "NONE" | "PICK_UP" | "DELIVER" | "DROP"
 
+--[[
+	Why the server refused (or failed) a RequestThrowSalt (§4.6, C14). Same shape and same rule as
+	KillVerdict: a union so the server can log WHY, and NEVER echoed to any client.
+
+	MISS IS THE ONE THAT CARRIES THE DESIGN, and it is deliberately a single value covering four
+	different worlds:
+
+	  · the cone was empty
+	  · the cone held a survivor
+	  · the cone held the Aswang, untransformed
+	  · the cone held the Aswang, transformed, but past ThrowRange
+
+	Splitting them is the obvious refactor and it is a role oracle. `MISS_NOT_ASWANG` versus
+	`MISS_OUT_OF_RANGE` would let a compromised client stand in front of each player in turn, throw,
+	and read the monster off the refusal — and it would do it for the price of one pouch, which is
+	the price §4.6 already charges for a legitimate reveal. There is no safe subset to return, so the
+	handler returns NOTHING on every value including OK; what the world does is the only answer.
+
+	NO_POUCH is the C13 half: you are not carrying salt. It is also never echoed, because the client
+	already knows what it is carrying — the server told it and it can count its own pickups.
+]]
+export type SaltVerdict = "OK" | "WRONG_PHASE" | "THROWER_NOT_ALIVE" | "NO_POUCH" | "MISS"
+
+--[[
+	The salt throw, broadcast to every client (§4.6, C14). THREE FIELDS, ALL ABOUT A TRAJECTORY AND
+	NONE ABOUT A PLAYER.
+
+	It does NOT carry the thrower, the target, or a UserId of any kind. A throw is a thing that
+	happens in the world — a white burst at a place — and every client standing there sees it whether
+	or not this remote exists.
+
+	`Hit` IS SAFE AND IS NOT THE REVEAL. It says "the salt struck something the salt can strike",
+	which given SaltVerdict above means "a transformed Aswang", and a transformed Aswang is ALREADY
+	public: `MonsterTransformed` broadcast it, by design (see MonsterTransformedPayload). This field
+	is what lets a client play a hit sound instead of a fizzle. The information that is genuinely new
+	— WHO it was, once they revert — arrives as a Highlight on a character in the workspace, not on
+	this payload.
+
+	READ THE RoundEndedPayload COMMENT ABOVE BEFORE ADDING A FIELD. An EXTRA field on an annotated
+	table is accepted silently by the typechecker, and `SaltEffect` is not on check-secrecy.mjs's
+	REVEAL_ALLOWLIST — so its broadcast rule DOES run over this call, catching a field named `role`
+	or `aswang` or `killer` and catching nothing else. A field named `TargetUserId` would pass every
+	check in this repo and would name the monster to eight clients.
+]]
+export type SaltEffectPayload = {
+	Origin: Vector3,
+	Impact: Vector3,
+	Hit: boolean,
+}
+
+--[[
+	Who the other ghosts are (§4.7, C15). Fired ONLY to players whose own state is GHOST.
+
+	IT CARRIES UserIds AND THAT IS SAFE, for one reason that must stay true: being dead is not a
+	role. A ghost is a player the Aswang has already killed, or one who died some other way, and
+	`PlayerKilled` used to broadcast exactly this fact to every client until Amendment A3 stopped it.
+	What makes this payload safe is not its contents but its RECIPIENTS — the server fires it per
+	player and never with FireAllClients, and the one thing a living client must not learn is which
+	of the eight are dead, because that is the death oracle Amendment A3 exists to close.
+
+	So the rule for this remote is the mirror of RoleAssigned's: RoleAssigned is safe because its
+	payload is minimal, this is safe because its audience is. Widening the audience is the leak, and
+	no check in this repo would see it — `check-secrecy.mjs` reads payload fields and call shapes,
+	and `FireClient(player, roster)` inside a loop over the wrong list looks identical to the right
+	one. The state test belongs at the fire site for that reason.
+]]
+export type GhostRosterPayload = {
+	UserIds: { number },
+}
+
+--[[
+	Why the server refused a RequestGhostSpook (§4.7, C16). Same shape and same rule as every other
+	verdict here: a union so the server can log WHY, and never echoed.
+
+	NOT_GHOST is a refusal and not an accusation — a living player's client has no spook button, so
+	reaching this value means either a stale button on a player who was just revived by a round
+	ending, or a compromised client. Both look the same from here, which is why C41 reads the log
+	rather than this function.
+]]
+export type SpookVerdict =
+	"OK"
+	| "WRONG_PHASE"
+	| "NOT_GHOST"
+	| "NO_SPOOKS_LEFT"
+	| "NOTHING_IN_RANGE"
+
 -- SERVER ONLY. Never send this table to a client.
 export type RoundState = {
 	Phase: RoundPhase,
@@ -376,9 +468,37 @@ export type ClientRoundSnapshot = {
 	TasksCompleted: number,
 	TasksRequired: number,
 	GateOpen: boolean,
-	AlivePlayerCount: number,
 	YourRole: Role?, -- only ever the receiving player's OWN role
 	YourState: PlayerState,
 }
+
+--[[
+	THE FIELD THAT USED TO BE HERE, AND WHY ITS ABSENCE IS LOAD BEARING (Amendment A3, §4.7).
+
+	`AlivePlayerCount: number` sat between GateOpen and YourRole and was pushed to every client every
+	`Round.SnapshotInterval` (0.5s), plus an immediate extra push from `MarkKilled` the instant a
+	death landed. That made it a sub-second global death signal, and a death signal is an input to an
+	attack this game cannot survive: record replicated character positions, timestamp each kill from
+	the decrement, then ask who was within `Monster.KillRange` (8 studs) of the victim's last known
+	position at that instant. In the open that is often one candidate. In a group it narrows the
+	field, which is damaging on its own.
+
+	DELAYING IT WAS CONSIDERED AND REJECTED. A fixed delay is a constant, and a constant is something
+	an attacker subtracts; it converts a zero-latency oracle into a zero-latency oracle with an
+	offset. A jittered delay is worse, because it is a claim of safety that is only ever statistical.
+
+	WHAT A CLIENT LEARNS ABOUT A DEATH NOW, in full:
+	  · the corpse, standing where the victim fell for `Monster.CorpseDuration` — LOCAL, discovery
+	    latency, and under §5's StreamingEnabled it does not replicate at all from far away. This is
+	    the signal the design wants and the only one the design wants.
+	  · `SaltEffect` — a public world event that names nobody.
+	  · `PlayerKilled` — fired to the victim alone since Amendment A3.
+
+	DO NOT REINTRODUCE IT UNDER ANOTHER NAME. `SurvivorsRemaining`, `DeadCount`, `RosterSize` and a
+	`YourState`-derived tally over a roster field are the same oracle wearing different words, and
+	none of them contains a token `check-secrecy.mjs` matches. C18 wants an alive count on the HUD
+	(BUILD-PLAN ~line 456) and this is the field it would reach for; Amendment A3 is the sentence
+	that says no.
+]]
 
 return {}
