@@ -332,52 +332,14 @@ local function guardChannel(instance: Instance)
 	instance.ShouldDeliverCallback = shouldDeliverToRecipient
 end
 
-local function configureChannels()
-	local channels = TextChatService:FindFirstChild("TextChannels")
+--[[
+	Attach the guard and create the ghost channel, given the TextChannels folder.
 
-	if channels == nil then
-		--[[
-			LOUD, NOT A WARN, AND THE ROUND-ENDING CONDITION IS THE REASON.
-
-			`TextChatService.ChatVersion` lives in the PLACE FILE, which is not in Git — so no check in
-			this repo can see it, `npm run verify` is green either way, and the only symptom of
-			`LegacyChatService` was a single warn line nobody reads in a published server's log. The
-			failure it hides is total: every ghost talks to every living player for the life of the
-			server, which does not degrade the game, it ends every round in it.
-
-			An error in `Start()` is caught by `init.server.luau`'s pcall and becomes a warn anyway, so
-			this deliberately does BOTH — the error for the stack trace, the warn for the operator who
-			only reads the last line.
-		]]
-		--[[
-			A WARN, AND DELIBERATELY NOT AN `error()`. The error was tried and REVERTED, because it made
-			this failure strictly worse rather than louder.
-
-			`init.server.luau` wraps every `Start` in a pcall that only warns, so `error()` here reached
-			an operator no more loudly than this line does — and because `configureChannels()` is the
-			FIRST call in `Start()`, it aborted everything after it. The result was: ghost chat still
-			unenforced, PLUS `PhaseChanged` never connected, PLUS the `CharacterAdded` watchers never
-			connected — so `makeGhost` never ran and every dead player walked the Barrio fully visible,
-			normally named, at default speed, and unkillable. Maximally public death, delivered by the
-			guard meant to prevent it.
-
-			Loudness cannot be bought upstream of your own service. If this needs to be unmissable, the
-			right shape is a repeating warn, an analytics event, or refusing to leave IDLE — none of
-			which a pcall can swallow, and all of which leave the rest of Start() running.
-		]]
-		warn(
-			"[GhostService] ⚠️ NO TextChannels UNDER TextChatService — GHOST CHAT IS NOT ENFORCED. "
-				.. "Every message a dead player sends reaches the living, which ends every round. "
-				.. "Set TextChatService.ChatVersion = TextChatService (not LegacyChatService) in the "
-				.. "place file. This cannot be fixed from Git — the setting is not tracked."
-		)
-		return
-	end
-
-	-- LAYER 3, over every existing channel and every channel created later. The `ChildAdded`
-	-- connection is what closes the attachment race: `FindFirstChild` at Start() with no fallback
-	-- silently covered nothing if the default channels had not been created yet, and the only symptom
-	-- was one warn.
+	Split out from `configureChannels` so the folder can arrive LATE — see below, where a live run
+	proved it does.
+]]
+local function configureWith(channels: Instance)
+	-- LAYER 3, over every existing channel and every channel created later.
 	for _, child in channels:GetChildren() do
 		guardChannel(child)
 	end
@@ -398,6 +360,65 @@ local function configureChannels()
 	channel.Parent = channels
 
 	ghostChannel = channel
+
+	if Config.Debug.VerboseLogging then
+		print(`[GhostService] Chat wall attached over {#channels:GetChildren()} channel(s).`)
+	end
+end
+
+--[[
+	═══ THIS FUNCTION SHIPPED BROKEN AND A LIVE RUN CAUGHT IT ═══════════════════
+
+	The first version did `FindFirstChild("TextChannels")`, and on nil it warned and RETURNED. A guard
+	for the arrival race was added later — `channels.ChildAdded:Connect(guardChannel)` — but it was
+	placed AFTER that early return, so in the exact case it was written for it never ran.
+
+	Measured, first Play of the session:
+
+	    [GhostService] ⚠️ NO TextChannels UNDER TextChatService — GHOST CHAT IS NOT ENFORCED.
+
+	and a moment later, from the same server: `TextChannels exists NOW = true`, children
+	`RBXSystem, RBXGeneral`, `Ghosts channel created by GhostService = false`. So the folder is created
+	shortly AFTER services start, every time — the race is not a corner case, it is the normal path.
+	The result was no ghost channel and no delivery callback on anything: ghost chat entirely
+	unenforced, with `npm run verify` green over it and one warn line as the only symptom.
+
+	The warn was also misleading. It blamed `ChatVersion = LegacyChatService`, and `ChatVersion` was
+	correct — the cause was timing, so anyone reading that line would have gone and checked the one
+	setting that was fine.
+
+	NOW IT WAITS. `WaitForChild` in a `task.spawn` so `Start()` does not yield (init.server.luau calls
+	every Start in sequence and a yield there delays every service after this one). A timeout rather
+	than an indefinite wait, so a genuinely absent folder still produces a diagnosis instead of a
+	silent hang.
+]]
+local CHANNELS_WAIT_SECONDS = 30 -- config-ok: a startup timeout, not a balance knob
+
+local function configureChannels()
+	local immediate = TextChatService:FindFirstChild("TextChannels")
+
+	if immediate ~= nil then
+		configureWith(immediate)
+		return
+	end
+
+	task.spawn(function()
+		local channels = TextChatService:WaitForChild("TextChannels", CHANNELS_WAIT_SECONDS)
+
+		if channels ~= nil then
+			configureWith(channels)
+			return
+		end
+
+		warn(
+			"[GhostService] ⚠️ NO TextChannels AFTER "
+				.. CHANNELS_WAIT_SECONDS
+				.. "s — GHOST CHAT IS NOT ENFORCED. Every message a dead player sends reaches the "
+				.. "living, which ends every round. Check TextChatService.ChatVersion is "
+				.. "TextChatService (not LegacyChatService) and that CreateDefaultTextChannels is on. "
+				.. "Neither setting is in Git, so no check in this repo can see them."
+		)
+	end)
 end
 
 --[[
