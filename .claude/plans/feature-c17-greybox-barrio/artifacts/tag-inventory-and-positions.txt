@@ -1,0 +1,65 @@
+Captured via mcp__Roblox_Studio__execute_luau (Edit datamodel, before Play) and inspect_instance,
+studio_id d9a7ddea-522d-4910-82ae-4cab25f3b0f6.
+
+=== CollectionService tag counts (Edit mode, before Play) ===
+TaskPoint: 12
+  Workspace.Barrio.Anchors.Task_ChapelAltar
+  Workspace.Barrio.Anchors.Task_ChapelBell
+  Workspace.Barrio.Anchors.Task_PlazaNotice
+  Workspace.Barrio.Anchors.Task_PlazaCart
+  Workspace.Barrio.Anchors.Task_WellPump
+  Workspace.Barrio.Anchors.Task_KuboNWHearth
+  Workspace.Barrio.Anchors.Task_KuboNELoom
+  Workspace.Barrio.Anchors.Task_KuboSEStore
+  Workspace.Barrio.Anchors.Task_RiceSluice
+  Workspace.Barrio.Anchors.Task_RiceDrier
+  Workspace.Barrio.Anchors.Task_AlleyGenset
+  Workspace.Barrio.Anchors.Task_RingCistern
+SaltSpawn: 6
+  Workspace.Barrio.Anchors.SaltSpawn_AlleySW
+  Workspace.Barrio.Anchors.SaltSpawn_Chapel
+  Workspace.Barrio.Anchors.SaltSpawn_Well
+  Workspace.Barrio.Anchors.SaltSpawn_Rice
+  Workspace.Barrio.Anchors.SaltSpawn_Plaza
+  Workspace.Barrio.Anchors.SaltSpawn_KuboNE
+EscapeGate: 1
+  Workspace.Barrio.Arko.EscapeGate
+FetchSource: 4
+  Workspace.Barrio.Anchors.FetchSource_Rice
+  Workspace.Barrio.Anchors.FetchSource_Chapel
+  Workspace.Barrio.Anchors.FetchSource_Well
+  Workspace.Barrio.Anchors.FetchSource_Plaza
+
+=== FETCH pairing attributes (inspect_instance) ===
+Task_KuboNWHearth: FetchSourceName="FetchSource_Rice", TaskType="FETCH", Position=(-120.9, 0.4, -120.9)
+Task_KuboSEStore:  FetchSourceName="FetchSource_Chapel", TaskType="FETCH", Position=(120.9, 0.4, 120.9)
+
+=== ActiveTaskPoint tag on the CLIENT during round #1 ACTIVE (proves client-side replication + affordance) ===
+ActiveTaskPoint on client: 5
+  Workspace.Barrio.Anchors.Task_ChapelBell
+  Workspace.Barrio.Anchors.Task_KuboSEStore
+  Workspace.Barrio.Anchors.Task_AlleyGenset
+  Workspace.Barrio.Anchors.Task_RiceSluice
+  Workspace.Barrio.Anchors.Task_ChapelAltar
+(matches the server's "Round tasks:" line for round #1 exactly)
+
+=== Key landmark positions (for reproducing camera/character moves) ===
+PlazaSpawn:          (0, 0.5, 21.7)
+Arko.EscapeGate:      (0, 7.5, -49.6), Size (27.9, 15, 2.325)
+Chapel_Floor center:  (0, 0.15, -235.6), Size (71.3, 0.3, 55.8)
+Task_ChapelAltar:     (0, 0.4, -244.9)  [round #1 draw, TIMING]
+Well_Pump:            (-89.9, 2.5, 62)
+Task_RiceSluice:      (147.25, 0.4, 240.25) [TIMING]
+Alley_SW:             (-155, 0.05, 100.75), Size (12.4, 0.1, 173.6)
+Alley_SW_Wall1:       (-162.75, 5, 100.75), Size (3.1, 10, 173.6)
+
+=== Character positions actually reached by character_navigation (walked, not teleported) ===
+Start (client spawn):     (8.41, 4.00, 28.62)
+-> Task_ChapelAltar:      (-0.10, 3.30, -244.12)   [target -0/0.4/-244.9 — arrived]
+-> Well_Pump:              (-90.24, 8.00, 61.44)    [target -89.9/2.5/62 — arrived, elevated onto pump top]
+-> Task_RiceSluice:        (146.63, 3.00, 239.87)   [target 147.25/0.4/240.25 — arrived]
+-> Alley_SW:                (-154.97, 3.00, 101.49)  [target -155/0.05/100.75 — arrived]
+Every character_navigation call returned "Success" with no stall/error, and each post-move position
+check landed within ~1 stud of the target part's position, in each case starting from the previous
+target (i.e. these are four consecutive point-to-point walks across the map, not four teleports from
+spawn), covering plaza -> chapel -> well -> rice field (opposite corner) -> SW alley.

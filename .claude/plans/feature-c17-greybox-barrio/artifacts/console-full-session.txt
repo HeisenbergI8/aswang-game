@@ -1,0 +1,129 @@
+Captured via mcp__Roblox_Studio__get_console_output, studio_id d9a7ddea-522d-4910-82ae-4cab25f3b0f6,
+place aswang.rbxl, Play mode, SoloTesting=true VerboseLogging=true, Intermission=8 Duration=90 EndScreen=6.
+This is the full buffered console from bootstrap through 5 complete round cycles (#1-#5 ACTIVE).
+
+[TaskService] Pool OK — 12 task points.
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 14 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[GhostService] Chat wall attached over 3 channel(s).
+[Client] Ready. 7 controllers loaded.
+[Client] Snapshot — INTERMISSION round #0 · tasks 0/5 · gate shut · you: LOBBY (7s left)
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[TaskService] Pool OK — 12 task points.
+[TaskService] Round tasks: Task_RiceSluice, Task_AlleyGenset, Task_ChapelAltar, Task_KuboSEStore, Task_ChapelBell
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[Task] list:
+  · Task_RiceSluice — time it — R
+  · Task_AlleyGenset — time it — R
+  · Task_ChapelAltar — time it — R
+  · Task_KuboSEStore — bring the item
+  · Task_ChapelBell — hold E
+[RoundService] -> ACTIVE (90s)
+[Client] Phase -> ROUND LIVE (90s)
+[Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · you: ALIVE (89s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #1 · tasks 0/5 · gate shut · you: ALIVE (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #1 · tasks 0/5 · gate shut · you: LOBBY (7s left)
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[TaskService] Pool OK — 12 task points.
+[TaskService] Round tasks: Task_PlazaCart, Task_RiceDrier, Task_ChapelAltar, Task_KuboNELoom, Task_RingCistern
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #2 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[Task] list:
+  · Task_PlazaCart — needs 2 people
+  · Task_RiceDrier — needs 2 people
+  · Task_ChapelAltar — time it — R
+  · Task_KuboNELoom — hold E
+  · Task_RingCistern — hold E
+[RoundService] -> ACTIVE (90s)
+[Client] Phase -> ROUND LIVE (90s)
+[Client] Snapshot — ACTIVE round #2 · tasks 0/5 · gate shut · you: ALIVE (89s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #2 · tasks 0/5 · gate shut · you: ALIVE (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #2 · tasks 0/5 · gate shut · you: LOBBY (7s left)
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[TaskService] Pool OK — 12 task points.
+[TaskService] Round tasks: Task_KuboNELoom, Task_KuboNWHearth, Task_KuboSEStore, Task_AlleyGenset, Task_ChapelBell
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #3 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[Task] list:
+  · Task_KuboNELoom — hold E
+  · Task_KuboNWHearth — bring the item
+  · Task_KuboSEStore — bring the item
+  · Task_AlleyGenset — time it — R
+  · Task_ChapelBell — hold E
+[RoundService] -> ACTIVE (90s)
+[Client] Phase -> ROUND LIVE (90s)
+[Client] Snapshot — ACTIVE round #3 · tasks 0/5 · gate shut · you: ALIVE (89s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #3 · tasks 0/5 · gate shut · you: ALIVE (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #3 · tasks 0/5 · gate shut · you: LOBBY (7s left)
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[TaskService] Pool OK — 12 task points.
+[TaskService] Round tasks: Task_KuboNELoom, Task_RiceDrier, Task_KuboNWHearth, Task_ChapelBell, Task_WellPump
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #4 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[Task] list:
+  · Task_KuboNELoom — hold E
+  · Task_RiceDrier — needs 2 people
+  · Task_KuboNWHearth — bring the item
+  · Task_ChapelBell — hold E
+  · Task_WellPump — hold E
+[RoundService] -> ACTIVE (90s)
+[Client] Phase -> ROUND LIVE (90s)
+[Client] Snapshot — ACTIVE round #4 · tasks 0/5 · gate shut · you: ALIVE (89s left)
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #4 · tasks 0/5 · gate shut · you: ALIVE (5s left)
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #4 · tasks 0/5 · gate shut · you: LOBBY (7s left)
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[TaskService] Pool OK — 12 task points.
+[TaskService] Round tasks: Task_RiceDrier, Task_ChapelAltar, Task_RiceSluice, Task_KuboNELoom, Task_RingCistern
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #5 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[Task] list:
+  · Task_RiceDrier — needs 2 people
+  · Task_ChapelAltar — time it — R
+  · Task_RiceSluice — time it — R
+  · Task_KuboNELoom — hold E
+  · Task_RingCistern — hold E
+[RoundService] -> ACTIVE (90s)
+[Client] Phase -> ROUND LIVE (90s)
+[Client] Snapshot — ACTIVE round #5 · tasks 0/5 · gate shut · you: ALIVE (89s left)
+
+--- Notable ---
+Round #3 drew BOTH fetch-paired points in the same round: Task_KuboNWHearth (-> FetchSource_Rice)
+and Task_KuboSEStore (-> FetchSource_Chapel). Both list as "bring the item" (FETCH, not demoted to
+HOLD "hold E"), so both pairings resolved without the "Demoting it to HOLD" warning.
+
+Absent across the entire buffer (grep-checked): NO "TaskPoint" PARTS IN THE MAP, Only N TaskPoint
+part(s) found, N TaskPoint parts found but Config.Tasks.PoolSize says, parts share a Name,
+NO "EscapeGate" PART IN THE MAP, asks for TaskType "X" which is not a TaskType, Demoting it to HOLD.
