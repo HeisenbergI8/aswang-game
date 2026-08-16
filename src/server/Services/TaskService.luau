@@ -123,6 +123,25 @@ type Presence = {
 
 local presence: { [number]: Presence } = {}
 
+--[[
+	C20. WHO HAS EVER FINISHED A TASK, and it is the single highest-leverage table in this file.
+
+	Appendix C is a teardown of the nearest competitor: 2.5M visits, 1.43M players, $0 earned, and
+	**79.9% of those players never completed a single objective**. §10 answers that one number by
+	guaranteeing a brand-new player's first round hands them a task NEAR THEM with a waypoint, instead
+	of dropping them into a dark map and hoping.
+
+	IN MEMORY AND DELIBERATELY SO. C40 moves this into the persisted profile; until then it resets with
+	the server, which means a returning player may be offered a first objective twice. That is the
+	correct way round to be wrong — a veteran seeing one redundant waypoint costs a moment of mild
+	irritation, and a beginner NOT seeing one costs the player.
+
+	SERVER-ONLY, and it never goes on the wire as a set. `FirstObjectiveAssigned` is fired to one
+	player at a time carrying a task Id; the roster of who is new is exactly the shape `GhostRoster`'s
+	comment warns about and it stays here.
+]]
+local everCompleted: { [number]: boolean } = {}
+
 -- The last YourTaskProgress each client was sent, so a bar that has not moved costs nothing. nil is a
 -- meaningful value here: "this player is not standing on anything", and it must be SENT once so the
 -- client can clear its bar.
@@ -983,6 +1002,26 @@ local function tick()
 		end
 
 		table.insert(bucket, weightFor(player))
+
+		--[[
+			C20. MARKED ON CONTRIBUTION, NOT ON COMPLETION, and the difference is the whole finding.
+
+			This first collected a per-tick `contributors` table and marked only whoever happened to be
+			standing there on the tick the bar filled. That under-marks systematically rather than
+			adversarially: do 95% of an eight-second hold, step off for the last interval, and the
+			server never records that you have ever done a task — so you are offered a beginner's
+			waypoint every round forever. The adversarial version is the same move done on purpose.
+
+			§10 wants "has ever completed a task" as a proxy for "knows what a task is", and advancing
+			one is the moment you learn that. Marking here — in the same pass that decided your presence
+			counts for progress — makes the flag mean what the spec meant, and makes it unavoidable
+			without also declining to play.
+
+			The inverse stays closed, which is the half that matters for exploitability: `presence` is
+			written only by `notePresence` from a player's own `RequestTaskProgress`, so a client can
+			still only ever mark ITSELF.
+		]]
+		everCompleted[userId] = true
 	end
 
 	local anyCompleted = false
@@ -1279,6 +1318,20 @@ local function noteTimingStop(player: Player)
 		task.Progress = 1
 		completed = true
 
+		--[[
+			C20. THE ONE PATH THE PRESENCE SWEEP CANNOT SEE.
+
+			A TIMING point advances only through this function — `tick` skips TIMING entirely — and a
+			player can press R without ever having held E, in which case they have no `presence` entry
+			and the contribution marking in `tick` never runs for them. So the flag is set here too.
+
+			It is set on COMPLETION here rather than on each hit, unlike the hold path, and that
+			asymmetry is deliberate: `state.Hits` is shared across everyone stopping the bar, so
+			crediting every stopper on every hit would mark players who merely stood nearby and tapped
+			once. Landing the final hit is unambiguously having done the task.
+		]]
+		everCompleted[player.UserId] = true
+
 		RoundService.SetTasksCompleted(completedCount())
 
 		if Config.Debug.VerboseLogging then
@@ -1459,7 +1512,98 @@ local function publishTaskLists()
 	end
 end
 
+--[[
+	C20 — THE GUARANTEED FIRST OBJECTIVE (§10).
+
+	Appendix C.2 is the whole argument: 79.9% of a competitor's 1.4M players never completed one
+	objective, and that game had seven zones, a mountain and unlockable weapons. It did not fail for
+	lack of content. A brand-new player spawns into a dark map with five task points somewhere in it
+	and no reason to believe any particular direction is correct, and §10's answer is to remove that
+	one decision — pick the nearest live task and point at it.
+
+	BIASED TO SPAWN PROXIMITY, which is the entire mechanism and the reason this runs at ACTIVE rather
+	than at STARTING. At STARTING players are mid-teleport and `positionOf` answers with wherever their
+	body happens to be, so "nearest" would be nearest to the last round's corpse. By ACTIVE everyone is
+	standing on the plaza spawn.
+
+	FIRED TO ONE PLAYER AT A TIME. Never a broadcast, never a roster — see the remote's own comment in
+	`Remotes.luau`. The payload is a task Id already public via `TaskListAssigned` and the
+	`ActiveTaskPoint` tag; what is private is only that THIS player was sent one.
+
+	THE ASWANG GETS ONE TOO, if they are new. That is deliberate rather than an oversight: skipping
+	them would mean the set of players who receive this remote is "new survivors", and a new Aswang
+	would notice they alone were dropped in without the help every other beginner describes in chat.
+	Amendment A2 already makes the Aswang a full task participant, so the waypoint points at something
+	they can genuinely do. It does point at a REAL task while C12 shows them a decoy list — see the
+	remote's declaration in `Remotes.luau` for why that costs coherence and not information.
+
+	A PLAYER WHO JOINS MID-ROUND GETS NOTHING THIS ROUND, and that is correct rather than a gap. This
+	runs once per ACTIVE transition over the players present at that moment, so a latecomer is not in
+	the loop — and they would be skipped anyway, because §6.4 makes a mid-round joiner a SPECTATOR and
+	the state check below admits only ALIVE. A spectator cannot advance a task, so a waypoint would be
+	pointing them at something they are not allowed to do. They are dealt in at the next round and get
+	their first objective then. Recorded because "the new player got no waypoint" is otherwise exactly
+	the shape of a bug report.
+]]
+local function assignFirstObjectives()
+	local remote = Remotes.Get("FirstObjectiveAssigned")
+
+	for _, player in Players:GetPlayers() do
+		if everCompleted[player.UserId] then
+			continue
+		end
+
+		if RoundService.GetPlayerState(player) ~= Enums.PlayerState.Alive then
+			continue
+		end
+
+		local from = positionOf(player)
+
+		if from == nil then
+			continue
+		end
+
+		local bestId: string? = nil
+		local bestDistance = math.huge
+
+		for _, task in activeTasks do
+			if task.Completed then
+				continue
+			end
+
+			local part: BasePart? = activeParts[task.Id]
+
+			if part == nil then
+				continue
+			end
+
+			local distance = (part.Position - from).Magnitude
+
+			if distance < bestDistance then
+				bestDistance = distance
+				bestId = task.Id
+			end
+		end
+
+		if bestId ~= nil then
+			remote:FireClient(player, bestId)
+
+			if Config.Debug.VerboseLogging then
+				-- A UserId and a task Id. No role, and no statement about anyone else.
+				print(
+					`[TaskService] C20 first objective for {player.UserId}: {bestId} `
+						.. `({math.floor(bestDistance)} studs)`
+				)
+			end
+		end
+	end
+end
+
 local function onPhaseChanged(phase: Types.RoundPhase)
+	if phase == Enums.RoundPhase.Active then
+		assignFirstObjectives()
+	end
+
 	if phase == Enums.RoundPhase.Starting then
 		clearTasks()
 		selectForRound()

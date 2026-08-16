@@ -2,15 +2,24 @@
 --[[
 	InputController — keyboard, touch and gamepad input.
 
-	Milestone: M7 owns the real HUD button and the mobile thumb zones (C18/C27). Today this file exists
-	for one reason: WITHOUT IT, C04 AND C05 CANNOT BE TESTED BY A HUMAN AT ALL. Nothing else in the tree
-	fires `RequestTransform` or `RequestKill`, so both would be reachable only from a console.
+	Milestone: M7. This file owns the KEYS and the target selection; C18's HUD owns the on-screen
+	buttons, and both run the same two functions — `performTransform` and `performKill` — which this
+	controller registers with `UIController.BindActions` at Start.
 
-	It is a keyboard bind, deliberately minimal, so the two-client test is possible now. C18 replaces it.
+	THAT REGISTRATION IS NOT PLUMBING, IT IS THE FIX FOR A REAL BUG. C18's KILL button first built its
+	own request, omitted the target UserId, and so fired something the server refuses AFTER spending a
+	rate-limit token. Two implementations of one action drift; one implementation with two triggers
+	cannot. See `performKill`.
 
-	NEITHER BIND CREATES A TOUCH BUTTON. `createTouchButton` is false on both, so mobile — 60% of the
-	audience, per §5 — cannot transform or kill yet. That is C27's subject and it is a known hole rather
-	than an oversight; naming it here so it is not rediscovered as a bug.
+	The dependency only points one way: this module requires `UIController` for `GetMyRole`, so the HUD
+	cannot require this one back. Registration is what makes the arrow point the right way.
+
+	NEITHER BIND CREATES A TOUCH BUTTON — `createTouchButton` is false on both — and that is now a
+	deliberate division rather than a hole. Mobile reaches transform and kill through the HUD buttons,
+	which is also the only way to make them Aswang-only: a CAS touch button appears for every client
+	that runs the bind, and the role gate lives inside the handler. What mobile still lacks is the
+	TASK, TIMING and THROW verbs; that remainder is C27's, and naming it here keeps it from being
+	rediscovered as a bug.
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -33,6 +42,30 @@ local TASK_ACTION = "TaskHold"
 local TIMING_ACTION = "TaskTimingStop"
 local THROW_ACTION = "SaltThrow"
 
+--[[
+	A plain function for the same reason `performKill` below is one: C18's HUD button must invoke THIS,
+	not a second copy of it. Returns whether the request was sent.
+
+	GATED ON THIS CLIENT'S OWN ROLE, from its own RoleAssigned. Never on a broadcast, never on
+	anything derived from another player.
+
+	This gate is UX and rate-limit courtesy, NOT security: the server re-evaluates every rule in
+	TransformRules against its own state and refuses regardless of what the client believes. A
+	compromised client can delete this check and gain exactly nothing, which is the correct
+	relationship between a client-side gate and a server-side one.
+]]
+local function performTransform(): boolean
+	if UIController.GetMyRole() ~= Enums.Role.Aswang then
+		return false
+	end
+
+	-- No arguments. The server knows who fired it and reads every other input from its own state;
+	-- anything passed here would be a client-supplied value the server must then refuse to trust.
+	Remotes.Get("RequestTransform"):FireServer()
+
+	return true
+end
+
 local function onTransformAction(
 	_actionName: string,
 	inputState: Enum.UserInputState
@@ -41,24 +74,9 @@ local function onTransformAction(
 		return Enum.ContextActionResult.Pass
 	end
 
-	--[[
-		GATED ON THIS CLIENT'S OWN ROLE, from its own RoleAssigned. Never on a broadcast, never on
-		anything derived from another player.
-
-		This gate is UX and rate-limit courtesy, NOT security: the server re-evaluates every rule in
-		TransformRules against its own state and refuses regardless of what the client believes. A
-		compromised client can delete this check and gain exactly nothing, which is the correct
-		relationship between a client-side gate and a server-side one.
-	]]
-	if UIController.GetMyRole() ~= Enums.Role.Aswang then
-		return Enum.ContextActionResult.Pass
-	end
-
-	-- No arguments. The server knows who fired it and reads every other input from its own state;
-	-- anything passed here would be a client-supplied value the server must then refuse to trust.
-	Remotes.Get("RequestTransform"):FireServer()
-
-	return Enum.ContextActionResult.Sink
+	return if performTransform()
+		then Enum.ContextActionResult.Sink
+		else Enum.ContextActionResult.Pass
 end
 
 --------------------------------------------------------------------------------
@@ -123,6 +141,36 @@ local function nearestTarget(): Player?
 	return best
 end
 
+--[[
+	THE KILL, AS A PLAIN FUNCTION, SO THE HUD BUTTON CANNOT DIVERGE FROM THE KEY.
+
+	It used to live entirely inside `onKillAction`, and C18's KILL button therefore reimplemented it —
+	badly. It fired `RequestKill` with NO target, which `MonsterService` refuses after already spending
+	a rate-limit token, so the button was a silent no-op that drained the Aswang's budget. The two
+	things it skipped are exactly the two things this function does that a naive re-implementation
+	would not think to: pick a target, and DO NOT FIRE when there isn't one.
+
+	Returns whether the request was actually sent, so the key handler can Sink or Pass correctly. A
+	press with nobody in range must Pass rather than Sink — the rate limiter is the reason: firing on
+	empty air is how you arrive at the moment that matters with no tokens left.
+]]
+local function performKill(): boolean
+	-- Courtesy and rate-limit hygiene, never security — same reasoning as the transform gate above.
+	if UIController.GetMyRole() ~= Enums.Role.Aswang then
+		return false
+	end
+
+	local target = nearestTarget()
+
+	if target == nil then
+		return false
+	end
+
+	Remotes.Get("RequestKill"):FireServer(target.UserId)
+
+	return true
+end
+
 local function onKillAction(
 	_actionName: string,
 	inputState: Enum.UserInputState
@@ -131,20 +179,7 @@ local function onKillAction(
 		return Enum.ContextActionResult.Pass
 	end
 
-	-- Same gate, same reasoning as the transform above: courtesy and rate-limit hygiene, never security.
-	if UIController.GetMyRole() ~= Enums.Role.Aswang then
-		return Enum.ContextActionResult.Pass
-	end
-
-	local target = nearestTarget()
-
-	if target == nil then
-		return Enum.ContextActionResult.Pass
-	end
-
-	Remotes.Get("RequestKill"):FireServer(target.UserId)
-
-	return Enum.ContextActionResult.Sink
+	return if performKill() then Enum.ContextActionResult.Sink else Enum.ContextActionResult.Pass
 end
 
 --------------------------------------------------------------------------------
@@ -253,6 +288,28 @@ end
 function InputController.Init() end
 
 function InputController.Start()
+	--[[
+		HAND THE HUD THE SAME TWO FUNCTIONS THE KEYS RUN.
+
+		The dependency points this way and cannot point the other: this module already requires
+		`UIController` for `GetMyRole`, so `UIController` requiring this one back would be a cycle.
+		Registration is what lets the button and the key be the SAME code rather than two copies that
+		agree until one of them is edited — which is exactly how C18 shipped a KILL button that fired
+		with no target and silently burned the Aswang's rate limit.
+
+		Registered before the binds, so a button cannot be pressed against a nil handler in the window
+		between them. `UIController.Start` has already run — `init.client.luau` orders this controller
+		last for precisely this class of reason.
+	]]
+	UIController.BindActions({
+		Transform = function()
+			performTransform()
+		end,
+		Kill = function()
+			performKill()
+		end,
+	})
+
 	ContextActionService:BindAction(TRANSFORM_ACTION, onTransformAction, false, Enum.KeyCode.T)
 	ContextActionService:BindAction(KILL_ACTION, onKillAction, false, Enum.KeyCode.F)
 	-- `E` because it is ProximityPrompt's default key, so Phase 6 is a swap rather than a retraining.

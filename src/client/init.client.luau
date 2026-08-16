@@ -10,6 +10,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
 local Remotes = require(Shared.Remotes)
 local Types = require(Shared.Types)
@@ -27,6 +28,13 @@ local CONTROLLER_ORDER = {
 	-- per dead player named the dead set to every client. Before InputController for the same reason
 	-- TaskController is: it reacts to snapshots and should be listening before any bind can fire.
 	"GhostController",
+	--[[
+		C20. After TaskController, because both react to the same `TaskPoint` tags and the objective
+		marker should sit on top of the affordance TaskController draws rather than race it. Before
+		InputController for the same reason everything else here is: it listens for a remote that can
+		arrive the instant the round goes ACTIVE.
+	]]
+	"OnboardingController",
 	"InputController",
 }
 
@@ -65,9 +73,23 @@ for _, name in CONTROLLER_ORDER do
 	end
 end
 
--- Smoke test for M1: prove the round state machine is reaching the client.
--- TODO(C18): hand this off to UIController for the real HUD.
+--[[
+	Console tracing, and it is NOW GATED because C18 exists.
+
+	These two connections were M1's smoke test — the only way to see that the round state machine was
+	reaching the client at all — and the TODO here said to hand them to UIController for the real HUD.
+	The HUD is built, so the handoff is done: a player reads the phase, the countdown and the task
+	count off the screen, and nobody needs a print to know the round started.
+
+	They are kept rather than deleted because the console is still where you look when the HUD is the
+	thing that is broken, and a silent client is the worst possible state to debug. `VerboseLogging` is
+	false on a published place, so this costs players nothing.
+]]
 Remotes.Get("PhaseChanged").OnClientEvent:Connect(function(phase: string, duration: number)
+	if not Config.Debug.VerboseLogging then
+		return
+	end
+
 	local label = if phase == Enums.RoundPhase.Active then "ROUND LIVE" else phase
 	print(`[Client] Phase -> {label} ({duration}s)`)
 end)
@@ -78,6 +100,10 @@ end)
 local lastSnapshotLine: string? = nil
 
 Remotes.Get("RoundSnapshot").OnClientEvent:Connect(function(snapshot: Types.ClientRoundSnapshot)
+	if not Config.Debug.VerboseLogging then
+		return
+	end
+
 	local gate = if snapshot.GateOpen then "OPEN" else "shut"
 	local tasks = `{snapshot.TasksCompleted}/{snapshot.TasksRequired}`
 	-- No alive count. Amendment A3 removed the field; see the comment in Types.ClientRoundSnapshot for

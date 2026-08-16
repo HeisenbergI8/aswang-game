@@ -51,6 +51,38 @@ local EVENTS_DOWN = {
 		over the right list. The state test therefore lives at the fire site in GhostService.
 	]]
 	"GhostRoster",
+	--[[
+		C20. FireClient to ONE player, at ACTIVE, carrying a single task Id and nothing else.
+
+		Sent only to players the server has never seen finish a task — §10's answer to Appendix C's
+		single worst number, 79.9% of a competitor's 1.4M players never completing one objective.
+
+		WHAT IT REVEALS, stated plainly because a per-player down-remote deserves it: that the RECEIVER
+		is new. It cannot reveal anything about anyone else — the recipient list is never sent anywhere,
+		and the payload is one task Id already painted in-world on every client by `TaskController` off
+		the replicated `ActiveTaskPoint` tag, out to `Config.Tasks.MarkerVisibleStuds`.
+
+		THE TAG IS THE REASON, NOT `TaskListAssigned`. An earlier version of this comment cited both,
+		and for the Aswang the second one is a lie the server deliberately told them: C12 sends them a
+		DECOY five, so a real task Id is something their task list denies. The tag is what makes this
+		harmless anyway — `TaskController` paints every genuinely-active point for every role, so an
+		Aswang can already see the true five in the world, and `TaskListView`'s own header concedes it.
+		C20's marginal gift is "this one is nearest your spawn", which they could also see.
+
+		That the two channels disagree is a coherence cost, not an information one, and it is taken
+		deliberately: pointing a new Aswang at a decoy point would teach them that holding E does
+		nothing, which is precisely the failure §10 exists to delete.
+
+		Being new is not a role, and the asymmetry runs the safe way: the Aswang learning that some
+		unnamed player is a beginner tells them nothing they cannot get by watching, and no survivor
+		learns anything about the Aswang. Compare `GhostRoster` above, which is dangerous for exactly
+		the reason this one is not — it names WHICH players are in a set.
+
+		The waypoint it drives is drawn CLIENT-SIDE into PlayerGui. A Beam or Billboard created on the
+		server would be a permanent replicated marker on one player, which is the shape §6.2 exists to
+		refuse.
+	]]
+	"FirstObjectiveAssigned",
 }
 
 -- Client -> Server (the client asks; the server decides)
