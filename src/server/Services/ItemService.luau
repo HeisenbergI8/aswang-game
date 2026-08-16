@@ -202,6 +202,41 @@ local function spawnPouches()
 		pouch.Material = Enum.Material.Sand
 		pouch.Parent = folder
 
+		--[[
+			A LABEL AND A GLOW, so a pouch reads as salt rather than as a white cube.
+
+			This is presentation, and it is here rather than on the client for one reason: the pouch is
+			ALREADY a fully public replicated object, so a BillboardGui on it tells nobody anything they
+			could not see by walking over. Nothing about it is per-player, so there is no secrecy question
+			— compare the reveal Highlight, which is deliberately server-owned for the opposite reason.
+
+			C34 replaces this with an actual model. Until then a tester needs to be able to find the one
+			mechanic that answers the monster.
+		]]
+		local billboard = Instance.new("BillboardGui")
+		billboard.Name = "PouchLabel"
+		billboard.Size = UDim2.fromOffset(60, 20) -- config-ok: placeholder label size, replaced at C34
+		billboard.StudsOffset = Vector3.new(0, 1.5, 0) -- config-ok: sits above the pouch
+		billboard.AlwaysOnTop = true
+		billboard.Parent = pouch
+
+		local text = Instance.new("TextLabel")
+		text.Size = UDim2.fromScale(1, 1)
+		text.BackgroundTransparency = 1
+		text.Text = "SALT"
+		text.TextColor3 = Color3.new(1, 1, 1)
+		text.TextStrokeTransparency = 0
+		text.TextScaled = true
+		text.Font = Enum.Font.GothamBold
+		text.Parent = billboard
+
+		local glow = Instance.new("PointLight")
+		glow.Name = "PouchGlow"
+		glow.Color = rgb(Config.Salt.PouchRgb)
+		glow.Brightness = 2 -- config-ok: placeholder pickup affordance, replaced at C34
+		glow.Range = 8 -- config-ok: same
+		glow.Parent = pouch
+
 		CollectionService:AddTag(pouch, TAG_POUCH)
 	end
 

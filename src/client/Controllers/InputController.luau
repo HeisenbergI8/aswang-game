@@ -241,6 +241,12 @@ local function onThrowAction(
 
 	Remotes.Get("RequestThrowSalt"):FireServer(camera.CFrame.LookVector)
 
+	-- The HUD's salt estimate lives in UIController and is decremented HERE, at the keypress, because
+	-- `SaltEffect` names nobody and cannot attribute a throw. Optimistic: the server may refuse this
+	-- (no pouch, wrong phase), in which case the display is briefly one low and self-corrects on the
+	-- next pickup. It is prefixed `~` on screen for exactly that reason.
+	UIController.NoteThrow()
+
 	return Enum.ContextActionResult.Sink
 end
 
