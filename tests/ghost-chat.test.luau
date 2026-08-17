@@ -155,6 +155,57 @@ end
 check("GHOST is not living-side", GhostChat.isLivingSide("GHOST") == false)
 check("SPECTATOR is not living-side", GhostChat.isLivingSide("SPECTATOR") == false)
 
+--------------------------------------------------------------------------------
+-- C25. The quick-chat wheel reuses this predicate rather than growing its own.
+--------------------------------------------------------------------------------
+
+--[[
+	WHY THESE ASSERTIONS ARE HERE AND NOT IN A quick-chat FILE.
+
+	They are not testing quick chat. They are pinning that quick chat's audience rule IS this
+	sixteen-cell grid and not a second, subtly different wall — which is the whole reason
+	`QuickChatService` calls `shouldDeliver` instead of writing its own condition.
+
+	The value is in WHERE THEY FAIL. If someone edits `shouldDeliver` for a text-chat reason, these
+	four lines fail in this file and name quick chat as the other caller, in the same run. A separate
+	quick-chat suite would fail too, but a chunk later and without saying why.
+
+	C15's ghost-chat rule and C25's are the same rule because they answer the same question — can this
+	dead player be heard by that living one — and the answer must not depend on which button was
+	pressed. A ghost whose typed message is walled but whose wheel is not has no wall at all.
+]]
+
+check(
+	"C25: a living player's quick chat reaches the living",
+	GhostChat.shouldDeliver("ALIVE", "ALIVE") == true
+)
+
+check(
+	"C25: a living player's quick chat also reaches ghosts",
+	GhostChat.shouldDeliver("ALIVE", "GHOST") == true
+)
+
+check(
+	"C25: a ghost's quick chat reaches other ghosts",
+	GhostChat.shouldDeliver("GHOST", "GHOST") == true
+)
+
+--[[
+	THE ONE THAT ENDS ROUNDS IF IT INVERTS. A ghost watched their own death and usually knows who did
+	it; one phrase reaching a living player makes "wait for someone to die" the optimal strategy.
+	Quick chat makes that cheaper than typing, so this cell matters MORE here than it did at C15.
+]]
+check(
+	"C25: a ghost's quick chat NEVER reaches the living",
+	GhostChat.shouldDeliver("GHOST", "ALIVE") == false
+)
+
+-- SPECTATOR is dead-side, so a mid-round arrival cannot relay a transform they watched.
+check(
+	"C25: a spectator's quick chat never reaches the living",
+	GhostChat.shouldDeliver("SPECTATOR", "ALIVE") == false
+)
+
 if failures > 0 then
 	error(`{failures} ghost-chat assertion(s) failed`, 0)
 end

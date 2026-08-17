@@ -39,6 +39,13 @@ local SERVICE_ORDER = {
 		produce a cue, not because the require needs it.
 	]]
 	"TeachingService",
+	--[[
+		C25. After RoundService's dependants for the ordinary reason — it subscribes to PhaseChanged
+		and reads GetPlayerState — and it needs no particular position relative to the others, because
+		nothing else in the tree calls into it. Quick chat is a leaf: the client requests, this
+		service decides and broadcasts, and no other service reads its state.
+	]]
+	"QuickChatService",
 	-- The state machine drives everything, so it starts last
 	"RoundService",
 }

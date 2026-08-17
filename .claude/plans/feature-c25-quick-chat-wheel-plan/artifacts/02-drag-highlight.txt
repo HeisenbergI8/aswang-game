@@ -1,0 +1,19 @@
+execute_luau (Client), after moveTo(960,300)+wait 200ms then re-checked mouse at (960,358) via
+UserInputService:GetMouseLocation():
+
+Sector TextColor3 dump (Wheel frame children):
+  SAW_TRANSFORM TextColor3=1, 1, 1
+  BODY_HERE TextColor3=1, 1, 1
+  TASK_HERE TextColor3=1, 0.839216, 0.360784      <-- matches COLOUR.Highlight (255,214,92)/255
+  FOLLOW_ME TextColor3=1, 1, 1
+  ACCUSE TextColor3=1, 1, 1
+  RUN TextColor3=1, 1, 1
+  IM_ALONE TextColor3=1, 1, 1
+  TRUST_ME TextColor3=1, 1, 1
+
+TASK_HERE is highlighted. Sector geometry/angle math (QuickChatPhrases.sectorFor + the atan2 call in
+sectorAt) DOES correctly compute and apply a highlight from a live mouse position, confirming the
+drag-highlight mechanism works mechanically. This is despite `origin` itself being wrong (see
+01-wheel-open-position.txt) -- the highlight is computed relative to whatever `origin` is, and origin
+being (0,0) instead of the press point does not break the angle math, it just makes the effective
+wheel occupy the corner of the screen instead of following the cursor.

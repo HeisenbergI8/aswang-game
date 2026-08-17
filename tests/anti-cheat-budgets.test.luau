@@ -21,7 +21,12 @@
 
 local Config = require("../src/shared/Config")
 
--- Hand copy of Remotes.EVENTS_UP, last synced at C22. See the header for why.
+-- Hand copy of Remotes.EVENTS_UP, last synced at C25. See the header for why.
+-- C25 checked this list and added NOTHING: the quick-chat wheel ships on the `RequestQuickChat`
+-- entry that was already here, because the world ping is a DERIVED FIELD on the broadcast rather
+-- than a second remote. A ping remote would have handed the client a "draw an arrow anywhere"
+-- primitive — including on top of a player, which accuses by geometry while the phrase says
+-- something innocent.
 local UP_REMOTES = {
 	"RequestTaskProgress",
 	"RequestTimingStop",
@@ -152,6 +157,33 @@ check("rate limiting is still log-only until C41", Config.AntiCheat.LogOnly == t
 check("an unbudgeted remote is refused", Config.AntiCheat.AllowUnbudgetedRemote == false)
 
 check("a request costs at least one token", Config.AntiCheat.DefaultCost >= 1)
+
+--[[
+	C25, and the second half of the plan's Step 2.4 — dropped by the first implementation and caught
+	by a plan audit. It was true by coincidence, which is exactly the state this file exists to end.
+
+	A wheel is pressed in bursts: you say "Body here!" and "Run!" in the same breath. A capacity below
+	that throttles the communication system §4.5 says must not be cut, and the symptom is a player
+	pressing a button that silently does nothing mid-chase.
+]]
+check(
+	"the quick-chat wheel bursts wide enough for consecutive calls",
+	Config.AntiCheat.Budgets.RequestQuickChat.Capacity >= 3,
+	`Capacity={Config.AntiCheat.Budgets.RequestQuickChat.Capacity}`
+)
+
+--[[
+	AND A TOKEN MUST RETURN BEFORE THE LAST MESSAGE HAS FADED. If refilling took longer than a message
+	stays on screen, a player would watch their own words disappear before they could add to them,
+	which reads as the feature being broken rather than rate-limited.
+]]
+check(
+	"a quick-chat token refills before a message fades",
+	1 / Config.AntiCheat.Budgets.RequestQuickChat.RefillPerSecond
+		<= Config.QuickChat.MessageLifetimeSeconds,
+	`{1 / Config.AntiCheat.Budgets.RequestQuickChat.RefillPerSecond}s per token vs `
+		.. `{Config.QuickChat.MessageLifetimeSeconds}s on screen`
+)
 
 if failures > 0 then
 	error(`{failures} anti-cheat budget failure(s)`, 0)

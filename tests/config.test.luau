@@ -523,6 +523,54 @@ check(
 	`travel={Config.Trial.ChaseWalkSpeed * Config.Trial.SnapshotInterval}, stop={Config.Trial.ChaseStopStuds}`
 )
 
+--------------------------------------------------------------------------------
+-- The quick-chat wheel (C25, §4.5)
+--
+-- Step 1.1 of the C25 plan asked for these and the first implementation shipped without them: the
+-- bounds were written in prose in Config's comment and enforced nowhere. A plan audit caught it.
+-- Prose does not fail a build.
+--------------------------------------------------------------------------------
+
+--[[
+	THE ACCUSATION MUST REACH FURTHER THAN THE ASWANG KILLS.
+
+	§4.5 exists for the moment something is close enough to kill you and there is no time to type. A
+	range that cannot name the thing standing on top of you has no reason to exist.
+]]
+check(
+	"the accusation reaches further than the Aswang kills",
+	Config.QuickChat.AccuseRangeStuds > Config.Monster.KillRange,
+	`AccuseRangeStuds={Config.QuickChat.AccuseRangeStuds}, KillRange={Config.Monster.KillRange}`
+)
+
+--[[
+	AND IT MUST STAY FAR SHORT OF MAP SCALE. This is the security half.
+
+	The phrase resolves its target from the sender's own position, so a large range turns it into a
+	proximity radar the sender can poll — and the player with most to gain from "who is near me" is
+	the Aswang hunting. Line of sight and the FOV term are the primary defences; this is the third,
+	and it is the one an M12 balance pass could undo without noticing.
+]]
+check(
+	"the accusation is not a map-scale radar",
+	Config.QuickChat.AccuseRangeStuds < Config.Tasks.MarkerVisibleStuds / 2,
+	`AccuseRangeStuds={Config.QuickChat.AccuseRangeStuds}, `
+		.. `MarkerVisibleStuds={Config.Tasks.MarkerVisibleStuds}`
+)
+
+--[[
+	THE FIELD OF VIEW IS A CONE, and at or past 90 degrees it stops being one.
+
+	An exploit audit found the accusation's failure was a free silent "is anyone watching me" probe,
+	because a raycast with no facing term sees behind the sender. At >= 90 that property returns:
+	the miss stops meaning "nobody in front of me" and the equivalence the design rests on breaks.
+]]
+check(
+	"the accusation's field of view is a forward cone",
+	Config.QuickChat.AccuseHalfAngleDegrees > 0 and Config.QuickChat.AccuseHalfAngleDegrees < 90,
+	`AccuseHalfAngleDegrees={Config.QuickChat.AccuseHalfAngleDegrees}`
+)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end

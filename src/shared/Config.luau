@@ -365,6 +365,71 @@ local Config = {
 		CameraDistance = 12,
 	},
 
+	--[[
+		§4.5, C25. The quick-chat wheel.
+
+		THE LAYOUT NUMBERS ARE HERE RATHER THAN IN THE CONTROLLER ON PURPOSE, and they are the ones
+		most likely to move: §5 puts ~60% of players on a phone, and "is this reachable with one
+		thumb" is a question answered by holding a phone, not by reading code. A wheel radius baked
+		into a controller is a wheel radius nobody re-tunes after the first playtest.
+	]]
+	QuickChat = {
+		--[[
+			How far the `"It's [nearest player]!"` phrase will look for a target, in studs.
+
+			BOUNDED ON BOTH SIDES BY `tests/config.test.luau`, and both bounds are security rather
+			than feel:
+
+			  · It MUST exceed `Monster.KillRange` (8). The moment §4.5 exists for is the one where
+			    something is close enough to kill you and you have no time to type. A range that
+			    cannot name the thing standing on top of you has no reason to exist.
+			  · It MUST stay far below `Tasks.MarkerVisibleStuds` (220). This is the half that
+			    matters for §6.2. The phrase resolves its target from the sender's own position, so a
+			    large range turns it into a map-wide proximity radar the sender can poll — and the
+			    player with the most to gain from "who is near me, through walls" is the Aswang
+			    hunting. Line of sight is the primary defence (see QuickChatService); this is the
+			    second.
+		]]
+		AccuseRangeStuds = 40,
+
+		--[[
+			THE FIELD OF VIEW THE ACCUSATION NEEDS, as a half-angle in degrees.
+
+			Added after an exploit audit deflated the original claim. Range and a raycast alone see
+			BEHIND the sender, through fog and darkness, so a failed accusation was a free silent
+			"nobody has line to me" — a transform-safety check bought for one token without looking.
+			With this term a miss means "nobody in FRONT of me", which is what the player's own eyes
+			already said, and that equivalence is the whole reason the phrase is safe to spam.
+
+			60 is a little narrower than a typical third-person camera frustum, so the phrase names
+			people the player can actually see on screen rather than people technically unoccluded.
+			`tests/config.test.luau` pins it inside (0, 90): at or past 90 it includes what is beside
+			and behind you, which is the property being removed.
+		]]
+		AccuseHalfAngleDegrees = 60,
+
+		-- How long a world ping marker lives on a receiving client, in seconds. Long enough to walk
+		-- toward, short enough that a plaza full of stale pings is not the HUD.
+		PingLifetimeSeconds = 8,
+		-- How long a received phrase stays on screen, and how many stack before the oldest is dropped.
+		MessageLifetimeSeconds = 6,
+		MaxVisibleMessages = 4,
+
+		-- The wheel's radius in pixels, measured from the press point to the middle of a sector.
+		WheelRadiusPx = 150,
+		--[[
+			THE ACCESSIBILITY FLOOR FOR A TOUCH TARGET, and the number the mobile argument rests on.
+			44px is the long-standing minimum for a reliable thumb press; a sector whose narrowest
+			dimension falls below it is a sector that gets mis-hit mid-chase, which for this feature
+			means accusing the wrong person. Pinned in `tests/config.test.luau` against
+			`WheelRadiusPx` so shrinking the wheel cannot silently shrink the targets below it.
+		]]
+		MinTouchTargetPx = 44,
+		-- A drag shorter than this radius from the press point is a CANCEL, not a selection. Without it,
+		-- opening the wheel and thinking better of it sends whichever sector the thumb was resting on.
+		DeadRadiusPx = 30,
+	},
+
 	Economy = {
 		XPPerRound = 50,
 		XPWinBonus = 40,

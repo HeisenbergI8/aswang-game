@@ -448,6 +448,79 @@ export type SpookVerdict =
 	| "NO_SPOOKS_LEFT"
 	| "NOTHING_IN_RANGE"
 
+--[[
+	§4.5, C25. The eight phrases, as IDS rather than as strings.
+
+	THE WHOLE SECURITY DESIGN OF THIS FEATURE IS THAT THIS IS A CLOSED UNION. `RequestQuickChat`
+	carries one of these and nothing else — no name, no position, no free text — which puts it in the
+	same class as `RequestTimingStop` and `RequestStartTrial`, remotes built so that there is no
+	argument in which a client could name a person, a place or an outcome.
+
+	The display strings live in `shared/pure/QuickChatPhrases` and are rendered by the RECEIVER from
+	the id. That is what removes user-generated text from the wire entirely — see QuickChatService's
+	header for why that also removes the TextService question.
+]]
+export type QuickChatPhraseId =
+	"SAW_TRANSFORM"
+	| "BODY_HERE"
+	| "FOLLOW_ME"
+	| "ACCUSE"
+	| "TASK_HERE"
+	| "RUN"
+	| "IM_ALONE"
+	| "TRUST_ME"
+
+--[[
+	Why the server refused a RequestQuickChat. Same shape and same rule as SpookVerdict above: a union
+	so the server can log WHY, and never echoed to the client.
+
+	LOGGED, NEVER ECHOED — not even to the sender. GhostService's spook handler states the reason and
+	it applies here unchanged: a verdict returned to a client is a STATE ORACLE.
+	`NOT_ALLOWED_FOR_STATE` echoed back would let a player fire the wheel and read their own aliveness
+	off the refusal, which is the death signal Amendment A3 removed `AlivePlayerCount` to close,
+	rebuilt out of an error code.
+
+	SO HOW DOES THE SENDER KNOW IT FAILED? They receive their own broadcast, like everyone else. A
+	message that appears succeeded; one that does not, did not. That is a complete signal, it needs no
+	remote, and it cannot be fired as a probe because the absence carries no detail.
+]]
+export type QuickChatVerdict =
+	"OK"
+	| "WRONG_PHASE"
+	| "UNKNOWN_PHRASE"
+	| "NOT_ALLOWED_FOR_STATE"
+	| "NO_SENDER_CHARACTER"
+	| "NO_TARGET_IN_SIGHT"
+
+--[[
+	C25. What `QuickChatBroadcast` carries, and the reason it is written as a closed type.
+
+	FOUR FIELDS, NO STRINGS. Every one is either a UserId the receiver can already resolve or a
+	position the SERVER derived from its own copy of the sender's character.
+
+	  · SenderUserId  — who said it. Attributable by design: an accusation nobody can attribute is
+	    not an accusation, and the cost of accusing is that you are on record.
+	  · PhraseId      — rendered locally from `pure/QuickChatPhrases`. Never a string on the wire.
+	  · TargetUserId  — present ONLY for ACCUSE, and only for a player the sender could see. Range
+	    AND line of sight are both checked server-side, so this names somebody the sender's own eyes
+	    already named. See the liveness note in the C25 plan's Follow Ups for the residual leak.
+	  · PingPosition  — the SENDER's own root position at the instant the request landed, present
+	    only for phrases whose meaning is locative. Never client-supplied: a client-named position is
+	    a "draw an arrow anywhere" primitive, including on top of a player.
+
+	NO PlayerState FIELD, AND THERE MUST NEVER BE ONE. Amendment A3 removed `AlivePlayerCount`
+	because a death signal is the missing input to a position-correlation attack, and a field saying
+	"the sender is ALIVE" would be that signal wearing a different hat. The audience filter already
+	encodes the same fact for the recipients entitled to it, and encodes it by WHO RECEIVES rather
+	than by what is written down — the same asymmetry that makes `GhostRoster` safe.
+]]
+export type QuickChatBroadcastPayload = {
+	SenderUserId: number,
+	PhraseId: QuickChatPhraseId,
+	TargetUserId: number?,
+	PingPosition: Vector3?,
+}
+
 -- SERVER ONLY. Never send this table to a client.
 export type RoundState = {
 	Phase: RoundPhase,

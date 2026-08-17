@@ -1,0 +1,25 @@
+execute_luau (Client datamodel), immediately after keyDown(B):
+
+Query:
+  PlayerGui children: Freecam (Enabled=true), Hud (Enabled=true), QuickChatWheel (Enabled=true), RoleIntro (Enabled=true)
+  QuickChatWheel Enabled=true framePos={0, 0}, {0, 0}
+
+Interpretation: the wheel opened (Enabled=true), but its Frame.Position is {0,0},{0,0} -- the
+top-left corner of the screen, not the press point. Screenshot 01-wheel-open-via-B-keyboard.png
+(saved separately by the tool) shows sector buttons clipped against the top-left corner, confirming
+this is not a coordinate-reporting artifact.
+
+Root cause (read from source, src/client/Controllers/QuickChatController.luau lines ~419-429):
+  onWheelAction(_actionName, inputState, inputObject)
+    local position = Vector2.new(inputObject.Position.X, inputObject.Position.Y)
+    if inputState == Enum.UserInputState.Begin then
+      openAt(position)   -- uses inputObject.Position
+
+For a KEYBOARD input (Enum.KeyCode.B pressed as a key, not a touch or mouse button),
+InputObject.Position is not meaningful and Roblox reports it as (0, 0, 0). openAt() then sets
+frame.Position = UDim2.fromOffset(0, 0) -- the corner, not the cursor.
+
+The header comment ("THE WHEEL OPENS AT THE THUMB, NOT AT SCREEN CENTRE") is true only for a TOUCH
+press, where InputObject.Position is the real touch coordinate. For the PC keyboard bind (B), which
+is the primary way a mouse+keyboard player triggers this, the position is always (0,0) regardless of
+where the mouse cursor is.
