@@ -164,6 +164,18 @@ local function ensurePanel()
 	taskLabel = tasks
 end
 
+--[[
+	Whether THIS client is currently in a trial. Read by `InputController` to decide which throw
+	remote Q fires — see its `performThrow`.
+
+	It is derived from the panel's existence rather than from a separate flag, so there is exactly one
+	piece of state and it cannot disagree with what the player can see. The server re-checks the
+	session on every request regardless; this only picks which question to ask.
+]]
+function TrialController.IsActive(): boolean
+	return panel ~= nil and panel.Parent ~= nil
+end
+
 function TrialController.Init() end
 
 function TrialController.Start()

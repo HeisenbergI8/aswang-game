@@ -27,6 +27,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local TaskController = require(script.Parent.TaskController)
+local TrialController = require(script.Parent.TrialController)
 local UIController = require(script.Parent.UIController)
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -274,7 +275,24 @@ local function onThrowAction(
 		return Enum.ContextActionResult.Pass
 	end
 
-	Remotes.Get("RequestThrowSalt"):FireServer(camera.CFrame.LookVector)
+	--[[
+		C22. IN A TRIAL, Q FIRES THE TRIAL'S THROW INSTEAD.
+
+		Both remotes take a direction and nothing else, and both resolve through the same
+		`SaltThrow.inCone` on the server — so this is a routing decision, not two mechanics. The
+		player presses the same key and learns the same aim.
+
+		It has to be routed because `ItemService` resolves against the ROUND phase, which is IDLE
+		during a trial: sending the real remote there gets a silent WRONG_PHASE and the tutorial
+		teaches an action the player is refused. Asking `TrialController` rather than tracking a
+		second flag here keeps one piece of state; the server re-checks the session either way, so a
+		client that picks wrongly gets a refusal rather than an advantage.
+	]]
+	if TrialController.IsActive() then
+		Remotes.Get("RequestTrialThrow"):FireServer(camera.CFrame.LookVector)
+	else
+		Remotes.Get("RequestThrowSalt"):FireServer(camera.CFrame.LookVector)
+	end
 
 	-- The HUD's salt estimate lives in UIController and is decremented HERE, at the keypress, because
 	-- `SaltEffect` names nobody and cannot attribute a throw. Optimistic: the server may refuse this

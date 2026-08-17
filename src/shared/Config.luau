@@ -522,6 +522,9 @@ local Config = {
 			]]
 			RequestStartTrial = { Capacity = 2, RefillPerSecond = 0.1 },
 			RequestEndTrial = { Capacity = 3, RefillPerSecond = 0.2 },
+			-- Priced like `RequestThrowSalt` next door rather than like the two button presses above:
+			-- it is the same action, and a player learning it will press it more than once.
+			RequestTrialThrow = { Capacity = 3, RefillPerSecond = 0.2 },
 		},
 
 		-- One request costs one token. Here rather than in the service so C41 can price an expensive

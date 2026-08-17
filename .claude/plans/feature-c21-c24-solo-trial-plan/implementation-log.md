@@ -355,3 +355,45 @@ invariants.
   can drive. The abort path is proven only by reading.
 - `UIController` hardcodes `AlreadyInTrial = false` for the door's display check. Harmless: the server
   refuses with `ALREADY_IN_TRIAL`.
+
+---
+
+## C22's salt throw — closing the gap the plan could not — 2026-08-17
+
+The user's rule was: if a later chunk teaches the salt throw, leave it; if not, build it here,
+because it is a major function and the tutorial must let the player do it to understand it.
+
+**Checked, and no later chunk covers it.** `docs/BUILD-PLAN.md:534` is C22 itself ("Salt is given and
+taught"); C27 is touch-control plumbing, C34 is visual polish. Nothing else teaches the throw. So it
+belongs here and is now built.
+
+**Files changed:** `src/shared/pure/SaltThrow.luau`, `src/shared/Remotes.luau`, `src/shared/Config.luau`,
+`src/server/Services/TrialService.luau`, `src/client/Controllers/TrialController.luau`,
+`src/client/Controllers/InputController.luau`, `tests/salt-throw.test.luau`,
+`tests/anti-cheat-budgets.test.luau`.
+
+**The shape, and why it is not the other one.** Of the two options put to the user, the cheaper —
+relaxing `ItemService`'s phase gate for players in a trial — was the one that would have hurt: the
+salt system would start consulting trial state to resolve a live round's throws, coupling the two
+services this whole feature exists to keep apart, on the 🔒 surface, for a tutorial. The fifth remote
+costs one budget entry and couples nothing.
+
+**`SaltThrow.inCone` was extracted so both throws share the real aim.** The trial needs the geometry
+half of `evaluate` and none of the round half — at IDLE, against a prop, `Phase`, `ThrowerState`,
+`Carried` and `TargetIsTransformedAswang` are all either false or meaningless. The alternative was
+passing `Phase = "ACTIVE"` to get past a gate the trial does not mean, or duplicating the cone maths;
+the first is a lie in the code and the second drifts, at which point the tutorial teaches an aim the
+game does not have. `evaluate` now calls `inCone`, and its 56 existing assertions passed unchanged,
+which is what makes the extraction safe to believe.
+
+**The pouch is spent on a miss.** §4.6 gives salt no recharge, and a throw that only costs you when
+it lands would teach that aiming is free — the opposite of the decision the real game asks for.
+
+**Tests:** `tests/salt-throw.test.luau` grew from 56 to 70 assertions — `inCone` directly (dead ahead,
+dead behind, past the range, at the boundary, zero direction, zero/90-degree cone, zero/infinite
+range), plus a property asserting the trial's aim and the round's agree at five distances. A geometry
+function with two callers and one test path is a function whose second caller is unverified.
+
+**Not verified in Studio.** The handler, the routing and the geometry are proven by the suite; that Q
+actually fires the trial remote in a live session, and that a hit visibly stuns the rig, has not been
+observed. That is the next playtest's first question.

@@ -104,6 +104,65 @@ end
 	scarcity IS the limiter, and `Config.AntiCheat.Budgets.RequestThrowSalt` bounds the request rate
 	regardless. A cooldown here would be a fifth number nobody tuned.
 ]]
+--[[
+	THE AIM, SPLIT OUT SO TWO CALLERS CAN SHARE IT WITHOUT SHARING THE ROUND'S RULES.
+
+	`evaluate` above answers a ROUND question — right phase, alive thrower, has a pouch, and the
+	target is the transformed Aswang — and then asks this. C21's Solo Trial needs only this half: it
+	runs at IDLE against a scripted rig, so every one of those round preconditions is either false or
+	meaningless there, and the trial establishes its own (you are in a session, the rig exists).
+
+	Extracted rather than duplicated, and rather than having the trial pass `Phase = "ACTIVE"` to get
+	past a gate it does not mean. THE POINT IS THAT THE TUTORIAL TEACHES THE REAL AIM: same range,
+	same cone, same feel, one implementation. A second copy would drift, and the throw a player
+	learned in the tutorial would stop being the throw that works in a round — which is the entire
+	reason C22 teaches it by doing.
+
+	Returns false for every degenerate input rather than erroring: a zero direction, a NaN distance,
+	an infinite range, a cone at or past 90 degrees (which would hit what is behind the thrower).
+]]
+function SaltThrow.inCone(
+	from: Vec3,
+	direction: Vec3,
+	target: Vec3,
+	range: number,
+	coneDegrees: number
+): boolean
+	if not (range > 0 and range < math.huge) then
+		return false
+	end
+
+	local toTarget = sub(target, from)
+	local distance = magnitude(toTarget)
+
+	if not (distance >= 0 and distance < math.huge) or distance > range then
+		return false
+	end
+
+	local aim = normalise(direction)
+	local bearing = normalise(toTarget)
+
+	if aim == nil or bearing == nil then
+		return false
+	end
+
+	--[[
+		A HALF-ANGLE IN DEGREES, COMPARED AS A COSINE. `math.cos` is monotonically decreasing over
+		[0, pi], so "inside the cone" is `dot >= cos(halfAngle)` — no `math.acos`, which is the call
+		that would need its own domain guard for a dot product that floating-point error pushed to
+		1.0000001.
+
+		Clamped to (0, 90) rather than trusted: `tests/config.test.luau` pins the Config value in that
+		range, and this module is called with numbers rather than with Config, so it re-checks. A
+		half-angle of 90 or more means a throw hits what is behind you.
+	]]
+	if not (coneDegrees > 0 and coneDegrees < 90) then
+		return false
+	end
+
+	return dot(aim, bearing) >= math.cos(math.rad(coneDegrees))
+end
+
 function SaltThrow.evaluate(request: Request): Verdict
 	if request.Phase ~= "ACTIVE" then
 		return "WRONG_PHASE"
@@ -133,39 +192,15 @@ function SaltThrow.evaluate(request: Request): Verdict
 		return "MISS"
 	end
 
-	if not (request.Range > 0 and request.Range < math.huge) then
-		return "MISS"
-	end
-
-	local toTarget = sub(request.TargetPos, request.ThrowerPos)
-	local distance = magnitude(toTarget)
-
-	if not (distance >= 0 and distance < math.huge) or distance > request.Range then
-		return "MISS"
-	end
-
-	local aim = normalise(request.Direction)
-	local bearing = normalise(toTarget)
-
-	if aim == nil or bearing == nil then
-		return "MISS"
-	end
-
-	--[[
-		A HALF-ANGLE IN DEGREES, COMPARED AS A COSINE. `math.cos` is monotonically decreasing over
-		[0, pi], so "inside the cone" is `dot >= cos(halfAngle)` — no `math.acos`, which is the call
-		that would need its own domain guard for a dot product that floating-point error pushed to
-		1.0000001.
-
-		Clamped to (0, 90) rather than trusted: `tests/config.test.luau` pins the Config value in that
-		range, and this module is called with numbers rather than with Config, so it re-checks. A
-		half-angle of 90 or more means a throw hits what is behind you.
-	]]
-	if not (request.ConeDegrees > 0 and request.ConeDegrees < 90) then
-		return "MISS"
-	end
-
-	if dot(aim, bearing) < math.cos(math.rad(request.ConeDegrees)) then
+	if
+		not SaltThrow.inCone(
+			request.ThrowerPos,
+			request.Direction,
+			request.TargetPos,
+			request.Range,
+			request.ConeDegrees
+		)
+	then
 		return "MISS"
 	end
 

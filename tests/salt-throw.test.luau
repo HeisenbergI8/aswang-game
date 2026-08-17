@@ -286,6 +286,92 @@ do
 	)
 end
 
+--------------------------------------------------------------------------------
+-- `inCone` DIRECTLY (C22). It was extracted from `evaluate` so the Solo Trial could
+-- share the real aim without inheriting the round's rules — the trial runs at IDLE
+-- against a scripted rig, where phase, thrower state and carry have no meaning.
+--
+-- Tested on its own because it now has a caller that never goes through `evaluate`,
+-- and a geometry function with two callers and one test path is a function whose
+-- second caller is unverified.
+--------------------------------------------------------------------------------
+
+local ORIGIN: SaltThrow.Vec3 = { X = 0, Y = 0, Z = 0 }
+local FORWARD: SaltThrow.Vec3 = { X = 0, Y = 0, Z = 1 }
+
+check(
+	"a target dead ahead and in range is in the cone",
+	SaltThrow.inCone(ORIGIN, FORWARD, { X = 0, Y = 0, Z = 10 }, 20, 30) == true
+)
+
+check(
+	"a target dead behind is not, whatever the range",
+	SaltThrow.inCone(ORIGIN, FORWARD, { X = 0, Y = 0, Z = -10 }, 20, 30) == false
+)
+
+check(
+	"a target beyond the range is not, however well aimed",
+	SaltThrow.inCone(ORIGIN, FORWARD, { X = 0, Y = 0, Z = 30 }, 20, 30) == false
+)
+
+check(
+	"a target exactly at the range boundary is in",
+	SaltThrow.inCone(ORIGIN, FORWARD, { X = 0, Y = 0, Z = 20 }, 20, 30) == true
+)
+
+-- The degenerate inputs, each of which must answer false rather than error. A zero direction is the
+-- one a client can actually send.
+check(
+	"a zero direction refuses rather than erroring",
+	SaltThrow.inCone(ORIGIN, { X = 0, Y = 0, Z = 0 }, { X = 0, Y = 0, Z = 5 }, 20, 30) == false
+)
+
+check(
+	"a cone at 90 degrees or more refuses — it would hit what is behind you",
+	SaltThrow.inCone(ORIGIN, FORWARD, { X = 0, Y = 0, Z = 5 }, 20, 90) == false
+)
+
+check(
+	"a zero cone refuses",
+	SaltThrow.inCone(ORIGIN, FORWARD, { X = 0, Y = 0, Z = 5 }, 20, 0) == false
+)
+
+check(
+	"an infinite range refuses",
+	SaltThrow.inCone(ORIGIN, FORWARD, { X = 0, Y = 0, Z = 5 }, math.huge, 30) == false
+)
+
+check(
+	"a zero range refuses",
+	SaltThrow.inCone(ORIGIN, FORWARD, { X = 0, Y = 0, Z = 5 }, 0, 30) == false
+)
+
+--[[
+	THE PROPERTY THAT KEEPS THE TUTORIAL HONEST: `inCone` is what `evaluate` uses, so a throw the
+	real game would land is a throw the trial lands, at the same Config numbers. If these two ever
+	disagree, the tutorial has started teaching an aim the game does not have — which is the exact
+	failure C22 teaches by doing in order to avoid.
+]]
+for _, distance in { 1, 5, 10, 14, 15 } do
+	local target: SaltThrow.Vec3 = { X = 0, Y = 0, Z = distance }
+
+	local geometric = SaltThrow.inCone(ORIGIN, FORWARD, target, 15, 25)
+
+	local full = SaltThrow.evaluate({
+		Phase = "ACTIVE" :: SaltThrow.RoundPhase,
+		ThrowerState = "ALIVE" :: SaltThrow.PlayerState,
+		Carried = 1,
+		ThrowerPos = ORIGIN,
+		Direction = FORWARD,
+		TargetPos = target,
+		TargetIsTransformedAswang = true,
+		Range = 15,
+		ConeDegrees = 25,
+	}) == "OK"
+
+	check(`the trial's aim and the round's agree at {distance} studs`, geometric == full)
+end
+
 if failures > 0 then
 	error(`{failures} salt-throw assertion(s) failed`, 0)
 end

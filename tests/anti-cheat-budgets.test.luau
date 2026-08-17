@@ -21,7 +21,7 @@
 
 local Config = require("../src/shared/Config")
 
--- Hand copy of Remotes.EVENTS_UP, last synced at C21. See the header for why.
+-- Hand copy of Remotes.EVENTS_UP, last synced at C22. See the header for why.
 local UP_REMOTES = {
 	"RequestTaskProgress",
 	"RequestTimingStop",
@@ -41,6 +41,9 @@ local UP_REMOTES = {
 	-- `AllowUnbudgetedRemote = false` to refuse silently.
 	"RequestStartTrial",
 	"RequestEndTrial",
+	-- C22. The trial's own throw. Separate from RequestThrowSalt because ItemService resolves against
+	-- the round phase, and a trial runs at IDLE.
+	"RequestTrialThrow",
 }
 
 local failures = 0

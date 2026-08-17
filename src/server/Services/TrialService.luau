@@ -44,6 +44,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Remotes = require(Shared.Remotes)
+local SaltThrow = require(Shared.pure.SaltThrow)
 local TrialAdmission = require(Shared.pure.TrialAdmission)
 local TrialTimeline = require(Shared.pure.TrialTimeline)
 local Types = require(Shared.Types)
@@ -160,6 +161,13 @@ end
 -- arrive — C22's tell is only learnable if it is seen coming rather than found already beside you.
 local function trialChaseSpot(): BasePart?
 	return taggedPart(TAG_TRIAL_CHASE)
+end
+
+-- Vector3 -> the plain table `pure/SaltThrow` takes. That module cannot mention Vector3: Lune has no
+-- Roblox datatypes, and the whole module would stop being runnable from a terminal. Same helper
+-- ItemService keeps for the same reason.
+local function vec3(v: Vector3): SaltThrow.Vec3
+	return { X = v.X, Y = v.Y, Z = v.Z }
 end
 
 local function rootOf(player: Player): BasePart?
@@ -892,6 +900,87 @@ function TrialService.Start()
 
 		endSession(player.UserId, "PLAYER_ASKED")
 	end)
+
+	--[[
+		THE THROW, AND IT TEACHES THE REAL ONE.
+
+		§9.1 asks that the player "learn to throw salt". They could not until this existed:
+		`ItemService` resolves every throw against `RoundService.GetPhase()`, and a trial runs at
+		IDLE, so the real remote answered WRONG_PHASE and the tutorial taught an action the player
+		was refused. A playtest confirmed the gap.
+
+		IT SHARES THE AIM WITH THE REAL THROW AND NOTHING ELSE. `SaltThrow.inCone` is the same
+		function `ItemService` calls — same range, same cone, one implementation — so what a player
+		learns here is what works in a round. A second copy of the geometry would drift, and a
+		tutorial that teaches a throw the game does not have is worse than teaching no throw at all.
+
+		WHAT IT DOES NOT SHARE is every round rule: phase, thrower state, carry limit, and whether the
+		target is the transformed Aswang. None of those has a meaning in a trial, where the phase is
+		IDLE, the thrower is in no round, and the target is a prop with no role. The trial's
+		preconditions are its own — you are in a session, you have the pouch, the rig exists — and
+		they are checked here.
+
+		The client sends a direction and nothing else, exactly as `RequestThrowSalt` does. It does not
+		raycast, pick a target, check range or predict a hit: a client that rendered a hit the server
+		refused would tell its player the monster is stunned when it is not.
+	]]
+	Remotes.Get("RequestTrialThrow").OnServerEvent
+		:Connect(function(player: Player, direction: unknown)
+			if not AntiCheatService.Consume(player, "RequestTrialThrow") then
+				return
+			end
+
+			-- Typed `unknown` rather than `Vector3` so this line cannot be skipped: without it a table
+			-- reaches `.Unit` and throws inside a connection, which Roblox swallows into one warn.
+			if typeof(direction) ~= "Vector3" then
+				return
+			end
+
+			local session = sessions[player.UserId]
+
+			if session == nil then
+				return
+			end
+
+			local pouch = session.Pouch
+
+			if pouch == nil or pouch.Parent == nil then
+				return
+			end
+
+			local rig = session.Rig
+			local primary = if rig ~= nil then rig.PrimaryPart else nil
+			local root = rootOf(player)
+
+			if primary == nil or root == nil then
+				return
+			end
+
+			local hit = SaltThrow.inCone(
+				vec3(root.Position),
+				vec3(direction),
+				vec3(primary.Position),
+				Config.Salt.ThrowRange,
+				Config.Salt.ThrowConeDegrees
+			)
+
+			--[[
+				THE POUCH IS SPENT EITHER WAY. §4.6 gives salt no recharge, and a throw that only
+				costs you when it lands teaches that aiming is free — which is the opposite of the
+				decision the real game asks you to make. A miss in the trial costs the pouch, exactly
+				as it does in a round.
+			]]
+			pouch:Destroy()
+			session.Pouch = nil
+
+			if hit then
+				session.StunnedUntil = os.clock() + Config.Trial.ChaseStunSeconds
+			end
+
+			if Config.Debug.VerboseLogging then
+				print(`[TrialService] {player.UserId} threw salt: {if hit then "HIT" else "MISS"}`)
+			end
+		end)
 
 	task.spawn(function()
 		while true do

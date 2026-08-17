@@ -154,6 +154,25 @@ local EVENTS_UP = {
 	"RequestStartTrial",
 	-- C22. Also argument-free: it means "I am done", and the server already knows whose session it is.
 	"RequestEndTrial",
+	--[[
+		C22. A throw INSIDE a trial, and it is a separate remote from `RequestThrowSalt` on purpose.
+
+		§9.1 asks that the player "learn to throw salt", and they could not: `ItemService` resolves
+		every throw through `pure/SaltThrow` against `RoundService.GetPhase()`, and a trial runs while
+		the phase is IDLE — so the real remote answers WRONG_PHASE and the tutorial taught an action
+		the player could not perform.
+
+		THE TWO WAYS TO FIX IT WERE A NEW REMOTE OR A LOOSER `ItemService`, AND THE LOOSER SERVICE IS
+		THE ONE THAT WOULD HAVE HURT. Relaxing the phase gate means the salt system starts consulting
+		trial state to decide a live round's throws — coupling the two services this entire feature
+		exists to keep apart, on the 🔒 surface, for a tutorial. This remote costs one budget entry and
+		couples nothing.
+
+		It carries a direction and nothing else, exactly as `RequestThrowSalt` does. The server owns
+		the range, the cone, the target and the outcome — and both remotes resolve through the SAME
+		`SaltThrow.inCone`, so the throw a player learns here is the throw that works in a round.
+	]]
+	"RequestTrialThrow",
 }
 
 local Remotes = {}
