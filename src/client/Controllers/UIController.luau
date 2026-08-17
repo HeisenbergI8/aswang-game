@@ -60,6 +60,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
 local Remotes = require(Shared.Remotes)
+local TrialAdmission = require(Shared.pure.TrialAdmission)
 local Types = require(Shared.Types)
 
 local UIController = {}
@@ -532,6 +533,115 @@ local function promptFor(snapshot: Types.ClientRoundSnapshot): string
 	return "E hold a task · R time it · Q throw salt · walk over a pouch to take it"
 end
 
+--[[
+	THE THREE THINGS (C24's done condition: "the lobby has three things to look at and a countdown
+	that is always visible").
+
+	  1. the status line   — above: a countdown when there is one, a headcount when there is not
+	  2. these tips        — rotating on Config.Community.LobbyTipSeconds
+	  3. the Trial door    — the button below, which is the one that is actually a GAME
+
+	§9.3's "cosmetic preview stand" is deliberately NOT here, and that is a scope call rather than an
+	oversight: a preview stand is map geometry plus a cosmetic-equip path through MonetizationService,
+	and neither is in C24's row. Three things exist without it.
+]]
+local TIPS = {
+	"Salt burns the aswang. Throw it to reveal and stun.", -- config-ok: lobby copy, not balance
+	"Tasks go faster with two people standing at them.", -- config-ok: lobby copy
+	"The aswang has to transform to kill. That is your warning.", -- config-ok: lobby copy
+	"Watch who is never around when someone dies.", -- config-ok: lobby copy
+}
+
+local lobbyPanel: Frame? = nil
+local tipLabel: TextLabel? = nil
+local trialButton: TextButton? = nil
+local tipIndex = 1
+local tipLoop: thread? = nil
+
+local function teardownLobby()
+	if tipLoop ~= nil then
+		task.cancel(tipLoop)
+		tipLoop = nil
+	end
+
+	if lobbyPanel ~= nil then
+		lobbyPanel:Destroy()
+		lobbyPanel = nil
+		tipLabel = nil
+		trialButton = nil
+	end
+end
+
+local function buildLobby()
+	if lobbyPanel ~= nil and lobbyPanel.Parent ~= nil then
+		return
+	end
+
+	local gui = hud
+
+	if gui == nil then
+		return
+	end
+
+	local frame = panel(gui, "Lobby")
+	-- Four label-heights tall (two of tip, two of button), sitting six up from the bottom edge so it
+	-- clears the prompt row. config-ok: panel proportions in label-heights, not balance.
+	frame.Size = UDim2.fromOffset(LAYOUT.BarWidth, LAYOUT.LabelSize * 4) -- config-ok: layout multiple
+	frame.Position = UDim2.new(0.5, -LAYOUT.BarWidth / 2, 1, -LAYOUT.LabelSize * 6) -- config-ok: layout multiple
+
+	local tip = text(frame, "Tip", LAYOUT.LabelSize, COLOUR.Dim) :: TextLabel
+	tip.Size = UDim2.new(1, 0, 0, LAYOUT.LabelSize * 2)
+	tip.Text = TIPS[tipIndex]
+
+	--[[
+		THE TRIAL DOOR. Its availability is `TrialAdmission.evaluate` run CLIENT-SIDE FOR DISPLAY
+		ONLY, over the phase and the headcount this client already has. Pressing it fires
+		`RequestStartTrial`, and the server re-runs the same module and decides.
+
+		A client that shows the button when it should not gets a refusal; a client that hides it when
+		it should not merely misses a trial. Neither is a security question, which is exactly why the
+		display side can afford to be approximate — §6.2's "the client requests, the server decides",
+		with the request being the only part that matters.
+	]]
+	local button = Instance.new("TextButton")
+	button.Name = "TrialDoor"
+	button.Size = UDim2.new(1, 0, 0, LAYOUT.LabelSize * 2)
+	button.Position = UDim2.fromOffset(0, LAYOUT.LabelSize * 2)
+	button.BackgroundTransparency = 1
+	button.TextColor3 = COLOUR.Text
+	button.TextSize = LAYOUT.LabelSize
+	button.Font = Enum.Font.GothamBold
+	button.Text = "try the solo run"
+	button.Visible = false
+	button.Parent = frame
+
+	button.Activated:Connect(function()
+		Remotes.Get("RequestStartTrial"):FireServer()
+	end)
+
+	lobbyPanel = frame
+	tipLabel = tip
+	trialButton = button
+
+	-- Rotating so a waiting screen is never the same screen twice. §9 item 3: a static screen reads
+	-- as broken, and that is true of a static SENTENCE as much as of a stopped clock.
+	tipLoop = task.spawn(function()
+		while true do
+			task.wait(Config.Community.LobbyTipSeconds)
+
+			tipIndex = (tipIndex % #TIPS) + 1
+
+			local label = tipLabel
+
+			if label == nil then
+				return
+			end
+
+			label.Text = TIPS[tipIndex]
+		end
+	end)
+end
+
 local function render(snapshot: Types.ClientRoundSnapshot)
 	buildHud()
 
@@ -556,14 +666,56 @@ local function render(snapshot: Types.ClientRoundSnapshot)
 	local minutes = math.floor(snapshot.SecondsRemaining / 60) -- config-ok: seconds in a minute
 	local seconds = math.floor(snapshot.SecondsRemaining % 60) -- config-ok: seconds in a minute
 
-	clock.Text = string.format("%d:%02d", minutes, seconds)
-	clock.TextColor3 = if snapshot.Phase == Enums.RoundPhase.Active
-			and snapshot.SecondsRemaining <= LAYOUT.UrgentSeconds
-		then COLOUR.Urgent
-		else COLOUR.Text
-	phase.Text = if snapshot.Phase == Enums.RoundPhase.Active
-		then "UNTIL SUNRISE"
-		else snapshot.Phase
+	--[[
+		C24, §9 item 3. WHAT THE BIG NUMBER SAYS WHEN THERE IS NOTHING TO COUNT.
+
+		During IDLE there is no deadline — `RoundService` leaves `PhaseEndsAt` at 0 because IDLE has no
+		duration, so `GetSecondsRemaining` honestly returns 0. Rendering that as "0:00" puts a STOPPED
+		CLOCK in the largest type on screen, and a stopped clock does not read as "waiting", it reads
+		as "this game is broken" — precisely the §9 item 3 failure and, per Appendix C, the moment a
+		player who arrived in a TikTok wave leaves and never comes back.
+
+		So IDLE gets a SENTENCE about the thing that will actually change: how many more people are
+		needed. Derived from `Config.Round.MinPlayers` and this client's own headcount — no new remote
+		and nothing about anybody's state.
+
+		ONE HONEST LIMITATION: `#Players:GetPlayers()` is a second source for a number the server also
+		knows, and if they disagree the client's is wrong. It is used because widening
+		`ClientRoundSnapshot` for a lobby label would move the round contract for a cosmetic reason,
+		and a headcount is already visible in Roblox's own player list — so it leaks nothing.
+	]]
+	if snapshot.Phase == Enums.RoundPhase.Idle then
+		local here = #Players:GetPlayers()
+		local needed = math.max(0, Config.Round.MinPlayers - here)
+
+		clock.Text = if needed == 1 then "1 more" else `{needed} more`
+		clock.TextColor3 = COLOUR.Dim
+		phase.Text = "WAITING FOR PLAYERS"
+
+		buildLobby()
+
+		local door = trialButton
+
+		if door ~= nil then
+			door.Visible = TrialAdmission.evaluate({
+				Enabled = Config.Trial.Enabled,
+				RoundPhase = snapshot.Phase,
+				PlayerCount = here,
+				OfferBelowPlayerCount = Config.Trial.OfferBelowPlayerCount,
+				AlreadyInTrial = false,
+			}) == "OK"
+		end
+	else
+		teardownLobby()
+		clock.Text = string.format("%d:%02d", minutes, seconds)
+		clock.TextColor3 = if snapshot.Phase == Enums.RoundPhase.Active
+				and snapshot.SecondsRemaining <= LAYOUT.UrgentSeconds
+			then COLOUR.Urgent
+			else COLOUR.Text
+		phase.Text = if snapshot.Phase == Enums.RoundPhase.Active
+			then "UNTIL SUNRISE"
+			else snapshot.Phase
+	end
 
 	-- Guarded because a map with no task points reports zero required, and dividing by it would put
 	-- `nan` on screen — which reads as a broken game rather than as a broken map.
