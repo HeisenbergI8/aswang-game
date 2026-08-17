@@ -50,6 +50,7 @@ local AntiCheatService = require(script.Parent.AntiCheatService)
 -- must never require this file back, for the same load-order reason the comment above gives.
 local GhostService = require(script.Parent.GhostService)
 local RoundService = require(script.Parent.RoundService)
+local TeachingService = require(script.Parent.TeachingService)
 local FetchCarry = require(script.Parent.Parent.pure.FetchCarry)
 local TaskListView = require(script.Parent.Parent.pure.TaskListView)
 local TaskParticipants = require(script.Parent.Parent.pure.TaskParticipants)
@@ -237,6 +238,23 @@ local function discoverPool(): TaskPool.Report
 				`[TaskService] {instance:GetFullName()} is tagged {TAG_POINT} but is a `
 					.. `{instance.ClassName}, not a BasePart — skipped.`
 			)
+			continue
+		end
+
+		--[[
+			C21. TRIAL-ONLY POINTS ARE EXCLUDED FROM THE ROUND'S DRAW, and this is the other half of the
+			separation TrialService's own comment describes.
+
+			The trial's practice points carry the SAME `TaskPoint` tag as the map's twelve, because
+			they are task points and the trial's job is to teach the real interaction. Without this
+			filter `selectForRound` could draw one — putting a live objective in a walled corner that
+			only trial players are ever teleported into, and counting it toward the escape gate.
+
+			The symptom would be a task nobody can find, appearing at random every few rounds, with
+			nothing logged and nothing failing. `tools/greybox/barrio.luau` is what sets the attribute;
+			a hand-placed trial point that omits it reintroduces exactly that bug.
+		]]
+		if instance:GetAttribute("TrialOnly") == true then
 			continue
 		end
 
@@ -1064,6 +1082,39 @@ local function tick()
 			)
 		then
 			weight = 0
+
+			--[[
+				C23. The first time a player stands at a TWO_PERSON point that does not have enough
+				people, tell them why nothing is happening. This is the exact moment of need §10 asks
+				for: the bar is not moving and the reason is invisible.
+
+				Cued from `presence`, which is keyed by UserId and written only by a player's own
+				`RequestTaskProgress` — so a player can only ever cue themselves. Names nobody.
+			]]
+			for userId, entry in presence do
+				if entry.TaskId ~= task.Id then
+					continue
+				end
+
+				local standing = Players:GetPlayerByUserId(userId)
+
+				if standing == nil then
+					continue
+				end
+
+				--[[
+					RE-ASK THE WORLD, exactly as the weight loop above does. A `presence` entry
+					survives for `Config.Tasks.PresenceGraceSeconds` after the player steps away, so
+					iterating it raw cues someone who has already left the point — teaching them about
+					a task they are no longer at. The grace window exists so a player's PROGRESS is
+					not punished by a dropped tick; it is not a licence to describe where they are.
+				]]
+				if taskPointAt(standing) ~= task.Id then
+					continue
+				end
+
+				TeachingService.Cue(standing, "CUE_FIRST_TWO_PERSON")
+			end
 		end
 
 		local result = TaskProgress.tick(task.Progress, elapsed, weight, durationFor(task))

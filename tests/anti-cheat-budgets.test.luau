@@ -21,7 +21,7 @@
 
 local Config = require("../src/shared/Config")
 
--- Hand copy of Remotes.EVENTS_UP, last synced at C15. See the header for why.
+-- Hand copy of Remotes.EVENTS_UP, last synced at C21. See the header for why.
 local UP_REMOTES = {
 	"RequestTaskProgress",
 	"RequestTimingStop",
@@ -36,6 +36,11 @@ local UP_REMOTES = {
 	"RequestGhostSpook",
 	"RequestEquipCosmetic",
 	"RequestClaimDaily",
+	-- C21. Both argument-free button presses. `RequestStartTrial` is the only remote in the game whose
+	-- handler spawns an NPC and teleports a character, which is why it is budgeted rather than left to
+	-- `AllowUnbudgetedRemote = false` to refuse silently.
+	"RequestStartTrial",
+	"RequestEndTrial",
 }
 
 local failures = 0

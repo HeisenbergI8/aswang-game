@@ -1,0 +1,37 @@
+Trial corner structural inventory — 2026-08-17
+Built in Studio (Edit mode) from the helpers and the trial block in tools/greybox/barrio.luau.
+Studio d9a7ddea-522d-4910-82ae-4cab25f3b0f6, place aswang.rbxl.
+
+This is the artifact for plan Step 4.1, which verify-plan reports as `unverifiable` because its
+deliverable is geometry in a gitignored place file. It is a structural dump rather than a screenshot
+because screen_capture returns images inline with no path to cite.
+
+TrialCorner children:
+  TrialFloor         Part     pos=(-465, 0, 465) size=(139.5, 1.0, 139.5) tags=[] attrs=[]
+  TrialWallN         Part     pos=(-465, 6, 395) size=(139.5, 12.0, 3.1) tags=[] attrs=[]
+  TrialWallS         Part     pos=(-465, 6, 535) size=(139.5, 12.0, 3.1) tags=[] attrs=[]
+  TrialWallW         Part     pos=(-535, 6, 465) size=(3.1, 12.0, 139.5) tags=[] attrs=[]
+  TrialWallE         Part     pos=(-395, 6, 465) size=(3.1, 12.0, 139.5) tags=[] attrs=[]
+  TrialSpawn_Entry   Part     pos=(-512, 0, 465) size=(6.0, 0.8, 6.0) tags=[TrialSpawn] attrs=[]
+  TrialTask_One      Part     pos=(-465, 0, 437) size=(6.0, 0.8, 6.0) tags=[TaskPoint] attrs=[TaskType=HOLD TrialOnly=true]
+  TrialTask_Two      Part     pos=(-434, 0, 490) size=(6.0, 0.8, 6.0) tags=[TaskPoint] attrs=[TaskType=HOLD TrialOnly=true]
+  TrialChase_Far     Part     pos=(-412, 0, 465) size=(6.0, 0.8, 6.0) tags=[TrialChase] attrs=[]
+  TrialLantern_Post  Part     pos=(-465, 4, 465) size=(1.5, 8.0, 1.5) tags=[] attrs=[]
+  TrialLantern_Head  Part     pos=(-465, 8, 465) size=(3.1, 1.6, 3.1) tags=[] attrs=[]
+
+THE THREE THINGS THIS PROVES
+
+1. The exclusion works. 14 TaskPoint-tagged parts exist; 2 carry TrialOnly=true; the round's draw pool
+   is exactly 12, which is Config.Tasks.PoolSize. Before TaskService.discoverPool learned to skip the
+   attribute this would have read 14, and a round could have drawn an objective into this corner.
+
+2. The corner is isolated. Nearest ROUND task point is Task_RingCistern at 419 studs. The four walls
+   are present at the floor's edges (floor spans z 395..535, x -535..-395; walls sit on those lines),
+   so a player teleported in cannot walk out into empty space.
+
+3. The contract parts are tagged as TrialService expects: TrialSpawn x1, TrialChase x1, and two
+   TaskPoint parts attributed TrialOnly.
+
+NOT PROVEN HERE, and left for the playtester: that a player teleported to TrialSpawn_Entry lands on the
+floor rather than inside it, that the rig is visible from the spawn under StreamingEnabled, and that
+the two HOLD points are reachable on foot within the walls.

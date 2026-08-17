@@ -501,4 +501,68 @@ export type ClientRoundSnapshot = {
 	that says no.
 ]]
 
+--[[
+	THE SOLO TRIAL'S TYPES (C21, §9.1), AND WHY THEY SHARE NOTHING WITH THE ROUND'S.
+
+	Luau unions are STRUCTURAL. A `TrialPhase` whose literals overlapped `RoundPhase`'s would be
+	assignable to a `RoundPhase` parameter with no cast and no analyzer complaint, which is a compile-
+	time hole underneath the one rule this whole feature exists to keep: the trial cannot advance,
+	end or observe a round. Not one string below appears in `RoundPhase` above.
+
+	`TrialSnapshot` is the other half. It carries no field name `ClientRoundSnapshot` carries — no
+	`Phase`, no `SecondsRemaining`, no `RoundNumber`, no `YourState` — so a handler wired to the wrong
+	remote fails to typecheck rather than rendering trial state as round state. `check:remotes` and
+	`check:secrecy` are text tripwires and would both pass a semantic mix-up like that; the type is
+	what actually catches it.
+]]
+export type TrialPhase = "TRIAL_OFF" | "TRIAL_TASKS" | "TRIAL_CHASE" | "TRIAL_HANDOFF"
+
+-- What the timeline fires, in order. FIRE-ONCE per session — see `shared/pure/TrialTimeline`.
+export type TrialBeat =
+	"BEAT_WELCOME"
+	| "BEAT_TASKS"
+	| "BEAT_SALT_GIVEN"
+	| "BEAT_TRANSFORM"
+	| "BEAT_SALT_TAUGHT"
+	| "BEAT_HANDOFF"
+
+-- Why a session ended. Read by nothing but a log line and the handoff copy, but naming the five
+-- exits is what stops a sixth being added silently.
+export type TrialEndReason =
+	"COMPLETED"
+	| "EXPIRED"
+	| "PLAYER_LEFT"
+	| "PLAYER_ASKED"
+	| "ROUND_STARTED"
+
+-- The answer to "may this player start a trial right now", decided by `shared/pure/TrialAdmission`.
+export type TrialStartVerdict =
+	"OK"
+	| "DISABLED"
+	| "ALREADY_IN_TRIAL"
+	| "ROUND_NOT_IDLE"
+	| "TOO_MANY_PLAYERS"
+
+--[[
+	FireClient to the ONE player in the session. Never FireAllClients, and there is no roster field to
+	make that tempting: everything here describes the receiver's own session and is worthless to
+	anybody else. The trial's Aswang is a scripted rig with no UserId and no role, so unlike every
+	other payload in this file there is no secret in the vicinity of this one.
+]]
+export type TrialSnapshot = {
+	TrialPhase: TrialPhase,
+	Beat: TrialBeat?, -- the beat that just fired, if this push carries one
+	TrialSecondsLeft: number,
+	TrialTasksDone: number,
+	TrialTasksRequired: number,
+}
+
+-- C23. The id of a one-liner, resolved to copy by `shared/pure/TeachingLines`. An ID rather than the
+-- string itself so the copy lives in one place and the seen-set is keyed on something stable.
+export type TeachingCueId =
+	"CUE_FIRST_SALT"
+	| "CUE_FIRST_GHOST_DEATH"
+	| "CUE_FIRST_TRANSFORM_SEEN"
+	| "CUE_FIRST_TWO_PERSON"
+
 return {}

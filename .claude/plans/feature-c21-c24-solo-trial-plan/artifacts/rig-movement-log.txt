@@ -1,0 +1,57 @@
+Rig movement / overshoot / stun evidence — captured via execute_luau (Server datamodel), single
+long-running scripts to avoid tool round-trip gaps eating the short in-Studio window. Config in effect
+(unedited, on disk): ChaseWalkSpeed=13, ChaseStopStuds=6, SnapshotInterval=0.5, PickupRangeStuds=6,
+ChaseStunSeconds=6.
+
+═══ RUN A — normal chase, pouch moved far away as a control (no salt nearby) ═══
+
+rig-appeared      | rig=(-425.3, 0.4, 465.0) | player=(-511.5, 3.5, 465.0)  dist ≈ 86.2
+chase-tick-1      | rig=(-431.8, 0.4, 465.0)                                 (Δ = -6.5 studs)
+chase-tick-2      | rig=(-438.3, 0.4, 465.0)                                 (Δ = -6.5 studs)
+chase-tick-3      | rig=(-444.8, 0.4, 465.0)                                 (Δ = -6.5 studs)
+chase-tick-4      | rig=(-451.3, 0.4, 465.0)                                 (Δ = -6.5 studs)
+
+Every tick moves the rig EXACTLY 6.5 studs (= ChaseWalkSpeed * SnapshotInterval = 13 * 0.5). This
+confirms (b) the rig visibly changes position every tick under PivotTo — it does move — but each step is
+larger than the entire ChaseStopStuds=6 radius, so the stop check (which only runs BEFORE each step) can
+be skipped over in one tick.
+
+Continuing to poll (same run, 14 more ticks after the above): the rig closed in and then held completely
+steady, tick after tick, at:
+
+  rig = (-509.8, 0.4, 465.0),  player = (-511.5, 3.5, 465.0),  horizontal distance = 1.70 studs
+
+...for 14 consecutive ticks (≈8.4 seconds) with zero movement — the "hold and face the player" branch,
+correctly entered once inside ChaseStopStuds, but ChaseStopStuds is documented and intended to mean the
+rig stops ~6 studs away. It actually stopped at 1.70 studs. This is deterministic given the fixed
+TrialChase_Far / TrialSpawn_Entry anchors and Config numbers: 86.2 mod 6.5 = 1.70, so it will
+land there every time under the current Config, not just this once.
+
+═══ RUN B — the salt/stun test ═══
+
+Control confirmed the rig moves 6.5 studs/tick unattended. This run tests whether carrying the pouch to
+the rig actually stuns it, tested as early as possible (right as the rig spawns, far from the player, so
+any halt cannot be explained by the ChaseStopStuds branch):
+
+rig-just-appeared    | pouch=(-511.5, 3.5, 461.0) [still near player, untouched]
+                      | rig=(-418.8, 0.4, 465.0)  [≈93 studs from player]
+pouch-dropped-on-rig | pouch manually moved to rig.CFrame * CFrame.new(2,0,0) — 2 studs from the rig,
+                      | inside Config.Salt.PickupRangeStuds (6)
+post-drop-tick-1     | pouch = nil (destroyed)                | rig = (-418.8, 0.4, 465.0)  [unchanged]
+post-drop-tick-2     | pouch = nil                             | rig = (-418.8, 0.4, 465.0)  [unchanged]
+post-drop-tick-3     | pouch = nil                             | rig = (-418.8, 0.4, 465.0)  [unchanged]
+post-drop-tick-4     | pouch = nil                             | rig = (-418.8, 0.4, 465.0)  [unchanged]
+
+Over 2.4 seconds (4 ticks) after the pouch reached PickupRangeStuds of the rig:
+  - the pouch was destroyed within one tick (the proximity check fired correctly)
+  - the rig did not move AT ALL, despite being ≈93 studs from the player — far outside ChaseStopStuds,
+    where it would otherwise have advanced ≈31 studs (4 × 6.5) toward the player in that time.
+
+CONCLUSION: carrying the pouch into the rig DOES produce a real stun that halts the chase, independent of
+and prior to the ChaseStopStuds mechanic. This is a genuine, working positive finding — the trial's core
+"salt stops the aswang" lesson is mechanically true, even though the THROW itself is not taught (known,
+already-documented gap).
+
+Screenshot (OBSERVED NOT ARTIFACTED — capture tool returns inline image data, no path to cite) taken
+during a later, similar run showed a small red mark far in the background near the horizon, consistent
+with a rig stunned near its spawn point rather than having closed the distance to the player.

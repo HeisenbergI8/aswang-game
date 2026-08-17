@@ -32,6 +32,14 @@
 	  FetchSource  × 4  TaskService.discoverSources   one per FETCH task drawn in a round
 	  SaltSpawn    × 6  ItemService.discoverPool      Config.Salt.PouchPoolSize
 	  EscapeGate   × 1  GateService.discoverGates     proximity win, Config.Tasks.GateRangeStuds = 6
+	  TrialSpawn   × 1  TrialService.trialSpawn       where a trial player is placed
+	  TrialChase   × 1  TrialService (C22 rig)        where the scripted rig appears
+	  TaskPoint    × 2  TrialService.trialPoints      attribute `TrialOnly = true` — see the corner
+
+	`TrialOnly` IS AN EXCLUSION AND IT IS THE ONE CONTRACT HERE THAT FAILS SILENTLY. The trial's two
+	points carry the ordinary `TaskPoint` tag, so `TaskService.discoverPool` sees them and skips them
+	only because of that attribute. Omit it and a real round draws an objective into a walled corner
+	nobody can reach — a task nobody can find, every few rounds, with nothing logged.
 
 	THE TYPE MIX IS A MAP DECISION AND IT IS LOAD-BEARING. Five of the twelve are drawn each round, and
 	the draw does not balance types — plan `feature-c09-c12` logged the open risk that a round could
@@ -719,6 +727,69 @@ for _, salt in SALT_SPAWNS do
 end
 
 --------------------------------------------------------------------------------
+-- THE SOLO TRIAL CORNER (C21, §9.1)
+--
+-- A walled corner OUTSIDE the barrio's playable ring, reachable only by being
+-- teleported into it. It is not connected to the streets on purpose: a player who
+-- can wander into the tutorial area mid-round finds two task points that do not
+-- count and a chase rig that is not there, which reads as a broken map.
+--------------------------------------------------------------------------------
+
+--[[
+	`TrialOnly = true` IS THE WHOLE CONTRACT AND IT IS AN EXCLUSION, NOT AN INCLUSION.
+
+	The trial's two practice points carry the SAME `TaskPoint` tag as the twelve above, because they
+	are task points and the trial's job is to teach the real interaction. That means
+	`TaskService.discoverPool` finds them, and a round could DRAW one — putting a live objective in a
+	corner of the map no player can walk to, and counting it toward the escape gate. `discoverPool`
+	therefore skips any part attributed `TrialOnly`, and this is what puts the attribute there.
+
+	If a trial point is ever added by hand and the attribute is forgotten, the symptom is a task
+	nobody can find, appearing at random every few rounds, with nothing logged and nothing failing.
+	This is the one map contract in this file whose violation is completely silent, which is why it is
+	written out at this length.
+
+	NOTE THE NAME. An earlier draft called this `TrialZone`; `check:scope` refuses "Zone" because
+	zone-based progression is on §3's OUT list — the competitor's seven zones (Appendix C.5). The
+	current name is also the more accurate one: it states what the attribute does to the round's draw.
+]]
+local TRIAL_X = -300
+local TRIAL_Z = 300
+
+local trial = Instance.new("Folder")
+trial.Name = "TrialCorner"
+trial.Parent = root
+
+box("TrialFloor", TRIAL_X, 0, TRIAL_Z, 90, 1, 90, Color3.fromRGB(38, 40, 50), trial)
+
+-- Four walls, so a player cannot wander out of the tutorial into empty space and fall forever.
+box("TrialWallN", TRIAL_X, 6, TRIAL_Z - 45, 90, 12, 2, Color3.fromRGB(30, 32, 40), trial)
+box("TrialWallS", TRIAL_X, 6, TRIAL_Z + 45, 90, 12, 2, Color3.fromRGB(30, 32, 40), trial)
+box("TrialWallW", TRIAL_X - 45, 6, TRIAL_Z, 2, 12, 90, Color3.fromRGB(30, 32, 40), trial)
+box("TrialWallE", TRIAL_X + 45, 6, TRIAL_Z, 2, 12, 90, Color3.fromRGB(30, 32, 40), trial)
+
+anchor("TrialSpawn_Entry", "TrialSpawn", TRIAL_X - 30, TRIAL_Z, trial)
+
+-- The two practice points. Both HOLD: the trial teaches the ONE interaction a new player needs, and
+-- §9.1's "complete two tasks to learn the interaction" is singular for a reason. A TIMING point here
+-- would teach a second verb before the first has landed.
+anchor("TrialTask_One", "TaskPoint", TRIAL_X, TRIAL_Z - 18, trial, {
+	TaskType = "HOLD",
+	TrialOnly = true,
+})
+
+anchor("TrialTask_Two", "TaskPoint", TRIAL_X + 20, TRIAL_Z + 16, trial, {
+	TaskType = "HOLD",
+	TrialOnly = true,
+})
+
+-- Where the scripted rig appears at ScriptedChaseAt — the far end, so the player sees it arrive
+-- rather than finding it already beside them. C22's tell is only learnable if it is watched.
+anchor("TrialChase_Far", "TrialChase", TRIAL_X + 34, TRIAL_Z, trial)
+
+lantern("TrialLantern", TRIAL_X, TRIAL_Z, trial)
+
+--------------------------------------------------------------------------------
 -- LIGHTING AND STREAMING
 --
 -- §5's art strategy, and it is the reason a parts-only greybox is allowed to look
@@ -777,8 +848,23 @@ local function count(tag: string): number
 	return #CollectionService:GetTagged(tag)
 end
 
+-- The trial's two points are counted SEPARATELY from the round's twelve, because the round's draw is
+-- the number that matters and `count("TaskPoint")` alone would now read 14 and look like a map error.
+local function countTrialOnly(): number
+	local n = 0
+
+	for _, part in CollectionService:GetTagged("TaskPoint") do
+		if part:GetAttribute("TrialOnly") == true then
+			n += 1
+		end
+	end
+
+	return n
+end
+
 print(
-	`[barrio] built — {count("TaskPoint")} TaskPoint, {count("FetchSource")} FetchSource, `
-		.. `{count("SaltSpawn")} SaltSpawn, {count("EscapeGate")} EscapeGate, `
-		.. `{#root:GetDescendants()} instances, scale {SCALE}`
+	`[barrio] built — {count("TaskPoint") - countTrialOnly()} TaskPoint (+{countTrialOnly()} TrialOnly), `
+		.. `{count("FetchSource")} FetchSource, {count("SaltSpawn")} SaltSpawn, `
+		.. `{count("EscapeGate")} EscapeGate, {count("TrialSpawn")} TrialSpawn, `
+		.. `{count("TrialChase")} TrialChase, {#root:GetDescendants()} instances, scale {SCALE}`
 )

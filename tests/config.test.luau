@@ -438,6 +438,91 @@ check(
 	`gate={Config.Tasks.GateRangeStuds}, kill={Config.Monster.KillRange}`
 )
 
+--------------------------------------------------------------------------------
+-- The Solo Trial (C21/C22, §9.1)
+--
+-- Every one of these is silent. A trial with its beats out of order does not error, does not fail to
+-- typecheck and does not warn — it just runs a 90-second tutorial that teaches the wrong thing, and
+-- the only symptom is a playtester saying it "felt confusing".
+--------------------------------------------------------------------------------
+
+check(
+	"the chase starts before the trial ends",
+	Config.Trial.ScriptedChaseAt < Config.Trial.Duration,
+	"a transform scheduled at or after Duration never fires; the trial teaches tasks and nothing else"
+)
+
+check(
+	"salt is in hand before the thing it defends against arrives",
+	Config.Trial.SaltGivenAt < Config.Trial.ScriptedChaseAt,
+	"§10 asks that the folklore be taught by doing; a pouch that arrives mid-chase is taught by panic"
+)
+
+check(
+	"the folklore line lands after the transform, not before",
+	Config.Trial.SaltTaughtAt > Config.Trial.ScriptedChaseAt,
+	"'salt burns the aswang' means nothing until there is an aswang on screen"
+)
+
+check(
+	"the handoff has room to be read",
+	Config.Trial.HandoffAt < Config.Trial.Duration
+		and Config.Trial.HandoffAt > Config.Trial.SaltTaughtAt,
+	"the closing line is the one sentence §9.1 specifies verbatim; it cannot be the last frame"
+)
+
+--[[
+	THE PARTITION. RoundService leaves IDLE at `>= MinPlayers` (RoundService.luau:1003) and
+	TrialAdmission refuses at `>= OfferBelowPlayerCount`. Equal, those two split the headcount line
+	with no value on both sides. If OfferBelowPlayerCount were the larger, there would be a count at
+	which a round starts AND a trial is still offered — and the trial would open and be aborted in the
+	same second, which presents as a button that flickers.
+]]
+check(
+	"the trial's offer threshold and the round's floor are the same line",
+	Config.Trial.OfferBelowPlayerCount == Config.Round.MinPlayers,
+	"a gap or an overlap here means a count where both a round and a trial believe they may start"
+)
+
+check(
+	"the trial's two tasks can actually be drawn",
+	Config.Trial.TasksToComplete >= 1 and Config.Trial.TasksToComplete <= Config.Tasks.PoolSize,
+	"a trial asking for more tasks than exist can never be completed and always times out"
+)
+
+--[[
+	The rig must be survivable. Compared against `Trial.PlayerBaselineWalkSpeed` rather than against
+	anything in Config.Monster, because the trial's Aswang never goes through MonsterService — see the
+	plan's §1.1 — and because retuning the real Aswang at M12 must not retune the tutorial. If this
+	ever fails, the tutorial has grown a death path, and a death path is the first step toward the PvE
+	campaign C22's row forbids in bold.
+]]
+check(
+	"the trial's scripted Aswang cannot catch the player",
+	Config.Trial.ChaseWalkSpeed < Config.Trial.PlayerBaselineWalkSpeed,
+	"a trial Aswang that catches you needs a death, a respawn and a re-entry — none of which exist"
+)
+
+--[[
+	ONE TICK OF CHASE MUST NOT CROSS THE WHOLE HOLD ZONE.
+
+	This one was found by a playtest, not by reading. `stepRig` checks the stop distance and THEN
+	moves, so if a single tick's travel exceeds `ChaseStopStuds` the rig steps straight over the zone
+	the check guards. At the shipped numbers it did: 13 studs/s x 0.5s = 6.5 studs per tick against a
+	6-stud radius, and the rig landed at 1.70 studs from the player every single run — close enough
+	to read as the monster standing inside you.
+
+	`stepRig` now CLAMPS its step, so the behaviour is correct regardless of these two numbers. This
+	invariant is the second line of defence and the documentation of the relationship: if someone
+	raises `ChaseWalkSpeed` or `SnapshotInterval` far enough, the clamp keeps the stop correct but
+	the approach becomes one visible jump per tick, which is a different bug with no error attached.
+]]
+check(
+	"one chase tick cannot cross the rig's whole hold zone",
+	Config.Trial.ChaseWalkSpeed * Config.Trial.SnapshotInterval <= Config.Trial.ChaseStopStuds,
+	`travel={Config.Trial.ChaseWalkSpeed * Config.Trial.SnapshotInterval}, stop={Config.Trial.ChaseStopStuds}`
+)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end

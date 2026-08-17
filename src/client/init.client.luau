@@ -35,6 +35,16 @@ local CONTROLLER_ORDER = {
 		arrive the instant the round goes ACTIVE.
 	]]
 	"OnboardingController",
+	--[[
+		C21. AFTER OnboardingController, and that ordering is a real dependency rather than a
+		preference: this controller REQUIRES it, for `ShowLine`. A controller requiring a sibling is a
+		new pattern in this codebase and it is deliberately one-way — `OnboardingController` knows
+		nothing about the trial, so the arrow cannot become a cycle.
+
+		Before InputController for the same reason as everything else in this list: it listens for a
+		remote that can arrive the instant a trial opens.
+	]]
+	"TrialController",
 	"InputController",
 }
 

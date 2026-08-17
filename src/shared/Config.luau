@@ -382,11 +382,69 @@ local Config = {
 		TasksToComplete = 2,
 		ScriptedChaseAt = 55, -- seconds in: the Aswang reveals itself
 		OfferBelowPlayerCount = 3, -- == Round.MinPlayers
+
+		-- The remaining beats, all measured in seconds from the session's start so the timeline is
+		-- readable as a single column. `tests/config.test.luau` pins their ordering (Phase 2.3),
+		-- because a chase scheduled after the trial ends teaches nothing and produces no symptom.
+		SaltGivenAt = 40, -- pouch appears BEFORE the transform, so the tell lands with a tool in hand
+		SaltTaughtAt = 58, -- §10's folklore line, 3s after the transform: after the fright, not during
+		HandoffAt = 84, -- the closing line, with time left to read it
+
+		--[[
+			THE SCRIPTED RIG. It is not a Player, has no Role and never goes through MonsterService —
+			see the plan's §1.1. These are its own numbers because reusing `Config.Monster`'s would
+			couple a tutorial to live balance: retuning the real Aswang's speed at M12 would silently
+			retune the tutorial, and the tutorial's job is to be survivable.
+
+			DELIBERATELY SLOWER THAN THE PLAYER. The trial's Aswang must never catch anyone: a death
+			here needs a death path, a respawn and a re-entry, and all three are how a 90-second
+			tutorial becomes a PvE level. It menaces and it is stunned. That is the whole encounter.
+		]]
+		--[[
+			13 UNTIL A PLAYTEST MEASURED WHAT IT ACTUALLY DID. At 13 studs/s against
+			`SnapshotInterval = 0.5`, one tick moved the rig 6.5 studs — larger than the entire
+			`ChaseStopStuds = 6` hold zone — so it stepped straight through and came to rest 1.70
+			studs from the player, deterministically, every run. `stepRig` now clamps its step so the
+			stop is correct at any values; 12 is the largest speed that also keeps a single tick from
+			crossing the whole zone, which `tests/config.test.luau` now pins.
+
+			Still comfortably under `PlayerBaselineWalkSpeed = 16`: the trial's Aswang must never
+			catch anyone, because a death here needs a death path, a respawn and a re-entry.
+		]]
+		ChaseWalkSpeed = 12,
+		ChaseStopStuds = 6, -- how close it gets before holding station
+		ChaseStunSeconds = 6, -- how long a salt hit holds it, ending the chase beat
+
+		--[[
+			Roblox's stock `Humanoid.WalkSpeed`, mirrored here for ONE reason: it is the number
+			`ChaseWalkSpeed` has to stay under, and an invariant cannot be pinned in
+			tests/config.test.luau against a constant that lives inside the engine. There is no
+			`Config.Player` block in this repo (checked at plan time — nothing anywhere sets a walk
+			speed), so survivors run at the engine default and this records it.
+
+			IF THE GAME EVER SETS A REAL WALK SPEED, this stops being the right comparison and the
+			invariant becomes a lie that still passes. Delete this field and point the test at the
+			real one; do not update the number here to match.
+		]]
+		PlayerBaselineWalkSpeed = 16,
+
+		-- How often the server pushes a TrialSnapshot to the one player in a session. Matches
+		-- Round.SnapshotInterval's job without reading it: these are different features and a shared
+		-- number is a coupling nobody documented.
+		SnapshotInterval = 0.5,
+
+		-- How far above the TrialSpawn anchor a player is placed. Here rather than hardcoded because
+		-- it depends on the zone's floor geometry: too low and the character spawns inside the floor
+		-- and is ejected, too high and they take a visible drop on entering the tutorial.
+		SpawnLiftStuds = 5,
 	},
 
 	Community = {
 		GroupId = 0, -- TODO(M10): set once the Roblox group exists
 		GroupJoinRewardCoins = 250,
+
+		-- C24, §9 item 3. A waiting player must never see a static screen.
+		LobbyTipSeconds = 7, -- how long each tip holds before the next
 	},
 
 	-- Award thresholds mirror the public funnel we can read back via the API.
@@ -453,6 +511,17 @@ local Config = {
 			RequestGhostSpook = { Capacity = 2, RefillPerSecond = 0.05 },
 			RequestEquipCosmetic = { Capacity = 5, RefillPerSecond = 0.5 },
 			RequestClaimDaily = { Capacity = 2, RefillPerSecond = 0.1 },
+			--[[
+				Both trial remotes are BUTTON PRESSES — one per session, at most, from an honest
+				client. Priced like `RequestGhostSpook` next door rather than like a heartbeat.
+
+				`RequestStartTrial` is the more interesting of the two: it is the only remote in this
+				game whose handler SPAWNS AN NPC AND TELEPORTS A CHARACTER, so an unbudgeted one is a
+				rig-spawn firehose. `AllowUnbudgetedRemote = false` below means a missing entry here
+				refuses rather than allows, but relying on that would leave the refusal undocumented.
+			]]
+			RequestStartTrial = { Capacity = 2, RefillPerSecond = 0.1 },
+			RequestEndTrial = { Capacity = 3, RefillPerSecond = 0.2 },
 		},
 
 		-- One request costs one token. Here rather than in the service so C41 can price an expensive

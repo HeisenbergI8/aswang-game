@@ -83,6 +83,32 @@ local EVENTS_DOWN = {
 		refuse.
 	]]
 	"FirstObjectiveAssigned",
+	--[[
+		C21. FireClient to the ONE player in a Solo Trial. Never FireAllClients.
+
+		THE INTERESTING PROPERTY IS THAT THERE IS NO SECRET HERE AT ALL, and saying so is the point:
+		the trial's Aswang is a scripted rig, so no role exists to leak inside a trial. The risk runs
+		the other way — a trial remote that could be confused with a round one, or fired at a player
+		who is in a round. `Types.TrialSnapshot` shares no field name with `ClientRoundSnapshot`
+		precisely so that confusion is a type error rather than a subtle bug, and the server refuses
+		to open a session at all unless RoundService is IDLE.
+
+		WHAT A SECOND PLAYER LEARNS: nothing from this remote, which they never receive. They can of
+		course SEE a trial player walk to the trial corner and see the rig, and that is harmless by
+		construction — a trial only runs while no round is running, so there is no round-secret to
+		correlate it against. `.claude/lessons/absence-is-observable.md` applies in its mild direction
+		and resolves the same way OnboardingController's waypoint does.
+	]]
+	"TrialSnapshot",
+	--[[
+		C23. FireClient to ONE player, carrying a `Types.TeachingCueId` and nothing else.
+
+		The generalisation of `FirstObjectiveAssigned` directly above, and it inherits that entry's
+		argument wholesale: what it reveals is that the RECEIVER is new, it names nobody else, and the
+		events it fires on (a salt pickup, a transform, a ghost death) are already public or already
+		the receiver's own. An id rather than a string so the copy has one home.
+	]]
+	"TeachingCue",
 }
 
 -- Client -> Server (the client asks; the server decides)
@@ -117,6 +143,17 @@ local EVENTS_UP = {
 	"RequestGhostSpook",
 	"RequestEquipCosmetic",
 	"RequestClaimDaily",
+	--[[
+		C21. NO ARGUMENTS, deliberately, and for the same reason `RequestTimingStop` above has none.
+
+		There is nothing a client could legitimately name here: which trial, where, and whether it is
+		allowed are all server facts. The handler re-runs `shared/pure/TrialAdmission` on every call
+		rather than trusting that C24's button was only shown when a trial was actually available —
+		the button is a hint to an honest player, never a permission.
+	]]
+	"RequestStartTrial",
+	-- C22. Also argument-free: it means "I am done", and the server already knows whose session it is.
+	"RequestEndTrial",
 }
 
 local Remotes = {}

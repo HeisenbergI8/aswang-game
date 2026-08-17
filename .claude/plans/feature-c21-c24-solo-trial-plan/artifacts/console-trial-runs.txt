@@ -1,0 +1,53 @@
+Full console dump across ~6 solo-trial sessions in one Play-mode run (see verification.md for context).
+Studio d9a7ddea-522d-4910-82ae-4cab25f3b0f6, place aswang.rbxl. VirtualInput CoreGUI warnings (from a
+failed in-Studio button click, worked around via execute_luau on the Client datamodel) are Studio
+automation noise, not game output — included for completeness.
+
+[TaskService] Pool OK — 12 task points.
+[Bootstrap] Ready. 15 services loaded.
+[GhostService] Chat wall attached over 3 channel(s).
+[Client] Ready. 9 controllers loaded.
+[Client] Snapshot — IDLE round #0 · tasks 0/5 · gate shut · you: LOBBY (0s left)
+[TrialService] 11461085874 entered the trial
+[TrialService] 11461085874 beat BEAT_WELCOME
+[TrialService] 11461085874 beat BEAT_TASKS
+[TrialService] 11461085874 beat BEAT_SALT_GIVEN
+[TrialService] refused 11461085874 a trial: ALREADY_IN_TRIAL
+[TrialService] 11461085874 beat BEAT_TRANSFORM
+[TrialService] 11461085874 beat BEAT_SALT_TAUGHT
+[TrialService] 11461085874 beat BEAT_HANDOFF
+[TrialService] 11461085874 left the trial: EXPIRED
+[TrialService] 11461085874 entered the trial   (run 2)
+[TrialService] 11461085874 beat BEAT_WELCOME
+[TrialService] 11461085874 beat BEAT_TASKS
+[TrialService] 11461085874 left the trial: PLAYER_ASKED   (RequestEndTrial fired from Client datamodel — equivalent to the "leave the trial" button)
+[TrialService] 11461085874 entered the trial   (run 3)
+[TrialService] 11461085874 beat BEAT_WELCOME
+[TrialService] 11461085874 beat BEAT_TASKS
+[TrialService] 11461085874 beat BEAT_SALT_GIVEN
+[TrialService] 11461085874 beat BEAT_TRANSFORM
+[TrialService] 11461085874 beat BEAT_SALT_TAUGHT
+[TrialService] 11461085874 beat BEAT_HANDOFF
+[TrialService] 11461085874 left the trial: EXPIRED
+[TrialService] 11461085874 entered the trial   (run 4)
+[TrialService] 11461085874 beat BEAT_WELCOME
+[TrialService] 11461085874 beat BEAT_TASKS
+[TrialService] 11461085874 beat BEAT_SALT_GIVEN
+[TrialService] 11461085874 beat BEAT_TRANSFORM
+[TrialService] 11461085874 beat BEAT_SALT_TAUGHT
+[TrialService] 11461085874 beat BEAT_HANDOFF
+[TrialService] 11461085874 left the trial: EXPIRED
+[TrialService] 11461085874 entered the trial   (run 5 — RUN A / RUN B stun test)
+[TrialService] 11461085874 beat BEAT_WELCOME
+[TrialService] 11461085874 beat BEAT_TASKS
+[TrialService] 11461085874 beat BEAT_SALT_GIVEN
+[TrialService] 11461085874 beat BEAT_TRANSFORM
+[TrialService] 11461085874 beat BEAT_SALT_TAUGHT
+[TrialService] 11461085874 beat BEAT_HANDOFF
+[TrialService] 11461085874 left the trial: EXPIRED
+[TrialService] 11461085874 entered the trial   (run 6 — stun test)
+[TrialService] 11461085874 beat BEAT_WELCOME
+[TrialService] 11461085874 beat BEAT_TASKS
+[TrialService] 11461085874 beat BEAT_SALT_GIVEN
+[TrialService] 11461085874 beat BEAT_TRANSFORM
+[TrialService] 11461085874 beat BEAT_SALT_TAUGHT
