@@ -53,6 +53,7 @@ local TweenService = game:GetService("TweenService")
 local AntiCheatService = require(script.Parent.AntiCheatService)
 local RoleService = require(script.Parent.RoleService)
 local RoundService = require(script.Parent.RoundService)
+local TeachingService = require(script.Parent.TeachingService)
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
@@ -443,6 +444,37 @@ local function revert(player: Player)
 	monster.AppliedTo = nil
 end
 
+--[[
+	THE BROADCAST AND ITS TEACHING CUE, IN ONE PLACE, SO THEIR AUDIENCES CANNOT DIVERGE.
+
+	`MonsterTransformed` is public by design — the tell is the point (§4.3) — and it is
+	`FireAllClients`. C23 cues every player about it, and that is safe for two independent reasons:
+	the audiences are identical, and the cue's payload is a constant id resolving to "That is the
+	tell. Run, or salt it." — no character, no UserId, no position. It would be safe even if the
+	broadcast did not exist.
+
+	NARROWING THE CUE BY PROXIMITY IS THE MISTAKE AVAILABLE HERE, and it would look like an
+	improvement: only tell players who can actually see it. That subset is computed from the ASWANG'S
+	POSITION and delivered per-player — and because the cue is FIRE-ONCE, it would leave a permanent
+	per-client mark of "I was near the first transform", outliving the broadcast that justified it.
+
+	An exploit audit made the point that decided this shape: the equality was previously held only by
+	two adjacent lines and a comment, and nothing would fail if someone later narrowed one and not the
+	other. `check:secrecy` structurally cannot see it. Here, the audience is ONE expression — a change
+	to it is a change to both, and shows up as such in a diff. §4.3's "visible to anyone with line of
+	sight" is exactly the phrase that will one day invite a filter on the broadcast; when it does, this
+	function is where both halves move together.
+]]
+local function announceTransform(payload: Types.MonsterTransformedPayload)
+	local audience = Players:GetPlayers()
+
+	transformedRemote:FireAllClients(payload)
+
+	for _, witness in audience do
+		TeachingService.Cue(witness, "CUE_FIRST_TRANSFORM_SEEN")
+	end
+end
+
 local function transform(player: Player)
 	local monster = stateFor(player.UserId)
 	local character = player.Character
@@ -501,7 +533,7 @@ local function transform(player: Player)
 
 	local payload: Types.MonsterTransformedPayload = { Character = character, Transformed = true }
 
-	transformedRemote:FireAllClients(payload)
+	announceTransform(payload)
 end
 
 --------------------------------------------------------------------------------

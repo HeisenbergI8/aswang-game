@@ -39,6 +39,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
 local Remotes = require(Shared.Remotes)
+local TeachingLines = require(Shared.pure.TeachingLines)
 local Types = require(Shared.Types)
 
 local OnboardingController = {}
@@ -82,6 +83,9 @@ local marker: BillboardGui? = nil
 local markerLabel: TextLabel? = nil
 local hint: TextLabel? = nil
 local hintShown = false
+
+-- Bumped on every ShowLine so an older hide-timer can tell it has been superseded. See ShowLine.
+local lineToken = 0
 local heartbeat: RBXScriptConnection? = nil
 
 -- The streaming-retry listener, held here rather than only in its own closure so `clearObjective` can
@@ -147,11 +151,57 @@ local function ensureHint()
 	label.Font = Enum.Font.GothamBold
 	label.RichText = true
 	label.TextStrokeTransparency = 0
-	label.Text = TEACH_LINE
 	label.Visible = false
 	label.Parent = gui
 
 	hint = label
+end
+
+--[[
+	THE TEACHING-LINE SLOT, and after C21/C23 this controller owns it for the whole client.
+
+	Three callers now: this file's own C20 arrival line, `TrialController`'s beats (C21/C22), and the
+	`TeachingCue` handler (C23). They share a LABEL and nothing else — no state, no timer, no memory of
+	what was shown. `hintShown` above stays private to the C20 objective and is not consulted here.
+
+	A SIBLING CONTROLLER WOULD HAVE COLLIDED ON SCREEN. The label sits at `1, -LAYOUT.HintLift` with
+	`HintLift = 120`, chosen to clear `UIController`'s prompt row. A second controller drawing its own
+	teaching line would either duplicate that constant or pick a different one, and the two would
+	overlap the first time a trial beat and a C23 cue landed together. There is one teaching-line slot
+	on this screen and it should have one owner.
+
+	FIRE-ONCE IS DELIBERATELY NOT THIS FUNCTION'S JOB. C20 tracks its own; C23's "once ever" lives on
+	the server where it survives a rejoin. A `ShowLine` that remembered would give those two subtly
+	different meanings of "once", and one of them would be wrong.
+
+	LAST WRITER WINS, on purpose. Two lines inside `HintSeconds` of each other is a real possibility —
+	a trial beat landing on a C23 cue — and the newer one describes what just happened. The pending
+	hide is re-armed on every call rather than left to the older one, which would otherwise blank the
+	newer line early.
+]]
+function OnboardingController.ShowLine(text: string)
+	ensureHint()
+
+	local teach = hint
+
+	if teach == nil then
+		return
+	end
+
+	teach.Text = text
+	teach.Visible = true
+
+	lineToken += 1
+
+	local token = lineToken
+
+	task.delay(LAYOUT.HintSeconds, function()
+		-- The token is what makes re-arming safe: an older timer finds the counter moved on and does
+		-- nothing, instead of hiding a line that replaced the one it was scheduled for.
+		if token == lineToken and teach.Parent ~= nil then
+			teach.Visible = false
+		end
+	end)
 end
 
 --[[
@@ -260,21 +310,7 @@ local function watch(point: BasePart)
 
 		hintShown = true
 
-		ensureHint()
-
-		local teach = hint
-
-		if teach == nil then
-			return
-		end
-
-		teach.Visible = true
-
-		task.delay(LAYOUT.HintSeconds, function()
-			if teach.Parent ~= nil then
-				teach.Visible = false
-			end
-		end)
+		OnboardingController.ShowLine(TEACH_LINE)
 	end)
 end
 
@@ -324,6 +360,29 @@ function OnboardingController.Start()
 				showMarker(instance)
 				watch(instance)
 			end)
+	end)
+
+	--[[
+		C23. NO NEW LABEL AND NO NEW CONTROLLER — the cue resolves to copy through the same pure module
+		the server used to decide it was owed, and renders through the same `ShowLine` this file
+		already owns.
+
+		THE COPY IS RESOLVED HERE RATHER THAN SENT. The payload is an id, so player-facing text never
+		crosses the wire — a localisation and a trust problem avoided for no cost, since
+		`shared/pure/TeachingLines` is replicated and the client can read it.
+
+		FIRE-ONCE IS NOT CHECKED HERE. The server owns it and has already decided: receiving this
+		remote at all means the server believes this player has not seen this line. Re-checking
+		client-side against an empty local set would be a second, weaker answer to a question already
+		settled — and it would be wrong after a rejoin, which is the case the server-side set exists
+		for.
+	]]
+	Remotes.Get("TeachingCue").OnClientEvent:Connect(function(cueId: string)
+		local line = TeachingLines.resolve(cueId, {})
+
+		if line ~= nil then
+			OnboardingController.ShowLine(line)
+		end
 	end)
 
 	-- A round ending takes the waypoint with it. Without this a player who never reached their first

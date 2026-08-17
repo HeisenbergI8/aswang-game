@@ -50,6 +50,7 @@ local TextChatService = game:GetService("TextChatService")
 
 local AntiCheatService = require(script.Parent.AntiCheatService)
 local RoundService = require(script.Parent.RoundService)
+local TeachingService = require(script.Parent.TeachingService)
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
@@ -472,6 +473,16 @@ local function syncChannelMembership(player: Player)
 	-- by Roblox's own auto-join on the next round's character load, and re-adding here would race it.
 	if isGhost then
 		removeFromLivingChannels(player)
+
+		--[[
+			C23. §4.7's retention fix in one sentence, at the moment it lands. Without it, dying reads
+			as the round being over for you — and a player who thinks they are done alt-tabs instead
+			of contributing, which is the six-minute boredom Appendix C puts a number on.
+
+			Fired to the player about their OWN death. It says nothing about who killed them, which is
+			the thing Amendment A3 spent a whole remote removing.
+		]]
+		TeachingService.Cue(player, "CUE_FIRST_GHOST_DEATH")
 	end
 	-- The `: Instance?` is load-bearing under --!strict, the same annotation ItemService's pool lookup
 	-- needs: without it the analyzer treats the result as non-optional and the nil comparison is a type

@@ -30,6 +30,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AntiCheatService = require(script.Parent.AntiCheatService)
 local MonsterService = require(script.Parent.MonsterService)
 local RoundService = require(script.Parent.RoundService)
+local TeachingService = require(script.Parent.TeachingService)
 local TaskPool = require(script.Parent.Parent.pure.TaskPool)
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -306,6 +307,11 @@ local function pickupTick()
 
 			carried[player.UserId] = (carried[player.UserId] or 0) + 1
 			pouch:Destroy()
+
+			-- C23. The first pouch a player ever takes explains what it is for. §10 is explicit that
+			-- the folklore must not be assumed. Fired to the player who did it, about a thing they
+			-- did themselves — no audience question here.
+			TeachingService.Cue(player, "CUE_FIRST_SALT")
 
 			-- ONE PER TICK PER PLAYER. Breaking here rather than continuing means two pouches lying in
 			-- the same spot cannot both be taken in one frame by a player whose limit is 1 — the
