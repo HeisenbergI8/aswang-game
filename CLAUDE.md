@@ -52,8 +52,9 @@ npm run verify:fast       # analyze + remotes + secrecy + toolchain             
 | `npm run check:toolchain` | verify the five pinned tools, fetch Roblox API definitions, refresh the sourcemap |
 | `npm run preflight` | task-loop entry conditions; `-- --studio` adds a Rojo check |
 | `npm run verify:plan <plan>` | run a plan's `**Verify:**` lines and grade the checks themselves |
+| `npm run plan:phase -- <plan> [N]` | the plan's phase index, or one phase. **Read plans through this, never whole** |
 | `npm run goal <plan-dir>` | one exit code for "is this plan finished" |
-| `npm run check:guards` | the harness's own 22 suites, unconditionally |
+| `npm run check:guards` | the harness's own 28 suites, unconditionally |
 
 **Prefer `npm run verify` over running checks individually**, and `verify:fast` mid-task. It is the same
 gate the hooks, the commit guard and the task loop all use, so your report and theirs cannot disagree.
@@ -215,8 +216,18 @@ and six Lune suites were green over a Critical bug: the transform's revert resto
 instead of captured state, permanently branding the ex-Aswang in a way readable map-wide. Only
 `exploit-auditor` found it. Static green over a secrecy surface means very little.
 
-**Scope every brief.** "Audit the diff" costs three times "audit `MonsterService`'s revert path and
-answer these four questions", and returns less. Name the files and the questions.
+**Scope every brief — this is a rule, not a preference.** "Audit the diff" costs three times "audit
+`MonsterService`'s revert path and answer these four questions", and returns less. Every brief names
+**the files, the phase, and the questions**:
+
+> Audit **Phase 3 only** of `.claude/plans/feature-c13-c16-salt-ghosts-plan/` — load it with
+> `npm run plan:phase -- <plan> 3`. Files: `MonsterService.luau`, `SaltThrow.luau`. Answer: (1) does the
+> throw resolve server-side, (2) is the cooldown read from `Config`, (3) does the revert restore captured
+> state, (4) any step with no traceable `file:line`.
+
+An unscoped brief is how an agent ends up reading a 57k-token plan and a 690KB source tree to check one
+function — and every turn of that agent then re-carries all of it. **Context size multiplies by turn
+count**, so what a brief lets an agent load is the single biggest lever on what a review costs.
 
 **Planning means the `architect` agent — never the built-in `Plan` agent.** They describe themselves
 almost identically, but `Plan` has no Write tool, so it creates no plan directory — and `implement-plan`,
@@ -238,10 +249,15 @@ costs a whole extra round trip. Omit an agent only for a *precondition you check
 playtester establishes nothing when `rojo serve` is down (`ReplicatedStorage` empty in `search_game_tree`
 means Rojo never synced). Check, then say why in one line.
 
-**Finish editing before you trigger them.** A review pass costs 5–8 minutes, and `review-gate.mjs` fires
-on every turn that edits a tracked `.luau` file and goes green — so applying an auditor's fixes *in a
-later turn* buys a second full review round. Do the work, self-review, apply what you already know needs
-applying, run `verify`, and only then launch. Batch any genuinely new findings into a single turn.
+**Finish editing before you trigger them.** A review pass costs 5–8 minutes **and 150–250k tokens**, and
+`review-gate.mjs` fires on every turn that edits a tracked `.luau` file and goes green — so applying an
+auditor's fixes *in a later turn* buys a second full review round at full price. Do the work,
+self-review, apply what you already know needs applying, run `verify`, and only then launch. Batch any
+genuinely new findings into a single turn.
+
+Subagents do not share the main thread's cache or each other's — every agent you launch re-reads its
+material cold. Three agents on the same change is three cold reads of the same plan and the same source,
+which is why the surface-based table above launches the reviewers a diff *earns*, not all of them.
 
 They run **after** implementation: an auditor with no `implementation-log.md` has nothing to trace.
 
@@ -275,6 +291,12 @@ reported red — it stops anyone else looking.
 **The auditors write nothing** — they report in chat, scored out of 100. That score measures **how much
 the auditor's own evidence is worth**, not how good the code is: an implementation it could only read,
 never play, caps around the mid-60s. Treat a high score with no runtime evidence as a red flag.
+
+**Start a fresh session at each milestone boundary.** The artifact directory is the handoff — the plan,
+`implementation-log.md`, `verification.md` and `artifacts/` carry the state that matters, which is the
+whole reason they are files rather than conversation. A session carried across milestones re-processes
+its entire history on every remaining turn and buys nothing the plan directory does not already hold.
+Finish the milestone, commit, then open a new session and read the plan index.
 
 Supporting skills: `lean-code` (before writing), `studio-sync` (before touching Studio), `asset-pipeline`
 (before making any art or sound), `playtest` (for the M5/M12 human gates), `debug-ladder` (after two
@@ -336,7 +358,7 @@ Rules enforced by code rather than by instruction, so they hold regardless of wh
 | `Stop` driver | the task loop's whether-and-what-next decision | `task-driver.mjs` |
 | `permissions.deny` + `autoMode.hard_deny` | declarative backstop; holds if a hook script errors | `.claude/settings.json` |
 | `analyze-baseline.json` | tracked at the repo root, so widening the gate shows in a diff. `--update` refuses to run under an agent | `check-analyze.mjs` |
-| 22 self-test suites | every guard and gate proven in BOTH directions | `harness-selftest.mjs` |
+| 28 self-test suites | every guard and gate proven in BOTH directions | `harness-selftest.mjs` |
 
 All hook wiring lives in `.claude/settings.json`. **Do not move per-agent hooks into agent frontmatter** —
 `hooks:` there is documented as agent-scoped and has been observed not to fire, while settings.json hooks

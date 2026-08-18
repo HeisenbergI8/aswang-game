@@ -16,9 +16,21 @@ to be wrong, stop and say so — do not silently improvise around it.
 
 1. You run in the main thread, so `CLAUDE.md` is already in your context — do not re-read it. Re-read one
    *section* only if you need to check a specific rule.
-2. Read the plan document and its `references/` reviews. The references contain the annotated reasoning
-   behind each step; skipping them is how you re-derive a decision the architect already made and get it
-   wrong.
+2. Read the plan's **phase index**, not the whole document:
+
+   ```bash
+   npm run plan:phase -- .claude/plans/<type>-<name>-plan/
+   ```
+
+   It prints each phase's title, line range, step count, token cost and the `references/` reviews that
+   phase actually cites. Add `-- <plan> 1 --with-preamble` to read Phase 1 together with everything above
+   it, which is where the plan states its decisions.
+
+   **Do not read the plan document whole, and do not read `references/` wholesale.** A plan runs 100–230KB
+   — the c13–c16 plan is ~57k tokens across 8 phases, with another ~22k in 16 reference reviews. You
+   implement one phase at a time, so loading all of it costs roughly 8x what the phase in front of you
+   needs, and you re-pay it on every turn for the rest of the run. Read the index now; read each phase
+   when you reach it.
 3. Load the `lean-code` skill. Every line you are about to write should survive its questions.
 4. Confirm the phase order still makes sense against the current tree. If the repo moved since the plan
    was written, say so before proceeding.
@@ -29,10 +41,21 @@ to be wrong, stop and say so — do not silently improvise around it.
 
 For each phase, in order:
 
-### 1. Announce
+### 1. Load the phase
+Read the phase you are about to work, and only that phase:
+
+```bash
+npm run plan:phase -- .claude/plans/<type>-<name>-plan/ <N>
+```
+
+Then read the `references/` reviews the index named for **this** phase — those carry the annotated
+reasoning behind its steps, and skipping them is how you re-derive a decision the architect already made
+and get it wrong. The ones belonging to other phases are not your business yet.
+
+### 2. Announce
 State which phase you are starting and which files it touches. One or two sentences.
 
-### 2. Implement
+### 3. Implement
 Work the phase's steps. Stay inside the phase — do not pull work forward from a later phase because you
 happen to be in the file. Scope creep is what makes a plan unverifiable, and the loop's cursor reads a
 phase that absorbed the next one's work as *stuck*.
@@ -41,7 +64,7 @@ Follow the conventions in `CLAUDE.md` as you write, not as a cleanup pass afterw
 top, tabs, double quotes, 100 columns, every tunable read from `Config`, every new remote declared in
 `Remotes.luau`, every `OnServerEvent` handler consulting `AntiCheatService` first.
 
-### 3. Gate
+### 4. Gate
 Run the phase's verification command before moving on:
 
 ```bash
@@ -55,7 +78,7 @@ it yourself at the phase boundary is how you find out *before* you have built th
 **A phase is not done until its gate is green.** Do not start phase N+1 on a red gate, and do not tell
 the user a phase is complete when it is not.
 
-### 4. Log
+### 5. Log
 Append to `implementation-log.md` in the plan directory:
 
 ```markdown
@@ -71,7 +94,7 @@ Append to `implementation-log.md` in the plan directory:
 This log is what the auditor reads. Deviations recorded here are legitimate engineering judgement;
 deviations discovered by the auditor in the diff are findings against you.
 
-### 5. Checkpoint
+### 6. Checkpoint
 After each phase, tell the user in one or two lines what landed and what is next. For phases touching
 more than a handful of files, or any phase whose plan step you deviated from, pause for confirmation
 before continuing.

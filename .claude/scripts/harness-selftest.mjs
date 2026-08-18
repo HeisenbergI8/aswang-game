@@ -69,6 +69,10 @@ export const SUITES = [
   // Pins that a human-only step blocks the LOOP only once the cursor reaches it — the fix for a plan
   // whose last phase needed a person halting the whole run at iteration 0.
   ['next-phase', ['.claude/scripts/next-phase.mjs', '--self-test']],
+  // Reads the SAME `### Phase N:` convention next-phase and verify-plan depend on, so the three must
+  // agree. It is what `implement-plan` and the auditor load a plan through; a slicer that quietly
+  // truncates a phase hands over a short contract that verify-plan still grades green.
+  ['plan-phase', ['.claude/scripts/plan-phase.mjs', '--self-test']],
   ['preflight', ['.claude/scripts/preflight.mjs', '--self-test']],
 
   // The accountability layer.

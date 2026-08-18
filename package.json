@@ -33,6 +33,7 @@
     "check:guards": "node .claude/scripts/harness-selftest.mjs --force",
 
     "verify:plan": "node .claude/scripts/verify-plan.mjs",
+    "plan:phase": "node .claude/scripts/plan-phase.mjs",
     "goal": "node .claude/scripts/goal-check.mjs",
     "preflight": "node .claude/scripts/preflight.mjs",
     "candidates": "node .claude/scripts/candidates.mjs list",

@@ -130,6 +130,23 @@ generation dies before that. The protocol below is the entire defence.
 A timeout now costs one phase, and the skeleton on disk is already enough for a human to read, for
 `verify-plan.mjs --lint` to grade, and for you to be resumed against.
 
+### Each phase is read on its own — write it that way
+
+Nothing downstream reads your plan whole. `implement-plan` loads one phase at a time via
+`npm run plan:phase -- <plan> <N>`, and the auditor traces one phase at a time, because a 100–230KB plan
+costs about 8x what the phase in front of the reader needs. Two obligations follow:
+
+- **A phase must be implementable from its own slice.** Everything its steps depend on goes in the phase
+  body, in the preamble above Phase 1 (which is read alongside Phase 1 via `--with-preamble`), or in a
+  `references/` review. A constraint stated only inside Phase 2's prose does not exist for whoever
+  implements Phase 6. Repeat the load-bearing sentence rather than cross-referencing it.
+- **Every step keeps its `**File:**` line.** That is not just the verify contract: it is how `plan:phase`
+  resolves which `references/` reviews a phase needs, by matching the file's basename to
+  `[fileName]-review.luau`. A step with no `**File:**` line silently orphans its review.
+
+Section headings *inside* a phase body must not be `### Phase <number>:` — that is the slice boundary.
+Any other `###` is fine; the slicer keeps it with its phase.
+
 `guard-agent-write.mjs` refuses a single Write over 600 lines to a plan document as the backstop under
 this.
 
