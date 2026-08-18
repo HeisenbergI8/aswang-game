@@ -1,0 +1,77 @@
+Q6 — the desktop keyboard verbs, driven for real. Captured by the coordinator via Studio MCP
+(`user_keyboard_input` into the Client datamodel of a live Play session, `aswang.rbxl`).
+
+METHOD, and why it is stronger than watching for a completed task:
+
+  Four transient listeners were attached on the SERVER to RequestTaskProgress, RequestTimingStop,
+  RequestThrowSalt and RequestTrialThrow — additive, recording only, discarded on Stop, and removed
+  afterwards (4 listeners disconnected, _G cleaned). The real handlers still ran. What this records
+  is exactly the link C27 refactored: key -> ContextActionService handler -> performAct /
+  performTimingStop / performThrow -> FireServer.
+
+  This needs no walking to a task point, because none of the three remotes is gated client-side:
+  the hold heartbeat fires while `holding` regardless of position, the timing stop fires
+  unconditionally by design (InputController documents the token cost of that choice), and the throw
+  sends a camera direction with no local pouch check. The SERVER refuses what it should; the point
+  under test is whether the key still reaches the wire at all.
+
+KEYS DRIVEN (one pass, in order):
+  keyDown E, wait 1500ms, keyUp E, wait 400ms, keyPress R, wait 400ms, keyPress Q, wait 400ms,
+  keyDown B, wait 800ms, [GUI inspected], keyUp B
+
+=== What arrived on the server ===
+
+7 event(s):
+RequestTaskProgress from Demiurgos_18 (0 args) at t=56237.69
+RequestTaskProgress from Demiurgos_18 (0 args) at t=56237.95
+RequestTaskProgress from Demiurgos_18 (0 args) at t=56238.20
+RequestTaskProgress from Demiurgos_18 (0 args) at t=56238.47
+RequestTaskProgress from Demiurgos_18 (0 args) at t=56238.74
+RequestTimingStop from Demiurgos_18 (0 args) at t=56239.30
+RequestThrowSalt from Demiurgos_18 (1 arg) at t=56239.84
+
+=== What the wheel did (Client datamodel, sampled while B was held down) ===
+
+QuickChatWheel ScreenGui exists: true
+Enabled (open right now): true
+Wheel frame position: {0, 205}, {0, 205}
+sectors drawn: 8 — SAW_TRANSFORM, BODY_HERE, TASK_HERE, FOLLOW_ME, ACCUSE, RUN, IM_ALONE, TRUST_ME
+viewport: 1000, 641
+
+=== Interpretation ===
+
+E (hold)  PASS. Five heartbeats over the 1.5s hold, spaced 0.26-0.27s apart, which is
+          Config.Tasks.HeartbeatInterval = 0.25 as intended. `performAct(true)` reached
+          TaskController.SetHolding.
+
+          AND THE RELEASE EDGE WORKS, which is the more valuable half: the last heartbeat is at
+          t=56238.74, immediately after keyUp, and none follows. A stuck hold would have gone on
+          firing four times a second for the rest of the session. This is the keyboard-path proof
+          of the property the touch pad's `actInput` identity check protects on a phone.
+
+R         PASS. One RequestTimingStop, zero arguments, fired away from any timing point — which is
+          the documented behaviour, not a defect: there is deliberately no client-side "am I at a
+          timing task" test, and the honest cost is one rate-limit token.
+
+Q         PASS. One RequestThrowSalt carrying 1 argument (the camera LookVector). It took the ROUND
+          path and not the trial path — RequestTrialThrow never fired — which is correct with no
+          trial session open, and confirms C22's routing in `performThrow` survived the extraction.
+
+B         PASS. The wheel opened with all 8 sectors present and named.
+
+          The frame sat at (205, 205), which is exactly C27's new clamp: WheelRadiusPx (150) +
+          SectorSize/2 (55) = 205. The cursor was nearer the corner than that, so `drawnCentre`
+          pulled the picture inside the viewport — the clipping fix demonstrably firing rather than
+          merely present. Selection is still measured from the untouched press point.
+
+          Not claimed: that releasing with no drag sends nothing. RequestQuickChat was not among the
+          watched remotes. That is C25's cancel path and is unchanged by this diff.
+
+=== Bonus: three ⚠ UNCONFIRMED notes are now resolved ===
+
+`InputController` carried a warning on R and on Q, and `QuickChatController` one on B: "NOT confirmed
+free of a CoreScript claim... Playtester." The origin was C08, which shipped unreachable because
+ProximityPrompt's default `E` silently swallowed an identical bind.
+
+All three keys demonstrably reached their handlers here, alongside E. No CoreScript claims any of
+them in this place. The comments were updated to record the evidence rather than repeat the warning.

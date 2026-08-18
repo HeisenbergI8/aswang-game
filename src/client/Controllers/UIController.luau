@@ -6,9 +6,13 @@
 	buttons, and the end screen with the reveal. It replaces the C13-C16 placeholder wholesale, as that
 	placeholder's own header asked to be replaced.
 
-	UGLY AND FUNCTIONAL, ON PURPOSE. Default fonts, flat rectangles, no theme, no art. C34 does polish
-	and the build plan is explicit that it happens AFTER six humans have said what the HUD is missing —
-	so anything here that looks like taste is a placeholder for a decision GATE 1 has not made yet.
+	C18 built this ugly and functional on purpose. C26 has since done the half of the polish that does
+	not need an opinion — motion on change, edge definition, text that survives any background, and a
+	reveal with three beats instead of none. See the MOTION block for where that line was drawn.
+
+	THE PALETTE AND THE TYPEFACE ARE STILL PLACEHOLDERS. §C26 says the theming pass is "informed by
+	what GATE 1 told you", and GATE 1 has not run — so anything here that looks like TASTE is still a
+	decision six humans have not made yet, even though the craft around it is now finished.
 
 	═══ THE ALIVE COUNT IS NOT HERE, AND THAT IS THE SPEC, NOT AN OMISSION ═══════
 
@@ -55,6 +59,17 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+--[[
+	C27 requires `TaskController` for one question — `IsTimingBarLive` — and the arrow points this way
+	on purpose. `TaskController` requires nothing from this file, so it cannot point back; the STOP
+	button needs to know whether there is a bar to stop, and the alternative (TaskController reaching
+	into the HUD to show a button) would put a piece of the pad's layout in a file that owns the
+	heartbeat.
+]]
+local TaskController = require(script.Parent.TaskController)
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
@@ -107,11 +122,85 @@ local LAYOUT = {
 	TopInset = 76, -- config-ok: clears the CoreGui topbar cluster
 
 	Scrim = 0.35, -- config-ok: placeholder background opacity
+
+	-- The end screen is a TAKEOVER, not a panel: it dims the map far harder than the HUD does, so the
+	-- reveal is the only lit thing on screen.
+	RevealScrim = 0.12, -- config-ok: end-screen background opacity
 	BarBackScrim = 0.55, -- config-ok: placeholder background opacity
 
 	-- When the sunrise timer starts reading as urgent. Presentation, not balance: the round is not
 	-- affected, the number just turns red so a player looks up.
 	UrgentSeconds = 30, -- config-ok: when the timer turns red; changes nothing about the round
+
+	-- Corner rounding and edge stroke. Restrained on purpose — see the MOTION block's note about
+	-- what C26 may and may not decide before GATE 1 has run.
+	Corner = 6, -- config-ok: HUD layout
+	StrokeWeight = 1, -- config-ok: HUD layout
+	StrokeScrim = 0.75, -- config-ok: HUD palette
+	TextStroke = 0.5, -- config-ok: HUD legibility over an unknown background
+
+	--[[
+		THE TOUCH PAD (C27), AND EVERY NUMBER HERE IS A THUMB MEASUREMENT RATHER THAN A PIXEL ONE.
+
+		The build plan's line is "thumb zones, not desktop positions scaled down", and the constraint
+		that actually decides these five numbers is the one a desk cannot show you: a phone's usable
+		GUI height in landscape is around 400, of which the CoreGui topbar takes the first 76 and
+		Roblox's own jump button owns the bottom-right corner. A five-button column at desktop sizes
+		does not fit on the screen at all — it runs off the top.
+
+		So the pad is TWO SHORT COLUMNS rather than one tall one: the survivor's three verbs at the
+		right edge under the thumb, and the Aswang's two beside them, which caps the tallest possible
+		stack at three buttons however many are visible.
+
+		`TouchBottomInset` is the load-bearing one. It lifts the whole pad clear of the jump button,
+		which is drawn by the CoreGui and cannot be moved — a pad that overlapped it would trade the
+		hold for the jump at the exact moment a player is running.
+	]]
+	TouchButton = 60, -- config-ok: touch target size in pixels, not a balance knob
+	TouchGap = 8, -- config-ok: touch pad layout
+	TouchTextSize = 14, -- config-ok: touch pad type scale
+	TouchRightInset = 16, -- config-ok: touch pad layout
+	TouchBottomInset = 150, -- config-ok: clears the CoreGui jump button
+}
+
+--[[
+	MOTION, AND THE LINE BETWEEN "ANIMATED" AND "THEMED".
+
+	C26's done condition is "every HUD element themed, readable, and animated on change; the reveal has
+	weight". Three of those four words are craft and one is taste, and GATE 1 has not run — so this
+	chunk does the craft in full and the taste conservatively. Concretely:
+
+	  · ANIMATED ON CHANGE and READABLE are answerable without six humans. A bar that steps twice a
+	    second is a bar that steps twice a second; white text with no stroke is unreadable over a bright
+	    wall whoever is looking at it. Both are fixed here properly.
+	  · THEMED is where a palette, a typeface and an identity get chosen, and §C26 says explicitly that
+	    it happens "informed by what GATE 1 told you". So the palette below is unchanged from C18, and
+	    what is added is only edge definition and legibility — the parts that help ANY theme read.
+
+	WHY THESE DURATIONS. `TaskBar` matches `Config.Round.SnapshotInterval` exactly: the fill is then
+	always still arriving as the next snapshot lands, so the bar reads as continuous motion rather than
+	as two steps a second. It is read from Config rather than duplicated, because if the snapshot rate
+	ever changes a hardcoded 0.5 here would silently start stuttering or overshooting.
+
+	The rest are shorter than one snapshot so they finish before the value they describe can change
+	again — an animation still running when its own input moves is how a HUD ends up showing a number
+	that was true a second ago.
+]]
+local MOTION = {
+	-- Matches Config.Round.SnapshotInterval; see above. Not a literal, so not a config-ok case.
+	TaskBar = Config.Round.SnapshotInterval,
+
+	Colour = 0.25, -- config-ok: HUD motion, not balance
+	Pulse = 0.18, -- config-ok: HUD motion
+	PulseScale = 1.35, -- config-ok: how far a changed number overshoots before settling
+	Fade = 0.4, -- config-ok: HUD motion
+
+	-- The reveal's beats. The headline lands, the room holds, then the name. The hold is the whole
+	-- point of §4.8 calling this "the screenshot people share" — a name that appears simultaneously
+	-- with the result is information, and information is not drama.
+	RevealFade = 0.5, -- config-ok: HUD motion
+	RevealHold = 1.1, -- config-ok: the pause before the name lands
+	RevealRise = 24, -- config-ok: how far the reveal line travels as it fades in
 }
 
 --[[
@@ -120,8 +209,9 @@ local LAYOUT = {
 	that a value is data rather than a constructed object.
 
 	These are not in Config because they are not shared with the server and nothing balances against
-	them. The Aswang red and the survivor blue in particular are C34's to replace, once GATE 1 has said
-	whether the HUD reads at all.
+	them. The Aswang red and the survivor blue in particular are C26's theming pass to replace, once
+	GATE 1 has said whether the HUD reads at all. (This said C34 for two chunks; C34 is "Six cosmetics"
+	and has nothing to do with the HUD.)
 ]]
 local COLOUR = {
 	Text = Color3.fromRGB(255, 255, 255), -- config-ok: HUD palette, not balance
@@ -153,16 +243,66 @@ local COLOUR = {
 	So the dependency is INVERTED rather than mirrored: `InputController` already requires this module
 	for `GetMyRole`, so it cannot be required back without a cycle. It registers its handlers here at
 	Start, and the buttons invoke exactly what the keys invoke.
+
+	C27 EXTENDS THE SAME REGISTRATION TO THE OTHER THREE VERBS rather than inventing a second
+	mechanism for the touch pad. `Act` and `Throw` are what `E`, `R` and `Q` already run, handed over
+	by the same call at Start, so the phone and the keyboard remain ONE implementation with several
+	triggers. Every argument above applies unchanged — and applies harder, because a touch button is
+	the only trigger 60% of players have.
 ]]
 export type ActionHandlers = {
 	Transform: () -> (),
 	Kill: () -> (),
+	--[[
+		The hold, as a press and a release — the one verb on the pad that is not a tap, and the one
+		this whole chunk exists for. A task is what all eight players do all round, and until C27 a
+		phone could not do one.
+
+		A boolean rather than two handlers because the two edges are one verb: whatever is registered
+		here must be able to see a release that follows its own press, and a pair of independent
+		callbacks is how a hold ends up stuck true on the client that has no key to press to clear it.
+	]]
+	Act: (pressed: boolean) -> (),
+	Throw: () -> (),
+	--[[
+		The timing stop, kept a SEPARATE verb rather than routed through `Act` — and the alternative is
+		worth recording because it looks tidier and does not work.
+
+		Routing "a press at a live bar is a stop" needs the client to know a bar is live, and a bar is
+		only live WHILE THE HOLD HEARTBEAT IS RUNNING (`TaskService.publishBar` sends to a player whose
+		presence is current). A player waiting for the green zone taps roughly once per
+		`Tasks.TimingBarPeriod` — 1.8s — which is well past `Tasks.PresenceGraceSeconds`, so the second
+		tap would arrive at a bar that had already gone stale and be read as a fresh hold. The task
+		would become unwinnable on a phone, silently, and only for the players who cannot report it.
+
+		So the pad mirrors the desktop exactly: hold ACT to keep the bar alive, tap STOP to stop it.
+	]]
+	TimingStop: () -> (),
+}
+
+--[[
+	THE WHEEL IS REGISTERED SEPARATELY BECAUSE IT BELONGS TO A DIFFERENT CONTROLLER.
+
+	`QuickChatController` owns the wheel, its geometry and its gesture; this file owns the button that
+	starts one. Registration inverts that dependency the same way `BindActions` does — nothing here
+	requires the quick-chat module, so neither can require the other back — and it stays a PAIR
+	because §4.5's gesture is press-drag-release rather than a tap: the pad reports where the thumb
+	went down and when it came up, and every decision in between is the wheel's.
+]]
+export type QuickChatHandlers = {
+	Open: (origin: Vector2) -> (),
+	Commit: () -> (),
 }
 
 local actionHandlers: ActionHandlers? = nil
+local quickChatHandlers: QuickChatHandlers? = nil
 
 function UIController.BindActions(handlers: ActionHandlers)
 	actionHandlers = handlers
+end
+
+function UIController.BindQuickChat(handlers: QuickChatHandlers)
+	quickChatHandlers = handlers
 end
 
 -- This client's OWN role, and nothing else. Read the header before adding to this.
@@ -184,9 +324,28 @@ local saltSeen = 0
 
 --------------------------------------------------------------------------------
 -- Construction. Every element is made once and then only updated, so `render`
--- never allocates — it runs at Config.Round.SnapshotInterval, several times a
--- second, for the whole round.
+-- allocates nothing while the world is holding still — it runs at
+-- Config.Round.SnapshotInterval, several times a second, for the whole round.
+-- C26's tweens are the one exception and they are edge-triggered precisely so
+-- that the exception stays rare; see the tween helpers below.
 --------------------------------------------------------------------------------
+
+--[[
+	LAST-RENDERED VALUES, WHICH ARE THE WHOLE ANIMATION SYSTEM.
+
+	`render` is level-triggered — it receives the current state of the world twice a second and has no
+	idea what changed. Animation is edge-triggered by definition. These four locals are the adapter
+	between the two, and they are the reason `tweenTo` is never called for a value that is already
+	where it should be.
+
+	They are seeded to values no first snapshot can equal (-1, and nil for the flags) so the first
+	render after a join sets everything without animating — a HUD that plays four transitions the
+	instant it appears looks broken, not alive.
+]]
+local lastRatio = -1
+local lastCompleted = -1
+local lastUrgent: boolean? = nil
+local lastGateOpen: boolean? = nil
 
 local hud: ScreenGui? = nil
 local timerLabel: TextLabel? = nil
@@ -197,6 +356,24 @@ local statusLabel: TextLabel? = nil
 local promptLabel: TextLabel? = nil
 local actionFrame: Frame? = nil
 
+--[[
+	C27's touch pad, and the two locals are separate because they have different lifetimes: the frame
+	is destroyed with the HUD, the button table is how `render` reaches five buttons without a
+	`FindFirstChild` twice a second for the whole round.
+]]
+local touchPad: Frame? = nil
+local touchButtons: { [string]: TextButton } = {}
+
+--[[
+	EDGE DEFINITION, AND WHY A PANEL NEEDS IT AT ALL.
+
+	Every panel is a translucent black rectangle over the map. At `Scrim = 0.35` that is 65% of
+	whatever is behind it, so over the barrio's dark geometry the panel has no visible boundary and the
+	text inside it appears to float on the world. A one-pixel stroke and a rounded corner cost nothing,
+	commit to no palette, and turn four floating labels into four things that are obviously UI.
+
+	This is the "readable" half of C26's done condition rather than the "themed" half — see MOTION.
+]]
 local function panel(parent: Instance, name: string): Frame
 	local frame = Instance.new("Frame")
 
@@ -204,11 +381,31 @@ local function panel(parent: Instance, name: string): Frame
 	frame.BackgroundColor3 = COLOUR.Panel
 	frame.BackgroundTransparency = LAYOUT.Scrim
 	frame.BorderSizePixel = 0
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, LAYOUT.Corner)
+	corner.Parent = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = COLOUR.Text
+	stroke.Thickness = LAYOUT.StrokeWeight
+	stroke.Transparency = LAYOUT.StrokeScrim
+	stroke.Parent = frame
+
 	frame.Parent = parent
 
 	return frame
 end
 
+--[[
+	`TextStrokeTransparency` is the single highest-value line in this file for readability.
+
+	The HUD draws over a map whose brightness this controller does not know and, after C28 drives
+	`Lighting.ClockTime` from the round clock, cannot know — the background legitimately changes from
+	night to sunrise underneath a label that is not told about it. White text on the sunrise is white
+	on white. A dark outline makes every label survive any background, at no cost and with no theme
+	decision taken.
+]]
 local function text(parent: Instance, name: string, size: number, colour: Color3): TextLabel
 	local label = Instance.new("TextLabel")
 
@@ -218,10 +415,31 @@ local function text(parent: Instance, name: string, size: number, colour: Color3
 	label.TextSize = size
 	label.Font = Enum.Font.GothamBold
 	label.RichText = true
+	label.TextStrokeColor3 = COLOUR.Panel
+	label.TextStrokeTransparency = LAYOUT.TextStroke
 	label.Text = ""
 	label.Parent = parent
 
 	return label
+end
+
+--[[
+	THE TWEEN HELPERS, AND THE ALLOCATION RULE THEY EXIST TO KEEP.
+
+	`render` runs at `Config.Round.SnapshotInterval` for the whole round, and this file's construction
+	comment promises it never allocates. `TweenService:Create` DOES allocate, so the promise is kept a
+	different way: nothing here is called unless the value it animates actually CHANGED since the last
+	snapshot. At steady state — a bar that has not moved, a timer that is not crossing the urgency
+	threshold — the render path allocates exactly nothing, as before.
+
+	That is also what "animated ON CHANGE" means literally. Tweening every frame toward a value that
+	is already correct is not animation, it is a slower render.
+]]
+local EASE = Enum.EasingStyle.Quad
+
+local function tweenTo(instance: Instance, seconds: number, goal: { [string]: any })
+	TweenService:Create(instance, TweenInfo.new(seconds, EASE, Enum.EasingDirection.Out), goal)
+		:Play()
 end
 
 --[[
@@ -261,6 +479,316 @@ local function makeActionButton(
 	button.Parent = parent
 
 	return button
+end
+
+--------------------------------------------------------------------------------
+-- The touch pad (C27, §5)
+--------------------------------------------------------------------------------
+
+--[[
+	IS THIS A PHONE.
+
+	`TouchEnabled and not KeyboardEnabled` rather than `TouchEnabled` alone, because a Windows laptop
+	with a touchscreen reports both — and a player with a keyboard already has every verb bound to a
+	key. The pad is for the device that has no other way in.
+
+	Read once, at build time, rather than watched. `LastInputTypeChanged` would let the pad appear and
+	vanish as a player alternated between a controller and a screen, and a control that disappears
+	mid-round is worse than one that is always there: the pad costs a phone nothing when unused, and
+	costs a desktop nothing because it is never built.
+]]
+local function isTouchDevice(): boolean
+	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+end
+
+--[[
+	One round button. Circular, because a round target reads as "press me" at a size where a label
+	does not, and because `UICorner` at half the height costs nothing.
+
+	`AutoButtonColor` is off and the press is drawn by hand: the stock highlight is a brightness shift
+	that is invisible over the barrio at night, which is the entire lighting condition this game is
+	played in.
+]]
+local function makeTouchButton(
+	parent: Instance,
+	name: string,
+	label: string,
+	order: number,
+	colour: Color3
+): TextButton
+	local button = Instance.new("TextButton")
+
+	button.Name = name
+	button.LayoutOrder = order
+	button.Size = UDim2.fromOffset(LAYOUT.TouchButton, LAYOUT.TouchButton)
+	button.BackgroundColor3 = COLOUR.Panel
+	button.BackgroundTransparency = LAYOUT.Scrim
+	button.BorderSizePixel = 0
+	button.TextColor3 = colour
+	button.TextSize = LAYOUT.TouchTextSize
+	button.Font = Enum.Font.GothamBold
+	button.Text = label
+	button.TextWrapped = true
+	button.AutoButtonColor = false
+	button.Visible = false
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.5, 0)
+	corner.Parent = button
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = colour
+	stroke.Thickness = LAYOUT.StrokeWeight
+	stroke.Transparency = LAYOUT.StrokeScrim
+	stroke.Parent = button
+
+	-- Feedback the player can see in the dark: the ring solidifies while the thumb is down. Connected
+	-- for every input type rather than for Touch alone, so the pad behaves identically if it is ever
+	-- shown on a device with a mouse.
+	button.InputBegan:Connect(function()
+		stroke.Transparency = 0
+	end)
+
+	button.InputEnded:Connect(function()
+		stroke.Transparency = LAYOUT.StrokeScrim
+	end)
+
+	button.Parent = parent
+
+	return button
+end
+
+local function touchColumn(parent: Instance, name: string, xOffset: number): Frame
+	local column = Instance.new("Frame")
+
+	column.Name = name
+	column.BackgroundTransparency = 1
+	column.Size = UDim2.new(0, LAYOUT.TouchButton, 1, 0)
+	column.Position = UDim2.fromOffset(xOffset, 0)
+	column.Parent = parent
+
+	local layout = Instance.new("UIListLayout")
+
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, LAYOUT.TouchGap)
+	layout.FillDirection = Enum.FillDirection.Vertical
+	-- Bottom-aligned, so the stack grows UPWARD from the thumb rather than downward from a fixed top
+	-- edge. A hidden button collapses out of the column and the ones below it do not move — which is
+	-- what stops the Aswang's verbs appearing and shifting the hold button out from under a thumb
+	-- that is already reaching for it.
+	layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.Parent = column
+
+	return column
+end
+
+--[[
+	THE PAD ITSELF, WITH THE FIVE VERBS 60% OF THIS AUDIENCE OTHERWISE HAS NO ACCESS TO.
+
+	Before C27 a phone could transform, kill and throw salt — the first two through the desktop-shaped
+	buttons in the corner, the third through a `ContextActionService` touch button whose position
+	Roblox chooses. It could not do a TASK, which is what all eight players do all round, and it could
+	not stop a TIMING bar. `InputController`'s header has carried that hole as a named defect since
+	C08.
+
+	The pad closes it and takes over the two CAS buttons at the same time, so there is exactly ONE
+	system placing touch controls in this game. That was worth doing on its own: C25's header records
+	that whether a second requested CAS button stacks predictably above the first was never
+	established, and two systems placing buttons is a collision nobody can debug from a screenshot.
+
+	RIGHT COLUMN: the verbs everyone has, most-used at the bottom.
+	LEFT COLUMN: the Aswang's two, which only exist on the Aswang's own screen — the same
+	PlayerGui-only argument the desktop buttons rest on, in the same file, for the same reason.
+]]
+local function buildTouchPad(gui: ScreenGui)
+	if not isTouchDevice() then
+		return
+	end
+
+	local pad = Instance.new("Frame")
+
+	pad.Name = "TouchPad"
+	pad.BackgroundTransparency = 1
+	pad.AnchorPoint = Vector2.new(1, 1)
+	pad.Size = UDim2.fromOffset(
+		LAYOUT.TouchButton * 2 + LAYOUT.TouchGap,
+		LAYOUT.TouchButton * 3 + LAYOUT.TouchGap * 2 -- config-ok: three buttons and two gaps
+	)
+	pad.Position = UDim2.new(1, -LAYOUT.TouchRightInset, 1, -LAYOUT.TouchBottomInset)
+	pad.Visible = false
+	pad.Parent = gui
+
+	local aswangColumn = touchColumn(pad, "Aswang", 0)
+	local mainColumn = touchColumn(pad, "Main", LAYOUT.TouchButton + LAYOUT.TouchGap)
+
+	local transform = makeTouchButton(aswangColumn, "Transform", "SHIFT", 1, COLOUR.Aswang)
+	local kill = makeTouchButton(aswangColumn, "Kill", "KILL", 2, COLOUR.Aswang)
+	--[[
+		STOP shares the left column with the Aswang's two verbs and that is not a leak, because the
+		column has no identity of its own — it is a place, and `render` decides what is in it. A
+		survivor standing at a timing task sees one button there; an Aswang sees two, or three at a
+		timing task. Nobody else sees any of it: the whole pad is in this client's PlayerGui.
+
+		Bottom of its column, because it is the only button in it that gets tapped repeatedly and
+		under time pressure.
+	]]
+	local stop = makeTouchButton(aswangColumn, "Stop", "STOP", 3, COLOUR.GateOpen) -- config-ok: layout order within a column
+
+	local say = makeTouchButton(mainColumn, "Say", "SAY", 1, COLOUR.Text)
+	local salt = makeTouchButton(mainColumn, "Salt", "SALT", 2, COLOUR.Progress)
+	local act = makeTouchButton(mainColumn, "Act", "ACT", 3, COLOUR.Text) -- config-ok: layout order within a column
+
+	touchButtons = {
+		Transform = transform,
+		Kill = kill,
+		Stop = stop,
+		Say = say,
+		Salt = salt,
+		Act = act,
+	}
+	touchPad = pad
+
+	--[[
+		EVERY ONE OF THESE INVOKES A REGISTERED HANDLER AND BUILDS NOTHING.
+
+		The rule is C18's, learned the expensive way — see `BindActions` above. A button that
+		assembles its own `FireServer` is a second implementation of a verb, and the second one
+		drifts. On a phone that would be worse than it was on the desktop: the key path would still
+		work, so the bug would be invisible to the person writing it and total for the person playing.
+	]]
+	transform.Activated:Connect(function()
+		local handlers = actionHandlers
+
+		if handlers ~= nil then
+			handlers.Transform()
+		end
+	end)
+
+	kill.Activated:Connect(function()
+		local handlers = actionHandlers
+
+		if handlers ~= nil then
+			handlers.Kill()
+		end
+	end)
+
+	salt.Activated:Connect(function()
+		local handlers = actionHandlers
+
+		if handlers ~= nil then
+			handlers.Throw()
+		end
+	end)
+
+	stop.Activated:Connect(function()
+		local handlers = actionHandlers
+
+		if handlers ~= nil then
+			handlers.TimingStop()
+		end
+	end)
+
+	--[[
+		THE HOLD IS THE ONE VERB WITH TWO EDGES, and the release edge is the one that matters.
+
+		A hold left stuck `true` does not complete a task — the server re-measures distance every tick
+		— it burns `RequestTaskProgress` tokens for as long as it lasts, and a throttled player looks
+		to themselves like a broken game. `InputEnded` fires when the touch ends OR when it slides off
+		the button, so a thumb that drags away releases; `UserInputService.InputEnded` at the bottom
+		of this function is the backstop for the case Roblox does not deliver either.
+	]]
+	--[[
+		THE INPUT THAT STARTED THE HOLD IS REMEMBERED, and that is not bookkeeping — it is the whole
+		correctness of the release.
+
+		A phone player has TWO thumbs on the screen: the left one lives on the movement stick and
+		lifts constantly. The backstop at the bottom of this function listens for touch endings
+		globally, so without this identity check every step a player took while holding a task would
+		end the hold — a bug that cannot happen on a desktop, cannot be reproduced in Studio with a
+		mouse, and would present to a player as "the task bar keeps resetting".
+	]]
+	local actInput: InputObject? = nil
+
+	local function beginAct(input: InputObject)
+		if
+			input.UserInputType ~= Enum.UserInputType.Touch
+			and input.UserInputType ~= Enum.UserInputType.MouseButton1
+		then
+			return
+		end
+
+		actInput = input
+
+		local handlers = actionHandlers
+
+		if handlers ~= nil then
+			handlers.Act(true)
+		end
+	end
+
+	local function endAct(input: InputObject)
+		if input ~= actInput then
+			return
+		end
+
+		actInput = nil
+
+		local handlers = actionHandlers
+
+		if handlers ~= nil then
+			handlers.Act(false)
+		end
+	end
+
+	act.InputBegan:Connect(beginAct)
+	act.InputEnded:Connect(endAct)
+
+	--[[
+		THE WHEEL OPENS WHERE THE THUMB IS, NOT WHERE THE BUTTON IS.
+
+		`QuickChatController` places the wheel at the point it is handed, and §4.5's gesture is
+		press-drag-release without lifting. So the origin passed here is the real touch coordinate:
+		opening at the button's own centre would work identically for the maths and put the wheel a
+		thumb-width from where the player is actually looking.
+	]]
+	say.InputBegan:Connect(function(input: InputObject)
+		if input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+
+		local handlers = quickChatHandlers
+
+		if handlers ~= nil then
+			handlers.Open(Vector2.new(input.Position.X, input.Position.Y))
+		end
+	end)
+
+	say.InputEnded:Connect(function(input: InputObject)
+		if input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+
+		local handlers = quickChatHandlers
+
+		if handlers ~= nil then
+			handlers.Commit()
+		end
+	end)
+
+	--[[
+		THE BACKSTOP, and it is not defensive programming for its own sake.
+
+		A GuiObject's `InputEnded` is not guaranteed when the input is interrupted rather than ended —
+		a phone call, the Roblox menu opening, the character dying under the thumb. Each of those
+		leaves the hold `true` forever, which is a rate limit spent for the rest of the round on a
+		device that has no key to press to clear it.
+
+		`endAct` ignores anything that is not the input the hold began with, so this fires for the
+		thumb that was on ACT and for nothing else — the left thumb walking is not a release. Both
+		paths converge on the same function precisely so they cannot disagree about that.
+	]]
+	UserInputService.InputEnded:Connect(endAct)
 end
 
 local function buildHud()
@@ -398,6 +926,13 @@ local function buildHud()
 			handlers.Kill()
 		end
 	end)
+
+	--[[
+		Last, and only on a phone. On a desktop this returns immediately and the HUD is exactly what
+		C18 and C26 built; on a phone the pad above takes over the Aswang's two verbs as well, so
+		`render` hides the corner buttons rather than drawing both.
+	]]
+	buildTouchPad(gui)
 end
 
 --[[
@@ -473,6 +1008,53 @@ local function nameOfAswang(userId: number?): string
 	return if player ~= nil then player.DisplayName else `a player who left (#{userId})`
 end
 
+--[[
+	FADE A LABEL IN FROM BELOW.
+
+	Both transparencies are tweened together, and that is not a flourish. `text()` gives every label a
+	stroke at `LAYOUT.TextStroke`, so tweening `TextTransparency` alone fades the glyphs in from behind
+	a fully-opaque OUTLINE of themselves — the words are legible as a dark silhouette before they are
+	legible as words, which is worse than no animation at all.
+]]
+local function riseIn(label: TextLabel, restingY: number, delaySeconds: number)
+	label.TextTransparency = 1
+	label.TextStrokeTransparency = 1
+	label.Position = UDim2.new(0, 0, 0.5, restingY + MOTION.RevealRise)
+
+	task.delay(delaySeconds, function()
+		-- The end screen may already have been dismissed if `Config.Round.EndScreen` is ever tuned
+		-- shorter than the beats below; a destroyed label is not an error worth a warning.
+		if label.Parent == nil then
+			return
+		end
+
+		tweenTo(label, MOTION.RevealFade, {
+			TextTransparency = 0,
+			TextStrokeTransparency = LAYOUT.TextStroke,
+			Position = UDim2.new(0, 0, 0.5, restingY),
+		})
+	end)
+end
+
+--[[
+	THE REVEAL, IN THREE BEATS, BECAUSE §4.8 CALLS THIS "THE SCREENSHOT PEOPLE SHARE".
+
+	What it did before was correct and inert: the result and the name appeared in the same frame, at
+	full opacity, over a scrim the same weight as the HUD's. Everything a player needed to know arrived
+	simultaneously, which is the most efficient way to deliver information and the worst way to deliver
+	a REVEAL. Nobody screenshots a fact.
+
+	  1. the map dims hard          — RevealScrim, well past the HUD's, so nothing else is lit
+	  2. the RESULT rises in        — you won, or you did not. The half you already suspected
+	  3. a held beat, then the NAME — the half you did not, and the reason the round was worth playing
+
+	The hold is the whole mechanism. It is the moment six people say "wait, WHO?" out loud, and it is
+	the difference between a stat line and a punchline.
+
+	THE BEATS MUST FIT INSIDE `Config.Round.EndScreen`. At the committed 12s they occupy roughly two,
+	and `riseIn` no-ops against a destroyed label if that ever stops being true — so tuning the end
+	screen shorter degrades the reveal rather than erroring in everyone's console.
+]]
 local function showEndScreen(payload: Types.RoundEndedPayload)
 	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
 
@@ -490,23 +1072,28 @@ local function showEndScreen(payload: Types.RoundEndedPayload)
 	local backdrop = Instance.new("Frame")
 	backdrop.Size = UDim2.fromScale(1, 1)
 	backdrop.BackgroundColor3 = COLOUR.Panel
-	backdrop.BackgroundTransparency = LAYOUT.Scrim
+	backdrop.BackgroundTransparency = 1
 	backdrop.BorderSizePixel = 0
 	backdrop.Parent = screenGui
+
+	tweenTo(backdrop, MOTION.RevealFade, { BackgroundTransparency = LAYOUT.RevealScrim })
 
 	local headline, colour = describeResult(payload.Result)
 
 	local title = text(backdrop, "Result", LAYOUT.RevealSize, colour)
 	title.Size = UDim2.new(1, 0, 0, LAYOUT.RevealSize * 2)
-	title.Position = UDim2.new(0, 0, 0.5, -LAYOUT.RevealSize * 2)
 	title.Text = headline
 
 	local reveal = text(backdrop, "Reveal", LAYOUT.PromptSize, COLOUR.Text)
 	reveal.Size = UDim2.new(1, 0, 0, LAYOUT.PromptSize * 2)
-	reveal.Position = UDim2.new(0, 0, 0.5, LAYOUT.Pad)
 	reveal.Text = `The aswang was <b>{nameOfAswang(payload.AswangUserId)}</b>`
 
+	-- Parented before the beats are scheduled, so `riseIn`'s own parent check is testing what it
+	-- means to test — dismissal — rather than losing a race with construction.
 	screenGui.Parent = playerGui
+
+	riseIn(title, -LAYOUT.RevealSize * 2, 0)
+	riseIn(reveal, LAYOUT.Pad, MOTION.RevealFade + MOTION.RevealHold)
 
 	-- Dismissed on the same clock the server uses to start the next round, so the screen is never
 	-- still up when the lobby is already running.
@@ -528,6 +1115,20 @@ local function promptFor(snapshot: Types.ClientRoundSnapshot): string
 		return "waiting for the round to start"
 	elseif snapshot.GateOpen then
 		return "THE GATE IS OPEN — get to the plaza"
+	end
+
+	--[[
+		C27: THE PROMPT NAMES THE CONTROLS THIS PLAYER ACTUALLY HAS.
+
+		The keyboard line was the only instruction in the game for three of the five verbs, and on a
+		phone it named three keys that do not exist — which is worse than saying nothing, because a
+		player who cannot find `E` concludes the task is broken rather than that the hint is.
+
+		Keyed off the pad's existence rather than off `UserInputService` again, so the sentence and
+		the buttons can never disagree about what device this is.
+	]]
+	if touchPad ~= nil then
+		return "hold ACT at a task · STOP on the bar · SALT to throw · walk over a pouch"
 	end
 
 	return "E hold a task · R time it · Q throw salt · walk over a pouch to take it"
@@ -692,6 +1293,17 @@ local function render(snapshot: Types.ClientRoundSnapshot)
 		clock.TextColor3 = COLOUR.Dim
 		phase.Text = "WAITING FOR PLAYERS"
 
+		--[[
+			IDLE OWNS THE CLOCK COLOUR DIRECTLY, so the urgency edge has to be forgotten here or the
+			next round starts dim.
+
+			Without this line `lastUrgent` is still `false` from the previous round, the first ACTIVE
+			snapshot computes `urgent == false`, finds no edge, and leaves the countdown rendering in
+			`Dim` — the lobby's colour — for the entire night. Setting it back to `nil` makes the next
+			active render take the un-animated first-render path and assign `Text` outright.
+		]]
+		lastUrgent = nil
+
 		buildLobby()
 
 		local door = trialButton
@@ -708,10 +1320,34 @@ local function render(snapshot: Types.ClientRoundSnapshot)
 	else
 		teardownLobby()
 		clock.Text = string.format("%d:%02d", minutes, seconds)
-		clock.TextColor3 = if snapshot.Phase == Enums.RoundPhase.Active
-				and snapshot.SecondsRemaining <= LAYOUT.UrgentSeconds
-			then COLOUR.Urgent
-			else COLOUR.Text
+
+		--[[
+			THE URGENCY COLOUR IS AN EDGE, NOT A LEVEL.
+
+			It used to be assigned every render, which is correct and invisible: the timer turned red
+			between one frame and the next, at the exact moment a player was least likely to be looking
+			at it. Crossing `UrgentSeconds` is the HUD's single most important state change and it
+			deserves to be seen happening, so it is now tweened once, on the crossing.
+
+			Tracked as a boolean rather than by comparing colours, because the timer is also DIM during
+			IDLE — comparing `clock.TextColor3` would read that as an urgency change on the first
+			active snapshot and flash the whole HUD red as the round starts.
+		]]
+		local urgent = snapshot.Phase == Enums.RoundPhase.Active
+			and snapshot.SecondsRemaining <= LAYOUT.UrgentSeconds
+
+		if urgent ~= lastUrgent then
+			local target = if urgent then COLOUR.Urgent else COLOUR.Text
+
+			if lastUrgent == nil then
+				clock.TextColor3 = target
+			else
+				tweenTo(clock, MOTION.Colour, { TextColor3 = target })
+			end
+
+			lastUrgent = urgent
+		end
+
 		phase.Text = if snapshot.Phase == Enums.RoundPhase.Active
 			then "UNTIL SUNRISE"
 			else snapshot.Phase
@@ -723,8 +1359,48 @@ local function render(snapshot: Types.ClientRoundSnapshot)
 		then snapshot.TasksCompleted / snapshot.TasksRequired
 		else 0
 
-	fill.Size = UDim2.fromScale(math.clamp(ratio, 0, 1), 1)
+	--[[
+		THE BAR IS THE ONE ELEMENT A PLAYER WATCHES RATHER THAN GLANCES AT, and it was the one that
+		most obviously stepped.
+
+		`SnapshotInterval` is 0.5s, so an assignment moved the fill in two visible jumps a second. A
+		task completing is the survivors' only good news in the whole round and it arrived as a
+		stutter. Tweened over exactly one snapshot interval, the fill is still travelling when the next
+		snapshot arrives and retargets it, which reads as one continuous climb.
+
+		Compared as a clamped ratio rather than by reading `fill.Size`, because a tween in flight means
+		`fill.Size` is a value somewhere in between and never equals the last target — every render
+		would find a difference and start a fresh tween from wherever the last one had reached.
+	]]
+	local clamped = math.clamp(ratio, 0, 1)
+
+	if clamped ~= lastRatio then
+		if lastRatio < 0 then
+			fill.Size = UDim2.fromScale(clamped, 1)
+		else
+			tweenTo(fill, MOTION.TaskBar, { Size = UDim2.fromScale(clamped, 1) })
+		end
+
+		lastRatio = clamped
+	end
+
 	count.Text = `TASKS {snapshot.TasksCompleted}/{snapshot.TasksRequired}`
+
+	--[[
+		AND THE COUNT POPS WHEN IT CHANGES. The bar shows the trend; this shows the event.
+
+		Overshoot-and-settle rather than a two-tween grow-then-shrink: the size is assigned at
+		`PulseScale` instantly and tweened back to rest, so one tween is allocated instead of two and
+		there is no window where a second change mid-pulse leaves the label permanently enlarged.
+	]]
+	if snapshot.TasksCompleted ~= lastCompleted then
+		if lastCompleted >= 0 then
+			count.TextSize = LAYOUT.LabelSize * MOTION.PulseScale
+			tweenTo(count, MOTION.Pulse, { TextSize = LAYOUT.LabelSize })
+		end
+
+		lastCompleted = snapshot.TasksCompleted
+	end
 
 	--[[
 		THE ROLE LINE IS THE ONE THING ON SCREEN THAT DIFFERS BETWEEN CLIENTS, and it is drawn from
@@ -754,22 +1430,101 @@ local function render(snapshot: Types.ClientRoundSnapshot)
 	prompt.Text = promptFor(snapshot)
 
 	--[[
+		THE GATE OPENING IS THE ROUND'S TURN, and until now it announced itself by quietly swapping one
+		sentence for another between two frames — at the exact moment every survivor is looking at the
+		world rather than at the bottom of their screen.
+
+		So the prompt line flashes to the gate colour and settles back to white. Deliberately on the
+		PROMPT rather than on the status panel's `gate OPEN` word: the prompt is centre-screen and is
+		already saying the actionable thing ("get to the plaza"), whereas the status line is a reference
+		readout in the corner. The flash is there to make someone READ the sentence, so it belongs on
+		the sentence worth reading.
+
+		The closing edge is animated too. A gate that shuts is not a thing this round does — but an
+		ABORTED round resets `GateOpen`, and a flash back to white there costs nothing and is more
+		honest than a prompt stuck gate-coloured.
+	]]
+	if snapshot.GateOpen ~= lastGateOpen then
+		if lastGateOpen ~= nil then
+			prompt.TextColor3 = if snapshot.GateOpen then COLOUR.GateOpen else COLOUR.Text
+			tweenTo(prompt, MOTION.Fade, { TextColor3 = COLOUR.Text })
+		end
+
+		lastGateOpen = snapshot.GateOpen
+	end
+
+	--[[
 		The buttons follow the phase as well as the role: a transform button during INTERMISSION is an
 		affordance for something the server will refuse, and a refusal the player cannot explain reads
 		as a bug. `myRole` alone decides whether they EXIST; the phase decides whether they are offered.
 	]]
+	local aswangVerbs = myRole == Enums.Role.Aswang
+		and snapshot.Phase == Enums.RoundPhase.Active
+		and snapshot.YourState == Enums.PlayerState.Alive
+
 	local actions = actionFrame
 
 	if actions ~= nil then
-		actions.Visible = myRole == Enums.Role.Aswang
-			and snapshot.Phase == Enums.RoundPhase.Active
-			and snapshot.YourState == Enums.PlayerState.Alive
+		-- On a phone the pad below owns these two, so the desktop corner never appears — otherwise
+		-- the Aswang gets two of every button and one of them is where a thumb cannot reach.
+		actions.Visible = aswangVerbs and touchPad == nil
 
 		for _, child in actions:GetChildren() do
 			if child:IsA("TextButton") then
 				child.Visible = actions.Visible
 			end
 		end
+	end
+
+	--[[
+		THE TOUCH PAD FOLLOWS THE SAME RULES, BUTTON BY BUTTON (C27).
+
+		Each verb is offered exactly when the server would accept it, because an affordance for
+		something that will be refused reads as a broken game and a phone player has no console to
+		check. That is the same argument the desktop buttons make; what is new is that the pad has
+		verbs a survivor uses, so the gating is per-button rather than per-frame:
+
+		  SAY   — alive, any phase. §4.5 is how a phone player talks, and the lobby is where the
+		          accusations from the last round get made.
+		  ACT   — a live round only. A task hold outside ACTIVE is a heartbeat the server discards.
+		  SALT  — a live round only, for the same reason.
+		  the Aswang's two — exactly as the desktop pair, including the role gate.
+
+		A hidden button collapses out of its column, so a survivor sees three and an Aswang five with
+		no gap where the other's verbs would be — and nothing on this screen is a difference another
+		player could observe, because the whole pad lives in this client's own PlayerGui.
+	]]
+	local pad = touchPad
+
+	if pad ~= nil then
+		local alive = snapshot.YourState == Enums.PlayerState.Alive
+		local inRound = alive and snapshot.Phase == Enums.RoundPhase.Active
+
+		--[[
+			THE PAD IS ALWAYS THERE AND SAY IS ALWAYS ON IT, INCLUDING FOR THE DEAD.
+
+			`QuickChatService` accepts a ghost's phrases — the ones flagged `GhostMay` — and delivers
+			them to the other ghosts, which is §4.7's "ghosts still matter" and the only voice a dead
+			phone player has. Hiding SAY with the rest of the pad would have taken it away, and the
+			bug would have been invisible from a desk: on a keyboard `B` still works.
+
+			The lobby keeps it too. The accusations from the last round are made there.
+		]]
+		pad.Visible = true
+
+		touchButtons.Say.Visible = true
+		touchButtons.Act.Visible = inRound
+		touchButtons.Salt.Visible = inRound
+		touchButtons.Transform.Visible = aswangVerbs
+		touchButtons.Kill.Visible = aswangVerbs
+		--[[
+			STOP EXISTS ONLY WHILE THERE IS SOMETHING TO STOP, which is while this player is holding
+			at a timing point — see `TaskController.IsTimingBarLive`. Re-evaluated on the snapshot
+			tick rather than on a timer of its own: the bar arrives four times a second while a thumb
+			is down, so a half-second of latency on the button appearing sits inside a task that
+			takes several seconds, and it costs no clock.
+		]]
+		touchButtons.Stop.Visible = inRound and TaskController.IsTimingBarLive()
 	end
 end
 
@@ -798,6 +1553,18 @@ function UIController.Start()
 	Remotes.Get("PhaseChanged").OnClientEvent:Connect(function(phase: Types.RoundPhase)
 		if phase ~= Enums.RoundPhase.Active then
 			saltSeen = 0
+
+			--[[
+				The animation edges reset with the round, for the same reason `myRole` does.
+
+				Left alone, the first snapshot of a new round finds 0/5 against last round's 5/5 and
+				plays the completed bar draining and the count popping — a recap of the previous round
+				animating over the new one's lobby. Back at their seed values, the new round's first
+				render assigns silently and only animates what actually happens next.
+			]]
+			lastRatio = -1
+			lastCompleted = -1
+			lastGateOpen = nil
 		end
 
 		if phase == Enums.RoundPhase.Intermission or phase == Enums.RoundPhase.Idle then

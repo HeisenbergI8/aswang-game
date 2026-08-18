@@ -33,6 +33,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
+-- One way, and it cannot become a cycle: `UIController` does not know this module exists — the pad's
+-- SAY button calls whatever was registered with `BindQuickChat`, exactly as its action buttons call
+-- whatever `InputController` registered with `BindActions`.
+local UIController = require(script.Parent.UIController)
+
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local QuickChatPhrases = require(Shared.pure.QuickChatPhrases)
@@ -186,6 +191,42 @@ end
 	It also gives cancel for free — drag back inside `DeadRadiusPx` and release, which is the gesture a
 	player will try without being told.
 ]]
+--[[
+	WHERE THE WHEEL IS DRAWN, WHICH SINCE C27 IS NOT ALWAYS WHERE THE THUMB IS.
+
+	`origin` — the point every angle is measured from — stays exactly where the press landed and is
+	untouched by this. What is clamped is the PICTURE: a wheel opened at a press near a screen edge
+	drew half its sectors off-screen, which on a phone is four phrases a player cannot read. C25 never
+	hit it because a `ContextActionService` button and a mouse both land somewhere central; C27's pad
+	puts the SAY button against the right edge on purpose, because that is where a thumb is.
+
+	SEPARATING THE TWO IS SAFE PRECISELY BECAUSE THE SELECTION IS A DIRECTION. Sector 0 is drawn at
+	the top of the wheel and is selected by dragging UP from wherever the press started, whatever the
+	wheel's centre pixel happens to be — so the labels and the gesture still agree, which is the
+	property C25's own comment says the wheel lives or dies by ("a wheel whose buttons sit somewhere
+	the angle maths does not agree with... means accusing the wrong person").
+
+	The alternative — moving `origin` to the clamped point — is the version that breaks it: the drag
+	would start with a large delta already registered, so a press-and-release with no drag at all would
+	fire whichever phrase the offset happened to point at.
+]]
+local function drawnCentre(pressPoint: Vector2): UDim2
+	local camera = workspace.CurrentCamera
+
+	if camera == nil then
+		return UDim2.fromOffset(pressPoint.X, pressPoint.Y)
+	end
+
+	local viewport = camera.ViewportSize
+	-- Half a sector past the ring, so the outermost pixel of the furthest label is still on screen.
+	local margin = Config.QuickChat.WheelRadiusPx + LAYOUT.SectorSize / 2
+
+	return UDim2.fromOffset(
+		math.clamp(pressPoint.X, margin, math.max(margin, viewport.X - margin)),
+		math.clamp(pressPoint.Y, margin, math.max(margin, viewport.Y - margin))
+	)
+end
+
 local function openAt(screenPosition: Vector2)
 	buildWheel()
 
@@ -205,7 +246,7 @@ local function openAt(screenPosition: Vector2)
 		`originFor` for why those two are not the same expression.
 	]]
 	origin = screenPosition
-	frame.Position = UDim2.fromOffset(screenPosition.X, screenPosition.Y)
+	frame.Position = drawnCentre(screenPosition)
 	gui.Enabled = true
 	isOpen = true
 
@@ -492,15 +533,38 @@ function QuickChatController.Start()
 		`createTouchButton = true`, and this is the one bind in the client that most needs it: §5 puts
 		~60% of players on a phone and §4.5's whole argument is that they cannot type.
 
-		⚠ UNCONFIRMED: `B` is a placeholder. C08 shipped unreachable because ProximityPrompt's default
-		`E` swallowed an identical bind, and nothing static proves `B` is unclaimed by a CoreScript.
-		Same caveat `R` and `Q` already carry in InputController.
+		`B` REACHES THIS HANDLER — confirmed at C27 alongside `R` and `Q`. Held down in a live Play
+		session it opened the wheel with all eight sectors drawn, so no CoreScript claims it in this
+		place: `.claude/plans/c27-c28-verification/artifacts/desktop-keys-console.txt`. It is still a
+		PLACEHOLDER as a design choice — nothing has argued `B` is the RIGHT key — but it is no longer
+		an unknown.
 
-		⚠ UNCONFIRMED: whether a SECOND requested touch button stacks predictably above the salt-throw
-		one, or whether the two can collide or reorder between sessions. The fallback named in the
-		plan is a hand-placed button in this controller's own ScreenGui.
+		The second ⚠ that stood here is moot rather than answered: whether two requested CAS touch
+		buttons stack predictably was never established, and C27 removed the question by taking both
+		touch buttons away. `UIController`'s pad is the hand-placed fallback that note anticipated.
 	]]
-	ContextActionService:BindAction(WHEEL_ACTION, onWheelAction, true, Enum.KeyCode.B)
+	ContextActionService:BindAction(WHEEL_ACTION, onWheelAction, false, Enum.KeyCode.B)
+
+	--[[
+		C27: THE PAD OWNS THE BUTTON, THIS FILE OWNS THE WHEEL.
+
+		`createTouchButton` was `true` above and is now `false`, and the reason it was true has not
+		gone away — §5 puts ~60% of players on a phone and §4.5's whole argument is that they cannot
+		type. What changed is that `UIController` now draws every touch control in the game, in thumb
+		zones it chooses, so SAY sits beside the other five verbs instead of wherever the CoreGui put
+		it. This file's own header flagged the unknown that made the old arrangement uncomfortable:
+		whether a second requested CAS button stacks predictably above the first was never
+		established, and now there is no second one to find out about.
+
+		Registered rather than required, so the arrow points one way: `UIController` knows nothing
+		about this module, and this module reaches it through a call it makes itself. The gesture is
+		still whole — the pad reports the press point and the release, and everything between them,
+		including the drag, the highlight and the cancel radius, is decided here.
+	]]
+	UIController.BindQuickChat({
+		Open = openAt,
+		Commit = commit,
+	})
 
 	--[[
 		The drag is read from a Heartbeat rather than from `InputChanged`, so touch and mouse take the

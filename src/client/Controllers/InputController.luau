@@ -14,12 +14,17 @@
 	The dependency only points one way: this module requires `UIController` for `GetMyRole`, so the HUD
 	cannot require this one back. Registration is what makes the arrow point the right way.
 
-	NEITHER BIND CREATES A TOUCH BUTTON — `createTouchButton` is false on both — and that is now a
-	deliberate division rather than a hole. Mobile reaches transform and kill through the HUD buttons,
-	which is also the only way to make them Aswang-only: a CAS touch button appears for every client
-	that runs the bind, and the role gate lives inside the handler. What mobile still lacks is the
-	TASK, TIMING and THROW verbs; that remainder is C27's, and naming it here keeps it from being
-	rediscovered as a bug.
+	NO BIND IN THIS FILE CREATES A TOUCH BUTTON, and since C27 that is the whole story rather than
+	half of it. Every verb here is registered with `UIController.BindActions` and drawn by C27's touch
+	pad, which is the one thing in this game that places a touch control.
+
+	The division is deliberate and `ContextActionService` is the reason: a CAS touch button appears for
+	EVERY client that runs the bind, so it cannot be Aswang-only (the role gate lives inside the
+	handler, not on the bind), cannot appear only while a timing bar exists, and cannot be placed in a
+	thumb zone this game chose. The pad does all three. What is left in this file is the KEYS.
+
+	The hole this header used to name — mobile could not do a TASK, the thing all eight players do all
+	round — is closed. If it reopens, it reopens in `UIController.buildTouchPad`.
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -207,18 +212,22 @@ end
 	Cancel is handled alongside End: ContextActionService raises it when a bind is unbound or the input
 	is interrupted, and treating it as Pass would leave `holding` true forever.
 ]]
+local function performAct(pressed: boolean)
+	TaskController.SetHolding(pressed)
+end
+
 local function onTaskAction(
 	_actionName: string,
 	inputState: Enum.UserInputState
 ): Enum.ContextActionResult
 	if inputState == Enum.UserInputState.Begin then
-		TaskController.SetHolding(true)
+		performAct(true)
 
 		return Enum.ContextActionResult.Sink
 	end
 
 	if inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
-		TaskController.SetHolding(false)
+		performAct(false)
 
 		return Enum.ContextActionResult.Sink
 	end
@@ -236,6 +245,10 @@ end
 	client-side "am I at a timing task" test: the client would have to know which of the five points
 	are TIMING to run one, and the honest cost of not running it is a rate-limit token.
 ]]
+local function performTimingStop()
+	Remotes.Get("RequestTimingStop"):FireServer()
+end
+
 local function onTimingAction(
 	_actionName: string,
 	inputState: Enum.UserInputState
@@ -244,7 +257,7 @@ local function onTimingAction(
 		return Enum.ContextActionResult.Pass
 	end
 
-	Remotes.Get("RequestTimingStop"):FireServer()
+	performTimingStop()
 
 	return Enum.ContextActionResult.Sink
 end
@@ -261,18 +274,11 @@ end
 	`carried` and refuses with NO_POUCH; a client-side check here would be a second copy of a rule and
 	the two would disagree the first time a pickup and a throw crossed on the wire.
 ]]
-local function onThrowAction(
-	_actionName: string,
-	inputState: Enum.UserInputState
-): Enum.ContextActionResult
-	if inputState ~= Enum.UserInputState.Begin then
-		return Enum.ContextActionResult.Pass
-	end
-
+local function performThrow(): boolean
 	local camera = workspace.CurrentCamera
 
 	if camera == nil then
-		return Enum.ContextActionResult.Pass
+		return false
 	end
 
 	--[[
@@ -300,7 +306,18 @@ local function onThrowAction(
 	-- next pickup. It is prefixed `~` on screen for exactly that reason.
 	UIController.NoteThrow()
 
-	return Enum.ContextActionResult.Sink
+	return true
+end
+
+local function onThrowAction(
+	_actionName: string,
+	inputState: Enum.UserInputState
+): Enum.ContextActionResult
+	if inputState ~= Enum.UserInputState.Begin then
+		return Enum.ContextActionResult.Pass
+	end
+
+	return if performThrow() then Enum.ContextActionResult.Sink else Enum.ContextActionResult.Pass
 end
 
 function InputController.Init() end
@@ -326,6 +343,17 @@ function InputController.Start()
 		Kill = function()
 			performKill()
 		end,
+		--[[
+			C27 REGISTERS THE OTHER THREE, so the touch pad runs this file's verbs rather than its own
+			copies of them. Mobile is ~60% of the audience per §5, so the drift this prevents would be
+			the majority experience being broken while the desktop path — the one being tested from a
+			desk — stayed green.
+		]]
+		Act = performAct,
+		Throw = function()
+			performThrow()
+		end,
+		TimingStop = performTimingStop,
 	})
 
 	ContextActionService:BindAction(TRANSFORM_ACTION, onTransformAction, false, Enum.KeyCode.T)
@@ -339,30 +367,42 @@ function InputController.Start()
 	-- matches every other bind in this file: mobile is C27's subject, and this is the fourth known
 	-- hole rather than a new one.
 	--
-	-- ⚠ `R` is NOT confirmed free of a CoreScript claim. C08 shipped unreachable because
-	-- ProximityPrompt's default `E` silently swallowed the identical bind, and nothing in the tree
-	-- proves `R` is not similarly claimed. `attachPrompt` sets `Enum.KeyCode.None`, which removes the
-	-- known collision — but "the known one" is all that can be established statically. Playtester.
+	-- `R` REACHES THIS HANDLER — confirmed at C27, not assumed. The warning that stood here came from
+	-- C08, which shipped unreachable because ProximityPrompt's default `E` silently swallowed the
+	-- identical bind, and nothing static could prove `R` was not claimed too. Driven for real in a
+	-- Play session, one press produced exactly one `RequestTimingStop` on the server:
+	-- `.claude/plans/c27-c28-verification/artifacts/desktop-keys-console.txt`.
 	ContextActionService:BindAction(TIMING_ACTION, onTimingAction, false, Enum.KeyCode.R)
 
 	--[[
-		`Q`, and `true` for createTouchButton — THE FIRST BIND IN THIS FILE THAT ASKS FOR ONE.
+		`Q`, and `false` for createTouchButton SINCE C27 — this bind was the one exception in the file
+		and it is now the rule again, because the reason for the exception was ANSWERED rather than
+		withdrawn.
 
-		The other four pass `false` and call mobile a known hole deferred to C27. Salt is the case
-		where that trade stops being defensible: §5 puts ~60% of players on a phone, and §4.6 is the
-		ONLY counterplay in the game. A mobile player with no throw button is not missing a
-		convenience, they are playing a version of the round with no answer to the monster at all —
-		which is Appendix C's failure mode, not a polish item.
+		C14 asked for a CAS touch button here on the grounds that §5 puts ~60% of players on a phone
+		and §4.6 is the only counterplay in the game: a mobile player with no throw is playing a
+		version of the round with no answer to the monster at all, which is Appendix C's failure mode
+		rather than a polish item. Every word of that still holds. What changed is who draws the
+		button — C27's pad in `UIController` draws SALT itself, in a thumb zone this game chose,
+		alongside the four verbs a CAS button cannot express: an Aswang-only gate, a press-and-hold,
+		and a button that exists only while a timing bar does.
 
-		It is also the bind that survives a touch button best: the throw is aimed by the CAMERA, which
-		a phone player is already controlling, so the button carries no aiming burden. That is why
-		`Config.Salt.ThrowConeDegrees` exists rather than a raycast.
+		THERE IS NOW EXACTLY ONE SYSTEM PLACING TOUCH CONTROLS, which was worth doing on its own.
+		C25's header records that whether a SECOND requested CAS button stacks predictably above the
+		first was never established; two systems placing buttons is a collision nobody can debug from
+		a screenshot, and this repo has already lost rounds to a control that silently did not exist.
 
-		⚠ `Q` is NOT confirmed free of a CoreScript claim, the same caveat `R` carries above. C08
-		shipped unreachable because ProximityPrompt's default `E` silently swallowed an identical
-		bind, and nothing static can prove `Q` is unclaimed. Playtester.
+		The throw is still the bind that survives a touch button best — it is aimed by the CAMERA,
+		which a phone player is already controlling, so the button carries no aiming burden. That is
+		why `Config.Salt.ThrowConeDegrees` exists rather than a raycast.
+
+		`Q` REACHES THIS HANDLER — confirmed at C27, the same way `R` above was. One press produced one
+		`RequestThrowSalt` carrying the camera LookVector, and `RequestTrialThrow` stayed silent, so
+		C22's routing survived the extraction into `performThrow`:
+		`.claude/plans/c27-c28-verification/artifacts/desktop-keys-console.txt`. The pad remains the
+		answer for a phone regardless, which is why the throw no longer rests on this key alone.
 	]]
-	ContextActionService:BindAction(THROW_ACTION, onThrowAction, true, Enum.KeyCode.Q)
+	ContextActionService:BindAction(THROW_ACTION, onThrowAction, false, Enum.KeyCode.Q)
 end
 
 return InputController

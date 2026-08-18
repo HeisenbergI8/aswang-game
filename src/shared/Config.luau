@@ -523,10 +523,154 @@ local Config = {
 		FirstTaskConversionGate = 0.50,
 	},
 
+	--[[
+		THE MOBILE BUDGET (§5, C27), AND THE SPEC CALLS IT NON-NEGOTIABLE.
+
+		~60% of this game's players are on a phone. Every number in this block is spent on one thing:
+		holding 30fps on a mid-range Android DURING A CHASE, which is the worst case rather than the
+		lobby. Until C27 the block was two numbers nothing read.
+	]]
 	Performance = {
-		-- Mobile is ~60% of players. Many dynamic lights is the #1 mobile FPS killer.
+		--[[
+			§5: "Cap dynamic lights to ~8 visible at once — many point lights are the #1 mobile FPS
+			killer." `shared/pure/LightBudget` now spends this: `PerformanceController` keeps the
+			nearest few MAP lights lit on each client and switches off the ones behind that client's
+			camera or across the barrio.
+
+			CLIENT-SIDE, ROLE-BLIND, AND NOTHING CROSSES THE WIRE. It is a rendering decision over a
+			distance from a camera, so every client runs the same rule over its own view.
+		]]
 		MaxVisibleLights = 8,
+
+		--[[
+			HOW MANY OF THE EIGHT ARE NOT THE MAP'S TO SPEND.
+
+			A transformed Aswang carries one PointLight on its head (`Monster.EyeGlowRgb`) and every
+			salt pouch in view carries another (`ItemService`). Those are TELLS — the eye glow is the
+			warning §4.3 is built around and the pouch glow is how §4.6's counterplay is found — so
+			the culler is never shown them: it only ever sees lights the greybox tagged `MapLight`,
+			and these slots are subtracted from its allowance so the scenery cannot crowd them out.
+
+			Three: one monster, and up to two pouches close enough to matter at once.
+
+			`tests/config.test.luau` pins this BELOW `MaxVisibleLights`. At or above it the barrio
+			goes fully dark, which does not cost frames — it breaks §5's sightline rule ("you should
+			almost always be able to see *something*"), and total darkness is confusing, not scary.
+		]]
+		ReservedGameplayLights = 3,
+
+		-- Past this many studs a lantern contributes nothing a player can see, so it is off whatever
+		-- the budget says. Comfortably beyond the barrio's own lantern Range (26 studs).
+		LightCullRadiusStuds = 140,
+
+		--[[
+			THE ANTI-FLICKER MARGIN, and the reason the cull is a tested pure module rather than a
+			sort. A lit lantern keeps its slot until a rival is this many studs closer; without it,
+			two lanterns at an equal distance trade the last slot on every pass while a player stands
+			still between them, and a strobing street lamp is worse than the frame it saved.
+		]]
+		LightHysteresisStuds = 12,
+
+		-- How often the cull runs. Lights do not move and the camera does not teleport, so a rate
+		-- near the snapshot's would be spending frames re-deciding something that did not change.
+		LightCullIntervalSeconds = 1,
+
+		--[[
+			§5's target, and C27's done condition measures against it: "30fps sustained on a real
+			phone during a chase". Read by the on-screen FPS readout that `PerformanceController`
+			draws when `Debug.VerboseLogging` is on — the phone test needs a number visible ON the
+			phone, and Studio's frame rate means nothing here.
+		]]
 		TargetFPSMobile = 30,
+	},
+
+	--[[
+		C28 — THE SKY IS THE COUNTDOWN (Appendix C.3, §5).
+
+		Appendix C.3 is the teardown of the competitor's one genuinely good feature, a "dynamic
+		sunset-to-night" cycle that decorated their round and did nothing for it. The instruction is
+		to steal it and point it at something: **the sky visibly progressing toward sunrise IS the
+		timer.** Diegetic, no UI, free tension — a player being chased is looking at the world, not at
+		the corner of their screen where the clock is.
+
+		WHAT IS HERE AND WHAT IS DELIBERATELY NOT. The NIGHT is not in this block. It is authored in
+		`tools/greybox/barrio.luau` — ambient, fog, the Atmosphere — because that is art direction and
+		C30 will retune it. `SkyController` CAPTURES those values from the place at startup and treats
+		them as the baseline, so what lives here is only the destination and the shape of the trip.
+
+		THAT CAPTURE IS THE C04 LESSON RESTATED. MonsterService's revert once restored hardcoded
+		defaults instead of captured state and permanently branded the ex-Aswang; a lobby that comes
+		back one shade warmer after every round is the same bug running slower. `SkyCycle.frameFor(0)`
+		returns the captured night EXACTLY, and `tests/sky-cycle.test.luau` pins it.
+
+		THE MULTIPLIERS ARE MULTIPLIERS ON PURPOSE. Fog distance is a fraction of the map — barrio
+		scales it by `SCALE` — so "2.6x the authored fog" survives a map resize that an absolute
+		number would silently break.
+	]]
+	Sky = {
+		--[[
+			WHERE THE NIGHT STARTS AND ENDS, in Roblox `ClockTime` hours (0-24, 6 is sunrise).
+
+			3.0 rather than the barrio's authored 0 (midnight), and that is the one number here worth
+			arguing about. Linear from 0 the sky would be visually identical for the first two thirds
+			of a round — Roblox's horizon does nothing between midnight and about 4 — so the clock
+			would be a countdown that reads as static for four minutes and then dawns all at once.
+			Starting at 3 puts the whole round inside the part of the cycle the eye can actually
+			follow.
+
+			IT IS ALSO THE LOBBY'S SKY, because `SkyCycle` maps every non-round phase to progress 0.
+			The place file's own midnight is what a map author sees in Studio; a joining player sees
+			this. One night, one starting point, and no jump at the moment a round begins.
+
+			6.4 rather than 6.0: the sun is a little above the horizon rather than exactly on it, so
+			the last thirty seconds are unmistakably morning rather than ambiguously grey.
+		]]
+		StartClockTime = 3.0,
+		EndClockTime = 6.4,
+
+		-- Dawn as multiples of whatever the place authored for the night. See the block header.
+		DawnBrightnessMult = 2.4,
+		DawnFogEndMult = 2.6,
+		-- Below 1 because fog LIFTS at dawn. This is also the term that quietly gives back sightlines
+		-- in the last minute of a round, which is when the gate rush happens.
+		DawnAtmosphereDensityMult = 0.55,
+
+		--[[
+			The two ambients are absolute RGB triples rather than multipliers, because dawn is a
+			COLOUR SHIFT and not a brightening: the night is blue (14,16,26) and the morning is warm.
+			Multiplying a blue by 2.4 gives a brighter blue, which reads as moonlight turned up.
+
+			RGB TRIPLES, NEVER Color3, for the reason `Config.Monster`'s block gives at length: this
+			file is required under LUNE by `tests/config.test.luau`, which has no Roblox datatypes at
+			all. `SkyController` builds the Color3.
+		]]
+		DawnAmbientRgb = { 74, 66, 62 },
+		DawnOutdoorAmbientRgb = { 138, 122, 110 },
+
+		--[[
+			How long the sky takes to fall back to the authored night when a round ends.
+
+			Not instant, because the end screen sits over a lit world for `Round.EndScreen` seconds
+			and a hard cut to midnight underneath the reveal is a flicker at the exact moment §4.8
+			calls "the screenshot people share". Comfortably shorter than `Round.Intermission`, so the
+			next round always begins from a settled night — pinned in `tests/config.test.luau`.
+		]]
+		RestoreSeconds = 3,
+
+		--[[
+			THE LINE BETWEEN A STEP AND A TWEEN, as a fraction of the whole night.
+
+			A running round advances the sky by `SnapshotInterval / Duration` per push — about a
+			thousandth — which is invisible as an assignment and would cost two Tween objects twice a
+			second for seven minutes to smooth something no eye can resolve. So small moves are
+			assigned and only JUMPS are tweened, over `RestoreSeconds` above.
+
+			There are exactly two jumps in a round's life: ENDING pins the sky to dawn (a leap, if the
+			round was aborted early), and the lobby afterwards drops it back to night. This number
+			only has to sit above the per-snapshot step and below those two, which is two orders of
+			magnitude of room — it is a threshold, not a knob to tune.
+		]]
+		TweenAboveProgressDelta = 0.05,
 	},
 
 	--[[

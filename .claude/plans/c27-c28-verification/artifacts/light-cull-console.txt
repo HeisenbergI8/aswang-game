@@ -1,0 +1,43 @@
+Captured via execute_luau (Client datamodel). Tags applied at RUNTIME (transient, not saved to the
+place file) via execute_luau on the Server datamodel:
+
+  CollectionService:AddTag(light, "MapLight")
+
+over all 13 scenery PointLights actually present in the currently-loaded map (12 lanterns under
+Workspace.Barrio.Lanterns.Lantern_N_Head.Glow, plus Workspace.Barrio.Chapel_Candles's PointLight) —
+found via search_game_tree since the map has NOT been rebuilt with the new barrio.luau (which would
+apply this tag permanently and add streaming radii). This exercises PerformanceController's
+CollectionService:GetInstanceAddedSignal("MapLight") path, not just a static GetTagged() scan at Start.
+
+Config values in effect: Performance.MaxVisibleLights=8, Performance.ReservedGameplayLights=3
+(allowance = 5), Performance.LightCullRadiusStuds=140, Performance.LightHysteresisStuds=12,
+Performance.LightCullIntervalSeconds=1.
+
+Player character was stationary at spawn for the whole sample (no movement input issued), so this
+also directly tests "stable while standing still, no flicker" across 6 passes ~1.5s apart (9s total,
+spanning an ACTIVE -> ENDING -> INTERMISSION phase boundary mid-probe).
+
+=== Console output ===
+
+[LightProbe] pass1 tagged=13 lit=5 eye=-7.629, 8.733, 28.855 ::
+  Lantern_3_Head(d=64,ON) Lantern_4_Head(d=77,ON) Lantern_6_Head(d=98,ON) Lantern_1_Head(d=106,ON)
+  Lantern_2_Head(d=114,ON) Lantern_8_Head(d=162,off) Lantern_9_Head(d=163,off) Lantern_7_Head(d=211,off)
+  Lantern_5_Head(d=227,off) Lantern_12_Head(d=266,off) Lantern_11_Head(d=271,off) Chapel_Candles(d=286,off)
+  Lantern_10_Head(d=301,off)
+[LightProbe] pass2  -- IDENTICAL to pass1, same 5 ON, same distances, same eye position
+[LightProbe] pass3  -- IDENTICAL
+[RoundService] -> INTERMISSION (8s)      <- phase changed mid-probe
+[LightProbe] pass4  -- IDENTICAL
+[LightProbe] pass5  -- IDENTICAL
+[LightProbe] pass6  -- IDENTICAL
+
+=== Interpretation ===
+
+- lit=5 on every pass, out of 13 tagged, matching allowance = MaxVisibleLights(8) - ReservedGameplayLights(3) = 5 exactly.
+- The 5 lit lanterns are exactly the 5 nearest by distance (64, 77, 98, 106, 114 studs); the next
+  nearest (Lantern_8_Head at 162 studs) is off, and every farther light is off. Confirms the cull
+  picks the nearest candidates, not an arbitrary subset.
+- ZERO flicker: the exact same 5 names stayed ON across all 6 passes (9 real seconds), including
+  across a live ACTIVE -> ENDING -> INTERMISSION phase transition, with the camera stationary. This
+  is the anti-flicker/hysteresis property (LightBudget's HysteresisStuds=12) behaving as designed —
+  no light traded its slot with a same-distance neighbour on repeated passes.

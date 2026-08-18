@@ -34,6 +34,9 @@ local MARKER_NAME = "TaskMarker"
 
 local latest: Types.TaskProgressPayload? = nil
 local latestBar: Types.TimingBarPayload? = nil
+-- When the last bar arrived, for `IsTimingBarLive` below. Seeded to zero rather than nil so the
+-- comparison never has to be guarded twice.
+local latestBarAt = 0
 local taskList: { string } = {}
 local holding = false
 
@@ -69,6 +72,28 @@ end
 ]]
 function TaskController.GetLatestBar(): Types.TimingBarPayload?
 	return latestBar
+end
+
+--[[
+	IS THERE A BAR IN FRONT OF THIS PLAYER RIGHT NOW (C27).
+
+	`GetLatestBar` deliberately never clears — the last bar of the round is still cached at the end of
+	it, which is correct for a cache and useless as a question. C27's touch pad needs the question:
+	the STOP button may only exist while there is something to stop, because a button that does
+	nothing on a phone reads as a broken game rather than as a button in the wrong place.
+
+	FRESHNESS RATHER THAN A CLEAR, and the window is `PresenceGraceSeconds` because it is already
+	exactly this quantity. `TaskService` publishes a bar on its own tick to a player whose PRESENCE
+	is current, and presence is what the hold heartbeat maintains — so a bar arrives roughly four
+	times a second for as long as a thumb is down on ACT, and stops arriving when it lifts.
+
+	`os.clock` rather than `tick` or `os.time`: monotonic, sub-millisecond, and unaffected by a
+	client's wall clock. Nothing is sent, nothing is decided — the server re-derives the phase from
+	its own clock on every stop, so a client that answered this wrongly would get the same hit
+	decision either way.
+]]
+function TaskController.IsTimingBarLive(): boolean
+	return latestBar ~= nil and (os.clock() - latestBarAt) <= Config.Tasks.PresenceGraceSeconds
 end
 
 --[[
@@ -283,6 +308,7 @@ end
 function TaskController.Init()
 	latest = nil
 	latestBar = nil
+	latestBarAt = 0
 	taskList = {}
 	holding = false
 end
@@ -316,6 +342,7 @@ function TaskController.Start()
 
 	Remotes.Get("TimingBarChanged").OnClientEvent:Connect(function(payload: Types.TimingBarPayload)
 		latestBar = payload
+		latestBarAt = os.clock()
 
 		if Config.Debug.VerboseLogging then
 			print(`[Task] bar {payload.TaskId} · {payload.Hits}/{payload.HitsRequired} hits`)

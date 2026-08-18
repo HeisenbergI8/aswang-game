@@ -18,6 +18,18 @@ local Types = require(Shared.Types)
 local CONTROLLER_ORDER = {
 	"AudioController",
 	"CameraFXController",
+	--[[
+		C28. Drives `Lighting` from the round clock — Appendix C.3's diegetic countdown. Early in the
+		list because it CAPTURES the place's authored night at Start and lerps away from it: anything
+		that touched Lighting first would be captured as though it were the night.
+	]]
+	"SkyController",
+	--[[
+		C27. §5's light cap, spent. Order is not load-bearing — it discovers its lights by tag and
+		reacts to streaming — but it sits beside the sky because both are the mobile budget: one
+		decides how much light there is, the other how much of it costs frames.
+	]]
+	"PerformanceController",
 	"UIController",
 	"QuickChatController",
 	-- Before InputController, deliberately. The order governs Init/Start rather than requires — the

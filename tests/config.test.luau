@@ -571,6 +571,108 @@ check(
 	`AccuseHalfAngleDegrees={Config.QuickChat.AccuseHalfAngleDegrees}`
 )
 
+--------------------------------------------------------------------------------
+-- The mobile light budget (C27, §5)
+--
+-- §5 calls the mobile budget non-negotiable, and until C27 its numbers were read
+-- by nothing at all. These pin the two relationships that would turn the cap
+-- from a frame-rate rule into a gameplay one.
+--------------------------------------------------------------------------------
+
+--[[
+	THE MAP MAY NOT SPEND THE MONSTER'S SLOT.
+
+	`ReservedGameplayLights` is subtracted from what the scenery culler may light, and those slots
+	belong to the Aswang's eye glow (§4.3's warning) and a salt pouch's (§4.6's counterplay). At or
+	above `MaxVisibleLights` the allowance is zero and the barrio goes fully dark — which does not
+	cost frames, it breaks §5's sightline rule, and total darkness is confusing rather than scary.
+]]
+check(
+	"the map keeps some of the light budget",
+	Config.Performance.ReservedGameplayLights < Config.Performance.MaxVisibleLights,
+	`ReservedGameplayLights={Config.Performance.ReservedGameplayLights}, `
+		.. `MaxVisibleLights={Config.Performance.MaxVisibleLights}`
+)
+
+--[[
+	AND THE CULL IS NOT ITSELF A COST. Lights do not move and a camera does not teleport, so
+	re-deciding faster than the server pushes a snapshot spends frames on an answer that did not
+	change — on the device the whole budget exists to protect.
+]]
+check(
+	"the light cull runs slower than the snapshot it is not driven by",
+	Config.Performance.LightCullIntervalSeconds >= Config.Round.SnapshotInterval,
+	`LightCullIntervalSeconds={Config.Performance.LightCullIntervalSeconds}, `
+		.. `SnapshotInterval={Config.Round.SnapshotInterval}`
+)
+
+--------------------------------------------------------------------------------
+-- The diegetic sunrise (C28, Appendix C.3)
+--
+-- The sky IS the countdown, so these are clock invariants wearing lighting
+-- names. `tests/sky-cycle.test.luau` proves the mapping; these pin the numbers
+-- it is handed.
+--------------------------------------------------------------------------------
+
+--[[
+	THE NIGHT RUNS FORWARDS. Inverted, the sky would DARKEN as the round ran out — a countdown
+	running backwards, and one that no HUD element would contradict because the HUD does not know the
+	sky exists.
+]]
+check(
+	"the night ends later than it starts",
+	Config.Sky.EndClockTime > Config.Sky.StartClockTime,
+	`StartClockTime={Config.Sky.StartClockTime}, EndClockTime={Config.Sky.EndClockTime}`
+)
+
+-- Roblox ClockTime is 0-24. Outside it the sky is undefined rather than clamped.
+check(
+	"both ends of the night are real clock times",
+	Config.Sky.StartClockTime >= 0 and Config.Sky.EndClockTime <= 24,
+	`StartClockTime={Config.Sky.StartClockTime}, EndClockTime={Config.Sky.EndClockTime}`
+)
+
+--[[
+	DAWN LIFTS THE NIGHT RATHER THAN DEEPENING IT. Three multipliers, one direction each: brighter,
+	further, thinner. A sign flip in any of them still typechecks, still tweens smoothly, and gives a
+	round that gets darker as sunrise approaches.
+]]
+check(
+	"dawn is brighter, further-seeing and less foggy than night",
+	Config.Sky.DawnBrightnessMult > 1
+		and Config.Sky.DawnFogEndMult > 1
+		and Config.Sky.DawnAtmosphereDensityMult < 1,
+	`brightness x{Config.Sky.DawnBrightnessMult}, fog x{Config.Sky.DawnFogEndMult}, `
+		.. `atmosphere x{Config.Sky.DawnAtmosphereDensityMult}`
+)
+
+--[[
+	AND IT IS WARM. The night is blue by construction (§5's art direction); a dawn whose red channel
+	did not exceed its blue is moonlight turned up, not morning. Checked on both ambients because
+	they are the two the eye reads as colour rather than as brightness.
+]]
+check(
+	"dawn is warmer than the night it replaces",
+	Config.Sky.DawnAmbientRgb[1] > Config.Sky.DawnAmbientRgb[3]
+		and Config.Sky.DawnOutdoorAmbientRgb[1] > Config.Sky.DawnOutdoorAmbientRgb[3],
+	`ambient={Config.Sky.DawnAmbientRgb[1]}/{Config.Sky.DawnAmbientRgb[3]}, `
+		.. `outdoor={Config.Sky.DawnOutdoorAmbientRgb[1]}/{Config.Sky.DawnOutdoorAmbientRgb[3]}`
+)
+
+--[[
+	THE SKY IS BACK TO NIGHT BEFORE THE NEXT ROUND IS DEALT.
+
+	The restore starts when a round ends and the lobby is `Round.Intermission` long. If the fall took
+	longer, a round would start part-way through the previous night's sunrise and the sky would spend
+	its first minute going the wrong way — the one thing `sky-cycle`'s monotonicity property cannot
+	see, because it holds within a round rather than across two.
+]]
+check(
+	"the sky settles back to night before the next round starts",
+	Config.Sky.RestoreSeconds < Config.Round.Intermission,
+	`RestoreSeconds={Config.Sky.RestoreSeconds}, Intermission={Config.Round.Intermission}`
+)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end

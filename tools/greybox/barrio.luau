@@ -34,6 +34,8 @@
 	  EscapeGate   × 1  GateService.discoverGates     proximity win, Config.Tasks.GateRangeStuds = 6
 	  TrialSpawn   × 1  TrialService.trialSpawn       where a trial player is placed
 	  TrialChase   × 1  TrialService (C22 rig)        where the scripted rig appears
+	  MapLight     ×14  PerformanceController         SCENERY lights only — never a gameplay tell
+	                    12 street lanterns + the trial corner's + the chapel candle glow
 	  TaskPoint    × 2  TrialService.trialPoints      attribute `TrialOnly = true` — see the corner
 
 	`TrialOnly` IS AN EXCLUSION AND IT IS THE ONE CONTRACT HERE THAT FAILS SILENTLY. The trial's two
@@ -257,6 +259,16 @@ end
 	mobile FPS killer. Twelve exist, spread over 360 studs at range 26, so two or three are in view at
 	any time — the cap is met by SPACING rather than by count, which is what lets the sightline rule
 	("you should almost always be able to see *something*") hold at the same time.
+
+	SINCE C27 THE SPACING IS BACKED BY A MECHANISM, and this tag is the whole contract for it.
+	`MapLight` marks a light as SCENERY, which is the client's permission to switch it off:
+	`PerformanceController` keeps the nearest `Config.Performance.MaxVisibleLights` minus the reserved
+	few lit and darkens the rest, per client, by distance from that client's camera.
+
+	WHAT MUST NEVER CARRY THIS TAG is the more important half. The Aswang's eye glow and a salt
+	pouch's glow are TELLS — §4.3's warning and §4.6's counterplay — and they are protected by never
+	being tagged rather than by a rule somebody could relax. Tag one of them here and the culler will
+	obediently switch off the only warning a survivor gets.
 ]]
 local function lantern(name: string, cx: number, cz: number, parent: Instance)
 	local post = box(`{name}_Post`, cx, 4, cz, 1, 8, 1, WOOD, parent)
@@ -273,6 +285,8 @@ local function lantern(name: string, cx: number, cz: number, parent: Instance)
 	light.Range = 26
 	light.Shadows = false
 	light.Parent = head
+
+	CollectionService:AddTag(light, "MapLight")
 end
 
 --[[
@@ -523,6 +537,8 @@ chapelLight.Brightness = 3
 chapelLight.Range = 34
 chapelLight.Shadows = false
 chapelLight.Parent = candles
+
+CollectionService:AddTag(chapelLight, "MapLight")
 
 --[[
 	SEVEN BAHAY KUBO, THREE ENTERABLE — §5 asks for 6–8 with at least 3 interiors.
@@ -810,6 +826,17 @@ if not ok then
 	)
 end
 
+--[[
+	THESE VALUES ARE THE NIGHT, AND SINCE C28 THEY ARE ALSO AN INPUT.
+
+	`SkyController` reads Brightness, FogEnd, Ambient, OutdoorAmbient and the Atmosphere's Density off
+	the place once at startup and treats them as the baseline it lerps toward dawn and back — so this
+	block is still the only place the barrio's night is authored, and C30's art pass retunes it here
+	without touching `Config` or any controller.
+
+	`ClockTime` is the exception: it is the one term the ROUND owns (`Config.Sky.StartClockTime`), and
+	the 0 below is what a map author sees in Studio rather than what a player sees in a lobby.
+]]
 Lighting.ClockTime = 0
 Lighting.Brightness = 1
 Lighting.Ambient = Color3.fromRGB(14, 16, 26)
@@ -832,9 +859,26 @@ atmosphere.Glare = 0.1
 atmosphere.Haze = 2.2
 atmosphere.Parent = Lighting
 
--- §5: "Enable StreamingEnabled" — and the build plan adds "from the start, retrofitting it later is
--- miserable". It is set here rather than by hand so a fresh place file gets it by running this file.
+--[[
+	§5: "Enable StreamingEnabled" — and the build plan adds "from the start, retrofitting it later is
+	miserable". Set here rather than by hand so a fresh place file gets it by running this file.
+
+	C27 TUNES THE RADII, and they live here rather than in `Config` for the same reason `SCALE` does:
+	they are properties of the PLACE, saved into the place file, and they are meaningless without the
+	map they are measured against. A streaming radius is a distance in this barrio, so a resize moves
+	it — hence both are written as multiples of the fog distance the map already sets, which is
+	already scaled.
+
+	TARGET is what a client tries to have loaded: matched to the fog wall, because a part that appears
+	inside visible range is a part a player watches pop in, and one that never loads past the fog is
+	free. MIN is the guaranteed floor a client always holds regardless of memory pressure — a chase
+	crossing an unloaded street is the failure this prevents, and §5's worst case is exactly a chase.
+
+	`StreamingEnabled` itself can only be set in Studio, which is why this file is where it happens.
+]]
 workspace.StreamingEnabled = true
+workspace.StreamingTargetRadius = math.floor(220 * SCALE)
+workspace.StreamingMinRadius = math.floor(110 * SCALE)
 
 --------------------------------------------------------------------------------
 -- THE RECEIPT
