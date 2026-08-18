@@ -135,9 +135,21 @@ local function buildWheel()
 		label.TextSize = LAYOUT.SectorTextSize
 		label.Font = Enum.Font.GothamBold
 		label.TextWrapped = true
-		-- The template, with the name slot left as-is: the wheel shows what the phrase MEANS, and
-		-- the actual target is not known until the server picks one.
-		label.Text = phrase.Text
+		--[[
+			THE WHEEL SHOWS A READABLE FORM; THE SENT MESSAGE SHOWS THE RESOLVED NAME.
+
+			`phrase.Text` is a template, and for ACCUSE it is literally "It's {name}!" — correct, since
+			the target is not known until the server picks one, and, sitting among seven phrases of
+			plain English, it reads to a player as unfinished code. A playtest caught it.
+
+			Substituted at the point of DISPLAY rather than by giving the phrase table a second string
+			field: the table stays one source of truth, `renderMessage` still fills in the real name
+			the server chose, and the test asserting "{name} appears iff the phrase needs a target" is
+			untouched.
+		]]
+		label.Text = string.gsub(phrase.Text, "{name}", function()
+			return "them"
+		end)
 		label.Parent = frame
 
 		sectorButtons[phrase.Order] = label
