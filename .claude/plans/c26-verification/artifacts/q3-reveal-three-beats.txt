@@ -1,0 +1,60 @@
+Live execute_luau poll (Client datamodel) of the EndScreen's three animated elements,
+captured with a self-contained wait-for-instance + sample loop (no MCP round-trip latency
+between samples, so this fully captures the whole sequence from the moment EndScreen is
+parented). Round: solo round, no Aswang drawn (ForceAswangWhenSolo=false, so a lone
+candidate is always a survivor by construction) -> "SUNRISE — NOBODY FINISHED" / "The
+aswang was nobody — the round was aborted". Content differs from a real reveal (no name),
+but the ANIMATION sequence exercised is identical code (`showEndScreen`, `riseIn`, the
+same MOTION constants) regardless of which strings render.
+
+Path: Players.LocalPlayer.PlayerGui.EndScreen.<Frame backdrop>.Result / .Reveal
+
+EndScreen appeared at t=39.097 (script-local clock)
+
+BEAT 1 — the dim + the RESULT line rising and fading in (simultaneous, ~0.5s):
+t=39.097 backdropTrans=1.000 resultTrans=1.000 resultYoff=-44.00 revealTrans=1.000 revealYoff=36.00
+t=39.148 backdropTrans=0.782 resultTrans=0.753 resultYoff=-50.00 revealTrans=1.000 revealYoff=36.00
+t=39.196 backdropTrans=0.591 resultTrans=0.536 resultYoff=-55.00 revealTrans=1.000 revealYoff=36.00
+t=39.296 backdropTrans=0.438 resultTrans=0.362 resultYoff=-59.00 revealTrans=1.000 revealYoff=36.00
+t=39.396 backdropTrans=0.219 resultTrans=0.112 resultYoff=-65.00 revealTrans=1.000 revealYoff=36.00
+t=39.547 backdropTrans=0.124 resultTrans=0.005 resultYoff=-68.00 revealTrans=1.000 revealYoff=36.00
+t=39.596 backdropTrans=0.120 resultTrans=0.000 resultYoff=-68.00 revealTrans=1.000 revealYoff=36.00   <- both settle together
+Backdrop 1.000 -> 0.120 matches LAYOUT.RevealScrim=0.12 over MOTION.RevealFade=0.5s.
+Result (the RESULT line) fades 1.000->0.000 transparency while rising Yoff -44 -> -68
+(RevealRise=24 studs of travel), settling at the exact same moment as the backdrop.
+The REVEAL line (the name/aswang line) is untouched throughout: transparency pinned at
+1.000, Yoff pinned at 36 — fully hidden, not yet started.
+
+BEAT 2 — the held pause, nothing moving:
+t=39.596 through t=40.696 (11 samples, every ~0.05s): backdropTrans=0.120 (unchanged),
+resultTrans=0.000 / resultYoff=-68.00 (unchanged, RESULT fully settled and visible),
+revealTrans=1.000 / revealYoff=36.00 (unchanged, REVEAL still fully hidden).
+Hold length measured: 40.747 - 39.596 = 1.151s, matching MOTION.RevealHold = 1.1
+(riseIn's delaySeconds for the Reveal label is MOTION.RevealFade + MOTION.RevealHold =
+0.5 + 1.1 = 1.6s after showEndScreen(), and title itself took ~0.5s to fade in, so the
+gap between "title settled" and "name starts" is ~1.1s as designed).
+
+BEAT 3 — the NAME (Reveal line) rising in, ~0.45s:
+t=40.747 backdropTrans=0.120 resultTrans=0.000 revealTrans=0.748 revealYoff=30.00
+t=40.796 revealTrans=0.536 revealYoff=25.00
+t=40.896 revealTrans=0.359 revealYoff=21.00
+t=40.946 revealTrans=0.216 revealYoff=17.00
+t=41.096 revealTrans=0.040 revealYoff=13.00
+t=41.197 revealTrans=0.000 revealYoff=12.00   <- settled
+Reveal fades 1.000->0.000 transparency while rising Yoff 36 -> 12 (RevealRise=24 studs),
+over ~0.45-0.5s, matching MOTION.RevealFade=0.5. Backdrop and Result are unchanged
+throughout this beat (0.120 / 0.000 respectively) — nothing else moves while the name
+lands.
+
+JUDGEMENT (the actual question): the 1.1s hold reads as DELIBERATE DRAMA, not as lag or a
+bug. Reasons, from the data itself rather than impression: (1) the hold is silent and
+perfectly flat — backdrop/result/reveal values do not drift, jitter, or partially update
+during it, which is what a stall or a missed frame would look like; a real hitch would show
+irregular timing or a value stuck mid-transition, not three properties parked at exact
+target values. (2) it starts only AFTER the first beat has visibly finished settling
+(result lands at exactly transparency 0.000 before the hold begins), so it reads as "the
+game paused for you," not "the game is still working on it." (3) its measured length
+(1.151s) matches the authored constant (1.1s) almost exactly, and the second beat begins
+crisply on schedule rather than at an unpredictable moment. A stutter would not reproduce
+the same duration if I re-ran the round, whereas this authored, code-driven hold should —
+and did, structurally, land where MOTION.RevealHold says it should.

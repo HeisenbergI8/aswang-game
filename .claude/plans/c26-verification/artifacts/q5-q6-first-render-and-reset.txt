@@ -1,0 +1,37 @@
+Q5 — NO ANIMATION ON FIRST RENDER
+First screen_capture after joining (Play mode start, first ACTIVE snapshot) showed the HUD
+already fully present in steady state: "UNTIL SUNRISE 0:30" in plain white (not mid-tween),
+"TASKS 0/5" with an empty bar, status panel showing "SURVIVOR / ALIVE salt ~0 / gate shut",
+and the prompt line — nothing caught mid-flight, no residual highlight or pulse. This matches
+the code: `lastRatio`, `lastCompleted` are seeded to -1 and `lastUrgent`, `lastGateOpen` to
+nil specifically so the first render's every branch takes the "assign directly, no tweenTo"
+path (see the `if lastRatio < 0 then fill.Size = ... else tweenTo(...)` shape repeated for
+each animated element in render()). Confirms by source + direct observation; no execute_luau
+counter-evidence found.
+
+Q6 — ROUND RESET STARTS SILENTLY AT 0/N
+Live poll of Fill.Size.X.Scale + Phase.Text across a full round boundary
+(ACTIVE -> ENDING -> INTERMISSION -> STARTING -> ACTIVE), sampled on every change for 60s:
+
+t=0.000 START scale=0.0000 text=TASKS 0/5 phase=UNTIL SUNRISE
+t=30.197 scale=0.0000 text=TASKS 0/5 phase=ENDING
+t=36.231 scale=0.0000 text=TASKS 0/5 phase=INTERMISSION
+t=44.397 scale=0.0000 text=TASKS 0/5 phase=STARTING
+t=48.566 scale=0.0000 text=TASKS 0/5 phase=UNTIL SUNRISE
+
+This particular cycle never had a completed task (solo round, aborted — no Aswang drawn),
+so it proves the negative (no spurious animation fires across a reset when the bar was
+already empty) but not the positive case of a FULL bar draining. For the positive case I
+rely on: (a) console evidence from round #4, where the last logged state before the phase
+left ACTIVE was "tasks 1/5" and the very next Client Snapshot line (INTERMISSION, same
+round) already read "tasks 0/5" with nothing logged in between; and (b) the source itself —
+UIController.Start()'s PhaseChanged handler resets `lastRatio = -1` (and lastCompleted,
+lastGateOpen) as soon as the phase becomes anything other than Active, which fires on the
+ACTIVE->ENDING transition, i.e. before the new round's first snapshot ever arrives. Because
+`lastRatio` is negative when the next snapshot's ratio is computed, render() takes the
+direct-assign branch (`if lastRatio < 0 then fill.Size = ... `) rather than tweenTo, so the
+reset itself is a silent snap-to-empty during Intermission/Starting, off-screen before the
+player is even looking at an active bar again — structurally prevents the "drain from full"
+replay the question is checking for. I was not able to force a >0-task round to end in the
+time available (solo rounds keep drawing no Aswang and aborting; see Not Verified) to
+capture the positive case directly on the live Fill instance the way Q1-Q3 were captured.

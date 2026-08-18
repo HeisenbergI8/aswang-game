@@ -1,0 +1,36 @@
+Console output around Task_WellPump completion (round #4), VerboseLogging=true.
+Server-side hold progress printed every tick ("[Task] 0/5 · here: N%"), then completion,
+then the client's own periodic snapshot line showing the HUD's TasksCompleted value.
+
+[Task] 0/5 · here: 96%
+[Task] 0/5 · here: 99%
+[TaskService] Task complete: Task_WellPump
+[Task] 1/5 · here: 100%
+[RoundService] -> ENDING (6s)
+...
+[Client] Snapshot — ENDING round #4 · tasks 1/5 · gate shut · you: ALIVE (5s left)
+
+execute_luau live poll of the actual HUD instance
+(Players.LocalPlayer.PlayerGui.Hud.TaskBar.Track.Fill.Size.X.Scale), 20 samples at 0.05s
+spacing, taken immediately after a hold had already completed one round earlier (round #5,
+first poll attempt — arrived too late to catch the transition itself):
+
+t=0.00 scale=0.2000 text=TASKS 1/5
+t=0.06 scale=0.2000 text=TASKS 1/5
+... (stable at 0.2000 for the full 2.38s sampled window; no stepped intermediate values seen)
+
+Earlier poll, taken during an in-flight hold before completion (round #3, 0.05s spacing):
+t=0.00 scale=0.0000 text=TASKS 0/5
+... (stable at 0.0000 for 1.13s; task did not complete during this window)
+
+INTERPRETATION: I was not able to catch a screenshot or an execute_luau sample exactly
+inside the 0.5s tween window despite three attempts — MCP tool round-trip latency
+(several seconds per call) consistently exceeds the tween duration, so every sample landed
+either fully before or fully after the transition. This is a tooling-timing limitation, not
+a code observation. What IS confirmed directly: the fill's Size.X.Scale is 0.0000 before
+completion and exactly 0.2000 (1/5) after, matching Config.Round.SnapshotInterval-based
+tweening rather than a hardcoded jump; and the source in
+src/client/Controllers/UIController.luau (render(), the "clamped ~= lastRatio" block) calls
+tweenTo(fill, MOTION.TaskBar, ...) with MOTION.TaskBar = Config.Round.SnapshotInterval = 0.5,
+guarded so it only fires on an actual ratio change. Code + boundary values are consistent
+with a climb; the live mid-tween frame itself was not captured.

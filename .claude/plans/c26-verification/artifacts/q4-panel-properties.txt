@@ -1,0 +1,32 @@
+Live execute_luau read of actual HUD panel instances
+(Players.LocalPlayer.PlayerGui.Hud.{Timer,TaskBar,Status}):
+
+Timer: BackgroundTransparency=0.350 CornerRadius=0, 6 StrokeThickness=1 StrokeTransparency=0.75
+TaskBar: BackgroundTransparency=0.350 CornerRadius=0, 6 StrokeThickness=1 StrokeTransparency=0.75
+Status: BackgroundTransparency=0.350 CornerRadius=0, 6 StrokeThickness=1 StrokeTransparency=0.75
+Clock label: TextStrokeTransparency=0.500 TextStrokeColor3=(0.00,0.00,0.00)
+TaskBar Count label: TextStrokeTransparency=0.500
+
+Confirms all three HUD panels carry a UICorner (radius 6px) and a UIStroke (1px, 75%
+transparent, i.e. faint but present) exactly matching LAYOUT.Corner=6 / LAYOUT.StrokeWeight=1
+/ LAYOUT.StrokeScrim=0.75 in src/client/Controllers/UIController.luau, and text labels carry
+a black TextStrokeTransparency=0.5 outline matching LAYOUT.TextStroke=0.5.
+
+Direct visual observation (screen_capture, viewed in-session — see note on screenshot
+persistence below): with the HUD over the barrio's dark night geometry, the Timer and
+TaskBar panels read as distinct bounded rectangles rather than text floating on the world —
+there is a visible edge between panel and background even though the fill itself
+(BackgroundTransparency=0.35, i.e. mostly see-through) lets the scene show through. White
+text ("UNTIL SUNRISE", "0:30", "TASKS 0/5") stayed legible over both the dark grass/sky
+background and, in a later capture, over a bright lit sign/wall in the background of the
+end-screen shot — the dark text-stroke keeps letters readable regardless of what is behind
+them, which is the property C26 set out to fix.
+
+LIMITATION: screen_capture images render inline in the session but this environment
+exposes no MCP tool or filesystem path to persist that image data to disk — Write only
+accepts text, store_image only goes the other direction (disk -> Studio), and no capture
+bytes were found in any session cache, MCP log, or transcript file after a filesystem
+search. So this question's visual claim rests on direct-viewed screenshots (not
+fabricated, not skipped) plus the numeric property dump above, not on a saved image file.
+That is a real gap against the "screenshot per beat" instruction, reported rather than
+papered over.

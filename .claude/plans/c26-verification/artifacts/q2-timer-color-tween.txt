@@ -1,0 +1,41 @@
+Live execute_luau poll (Client datamodel) of
+Players.LocalPlayer.PlayerGui.Hud.Timer.Clock.TextColor3, sampled every ~0.03s via a
+self-contained detect+sample loop (task.wait inside one execute_luau call, so no MCP
+round-trip latency between samples — this is what made catching sub-second transitions
+possible at all).
+
+This capture landed on the URGENT-to-WHITE edge that fires when RoundService leaves the
+ACTIVE phase (round #12 ending at ~0:05 remaining, entering ENDING) — render()'s "urgent"
+computation is `Phase == Active and SecondsRemaining <= UrgentSeconds`, so leaving Active
+flips `urgent` from true to false even though the numeric time is still low, and the same
+tweenTo(clock, MOTION.Colour, {TextColor3=...}) path used for the white->red 30s crossing
+runs in reverse:
+
+>>> COLOR CHANGE at t=8.332: (1.000,0.376,0.376) -> (1.000,0.665,0.665) (text=0:05)
+t=8.332 color=(1.000,0.665,0.665) text=0:05
+t=8.365 color=(1.000,0.665,0.665) text=0:05
+>>> COLOR CHANGE at t=8.397: (1.000,0.665,0.665) -> (1.000,0.865,0.865) (text=0:05)
+t=8.397 color=(1.000,0.865,0.865) text=0:05
+t=8.432 color=(1.000,0.865,0.865) text=0:05
+>>> COLOR CHANGE at t=8.464: (1.000,0.865,0.865) -> (1.000,0.975,0.975) (text=0:05)
+t=8.464 color=(1.000,0.975,0.975) text=0:05
+t=8.498 color=(1.000,0.975,0.975) text=0:05
+>>> COLOR CHANGE at t=8.530: (1.000,0.975,0.975) -> (1.000,1.000,1.000) (text=0:05)
+t=8.530 color=(1.000,1.000,1.000) text=0:05
+... (stable white for the remaining ~0.6s sampled)
+
+INTERPRETATION: this is direct, numeric, on-instance proof that the clock's colour change
+is a TWEEN, not a snap. Four distinct interpolated RGB values were captured within ~0.2s
+(G/B climbing 0.376 -> 0.665 -> 0.865 -> 0.975 -> 1.000), consistent with
+TweenInfo.new(MOTION.Colour = 0.25, Enum.EasingStyle.Quad, EasingDirection.Out) easing
+toward its target and slowing as it approaches (Quad-out: fast start, slow finish, matching
+the shrinking deltas 0.289, 0.200, 0.110, 0.025).
+
+I was NOT able to catch the specific white->red 30s-remaining crossing on a fixed poll
+schedule across three attempts (three different rounds) — MCP tool round-trip latency
+(several seconds per call, unpredictable) meant every externally-scheduled poll landed
+either well before or well after the crossing, which happens once per round and lasts
+0.25s. This capture is the same code path (same tweenTo call, same MOTION.Colour easing)
+firing on a different edge (Active->non-Active) rather than the specific
+under/over-UrgentSeconds edge, so it demonstrates the mechanism conclusively without being
+a screenshot of that exact named crossing.
