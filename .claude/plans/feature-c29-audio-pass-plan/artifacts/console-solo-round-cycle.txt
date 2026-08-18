@@ -1,0 +1,149 @@
+C29 Audio Pass — Phase 3 verification
+Captured from Roblox Studio console (studio id 8f3a2aed-d946-457f-a90d-f8895192fe90, aswang.rbxl),
+fresh Play session, 11 solo rounds observed at Config.Round.Duration=20/Intermission=8/EndScreen=6,
+Debug.SoloTesting=true, Debug.VerboseLogging=true, Audio.OneShotMinSeconds/MaxSeconds=8/12.
+
+Covers rounds #0 (initial LOBBY) through #11 STARTING/ACTIVE. Demonstrates:
+  - CUE_BED_LOBBY on every LOBBY/INTERMISSION entry
+  - CUE_BED_NIGHT on every STARTING entry
+  - CUE_BED_DAWN on every ENDING entry
+  - CUE_WIND / CUE_DOGS firing repeatedly across STARTING/ACTIVE/INTERMISSION (lowered
+    OneShotMin/MaxSeconds = 8-12s makes both audible within the 20s round)
+  - CUE_SUNRISE firing exactly ONCE per round (one "cue CUE_SUNRISE — dawn" line per round number,
+    never a second one for the same round)
+  - "Failed to load sound rbxassetid://TEST_MARKER: Request asset was not found" — this is the
+    verifier's OWN manual test marker (see footstep investigation below), not a defect. No load
+    errors were observed for any real CUE_* asset id across the whole capture.
+  - Every player-facing RoleAssigned this session resolved to SURVIVOR ("You are a survivor.")
+    because RoleDraw.draw() clamps picks to `max(#candidates - 1, 0)` — with exactly 1 candidate
+    that is 0, so a lone player without Debug.ForceAswangWhenSolo=true can NEVER draw Aswang. This
+    is by design (RoleDraw.luau:107-108, Config.luau:858-863) but it means CUE_TRANSFORM and
+    CUE_HEARTBEAT could not be exercised behaviourally in this session. See verification.md.
+
+--- RAW CONSOLE (rounds #0-#11) ---
+
+[TaskService] Pool OK — 12 task points.
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 16 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[GhostService] Chat wall attached over 3 channel(s).
+[Client] Ready. 11 controllers loaded.
+[AudioController] cue CUE_BED_LOBBY — bed
+[Client] Snapshot — INTERMISSION round #0 · tasks 0/5 · gate shut · you: LOBBY (7s left)
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[TaskService] Pool OK — 12 task points.
+[TaskService] Round tasks: Task_KuboSEStore, Task_PlazaNotice, Task_ChapelBell, Task_RiceSluice, Task_RiceDrier
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[Task] list:
+  · Task_KuboSEStore — bring the item
+  · Task_PlazaNotice — hold E
+  · Task_ChapelBell — hold E
+  · Task_RiceSluice — time it — R
+  · Task_RiceDrier — needs 2 people
+[AudioController] cue CUE_DOGS — ambient one-shot in STARTING
+[RoundService] -> ACTIVE (20s)
+[TaskService] C20 first objective for 11461085874: Task_PlazaNotice (44 studs)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · you: ALIVE (19s left)
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #1 · tasks 0/5 · gate shut · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #1 · tasks 0/5 · gate shut · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[AudioController] cue CUE_WIND — ambient one-shot in INTERMISSION
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[TaskService] Pool OK — 12 task points.
+[TaskService] Round tasks: Task_KuboNWHearth, Task_WellPump, Task_ChapelAltar, Task_AlleyGenset, Task_KuboNELoom
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #2 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[Task] list:
+  · Task_KuboNWHearth — bring the item
+  · Task_WellPump — hold E
+  · Task_ChapelAltar — time it — R
+  · Task_AlleyGenset — time it — R
+  · Task_KuboNELoom — hold E
+[AudioController] cue CUE_WIND — ambient one-shot in STARTING
+[RoundService] -> ACTIVE (20s)
+[TaskService] C20 first objective for 11461085874: Task_WellPump (112 studs)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #2 · tasks 0/5 · gate shut · you: ALIVE (19s left)
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_WIND — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #2 · tasks 0/5 · gate shut · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #2 · tasks 0/5 · gate shut · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[AudioController] cue CUE_WIND — ambient one-shot in INTERMISSION
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+...
+[TaskService] Round tasks: Task_KuboNELoom, Task_ChapelBell, Task_WellPump, Task_RingCistern, Task_PlazaNotice
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #10 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[Task] list:
+  · Task_KuboNELoom — hold E
+  · Task_ChapelBell — hold E
+  · Task_WellPump — hold E
+  · Task_RingCistern — hold E
+  · Task_PlazaNotice — hold E
+Failed to load sound rbxassetid://TEST_MARKER: Request asset was not found
+[RoundService] -> ACTIVE (20s)
+[TaskService] C20 first objective for 11461085874: Task_PlazaNotice (41 studs)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #10 · tasks 0/5 · gate shut · you: ALIVE (19s left)
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #10 · tasks 0/5 · gate shut · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #10 · tasks 0/5 · gate shut · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[AudioController] cue CUE_WIND — ambient one-shot in INTERMISSION
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[TaskService] Pool OK — 12 task points.
+[TaskService] Round tasks: Task_PlazaNotice, Task_RingCistern, Task_RiceSluice, Task_PlazaCart, Task_RiceDrier
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #11 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[Task] list:
+  · Task_PlazaNotice — hold E
+  · Task_RingCistern — hold E
+  · Task_RiceSluice — time it — R
+  · Task_PlazaCart — needs 2 people
+  · Task_RiceDrier — needs 2 people
+[RoundService] -> ACTIVE (20s)
+[TaskService] C20 first objective for 11461085874: Task_PlazaNotice (41 studs)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #11 · tasks 0/5 · gate shut · you: ALIVE (19s left)
+[AudioController] cue CUE_WIND — ambient one-shot in ACTIVE

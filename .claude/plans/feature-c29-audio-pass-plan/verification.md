@@ -1,0 +1,90 @@
+# Verification: C29 — Audio Pass, Phase 3 (event cues: stinger, heartbeat, gate, sunrise)
+
+**Date:** 2026-08-18
+**Scope:** `.claude/plans/feature-c29-audio-pass-plan/`, Phase 3 only. Files: `src/client/Controllers/AudioController.luau`, `src/shared/pure/AudioCues.luau`, the `Audio` block in `src/shared/Config.luau`. No server file changed.
+**Rojo serving:** yes — `ReplicatedStorage.Shared` present with `Config`, `Remotes`, `Enums`, `Types`, `pure` (20 modules). See the trap noted below, which this was not.
+**Studio reachable:** yes — studio id `8f3a2aed-d946-457f-a90d-f8895192fe90`, place `aswang.rbxl`.
+**SoloTesting:** on — I did not change it or any of the seven debug values. Confirmed still present via `git diff --stat src/shared/Config.luau` (108 insertions / 5 deletions, unchanged by me) for the main thread to revert.
+
+## A real trap caught before it produced a false result
+
+Studio was already in Play mode when I attached, mid-way through **round #101** of a session that had apparently been running unattended. I read `ReplicatedStorage.Shared.Config` from the **Client** datamodel and got `Config.Audio == nil` — the live client's already-`require`'d copy of `Config` predated the `Audio` block existing on disk entirely, so `AudioController` had been running for 100+ rounds throwing away silently (its `Config.Audio.Assets` reads would error, and — more likely, given the total absence of any `[AudioController]` line or Lua error in that whole log — the controller had simply never been (re)started against current code). I confirmed **Edit-mode** `Config` was correct (`Config.Audio` populated, all seven debug values exactly as briefed: `SoloTesting=true`, `VerboseLogging=true`, `Round.Duration=20`, `Intermission=8`, `EndScreen=6`, `Audio.OneShotMinSeconds=8`, `OneShotMaxSeconds=12`), so this was a **stale Play session**, not a Rojo sync failure. I stopped Play and started a fresh session; every result below is from that fresh session. Anyone reusing a long-lived Studio Play session for this kind of check should treat a `nil` where a field should exist as a signal to restart Play, not as a code bug.
+
+## Results
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| analyze | PASS | `npm run verify` → `- analyze: ok`, 0 errors/warnings/parse errors |
+| lint + format | PASS | `npm run verify` chain reached `check:remotes` without stopping, so `lint` and `fmt:check` passed silently |
+| repo checks | PASS (5/5), plus the intentional debug stop | `remotes: ok`, `secrecy: ok`, `config: ok`, `scope: ok`, `ratelimit: ok`; chain then correctly `FAIL`s at `check:debug` on exactly the two expected findings (`Debug.SoloTesting`, `Debug.VerboseLogging`) — the main thread's debug values working as designed, not a defect |
+| unit (Lune) | 32/33 files, expected | `npm run test:unit` → `AudioCues 30/30 checks passed`; overall `1/33 file(s) failed` = `tests/config.test.luau`, with **exactly** the two failures the brief predicted ("solo testing is off", "a round is long enough to actually be played") and no others |
+| behavioural | PASS (bed/wind/dogs/sunrise), NOT VERIFIED (transform/heartbeat/gate) | `artifacts/console-solo-round-cycle.txt`, `artifacts/footstep-retarget-evidence.txt` — see below |
+
+## Behavioural findings, one per brief question
+
+**1. `CUE_BED_*` at each phase change?** Yes, every time, across 11 consecutive rounds with no misses: `CUE_BED_LOBBY` on every `INTERMISSION`/initial-`LOBBY` entry, `CUE_BED_NIGHT` on every `STARTING` entry, `CUE_BED_DAWN` on every `ENDING` entry. `artifacts/console-solo-round-cycle.txt`.
+
+**2. Transform → `CUE_TRANSFORM` then `CUE_HEARTBEAT`; revert → `CUE_HEARTBEAT — stopped on <name>`?** **NOT VERIFIED — blocked by role assignment, not by this code.** Every `RoleAssigned` this session resolved to `SURVIVOR` (confirmed both by listening on the `RoleAssigned` remote directly, `{"Role":"SURVIVOR"}`, and visually — the round-start screen literally reads "You are a survivor. Finish five tasks and escape."). I traced why: `RoleDraw.draw` (`src/server/pure/RoleDraw.luau:107-108`) computes `picks = math.clamp(aswangCount, 0, math.max(#candidates - 1, 0))` — "never draw every candidate as the Aswang: a round with no survivors is over before it starts." With exactly 1 solo candidate, `#candidates - 1 = 0`, so **zero** Aswangs are ever drawn. `Config.Debug.ForceAswangWhenSolo` exists precisely to override this (`Config.luau:858-863`: "a lone player is otherwise ALWAYS a survivor by construction") but is pinned `false` and was not among the seven values set for this run. I pressed `T` (the bound transform key, `InputController.luau:359`) during `ACTIVE` and confirmed via `UIController.GetMyRole()` and the snapshot's `YourRole` that the client had no Aswang role to act on — the client-side gate at `InputController.luau:60-70` correctly refused to fire `RequestTransform`, so this is not a bug, just an unreachable precondition this session. **To verify this: rerun with `Config.Debug.ForceAswangWhenSolo = true` added to the debug set.**
+
+**3. `CUE_GATE_OPEN` exactly once?** **NOT RUN.** The gate opens only at 5/5 tasks complete; several of each round's randomly-selected 5 tasks require 2 people (e.g. `Task_RiceDrier`, `Task_PlazaCart`), which a solo player cannot complete regardless of time, and even an all-solo-completable set is very unlikely to finish within the 20s `Duration` given task travel distances observed (41-184 studs between objectives). I did not attempt this — the tool-call cost of actually walking+holding-E through 5 tasks solo, repeated across enough rounds to land a no-2-person-task set, was not a good trade against the code-review confidence available: `onGateChanged` (`AudioController.luau:521-533`) is a plain boolean edge-detector (`if open == gateWasOpen then return end`), structurally identical to the sunrise fire-once guard I *did* confirm behaviourally (see Q4). I did confirm every round's console showed `gate shut` throughout, consistent with the gate never opening, so no false-positive fire occurred either. **To verify this: either a much longer `Round.Duration`, or drive it as a real multi-player playtest — see CLAUDE.md's note that gate-adjacent testing belongs to the M5 human gate.**
+
+**4. `CUE_SUNRISE` exactly once per round?** **Confirmed, PASS.** Exactly one `cue CUE_SUNRISE — dawn` line per round number across all 11 rounds captured (round #1 through #11), never a second one for the same round despite the snapshot arriving repeatedly per round. `artifacts/console-solo-round-cycle.txt`.
+
+**5. Does any `AswangHeartbeat` survive the round?** **NOT VERIFIED — same blocker as Q2.** No transform ever occurred this session, so there was nothing to leak. I did check `workspace` after several rounds via `search_game_tree` with `keywords: "Heartbeat,AswangTransformStinger"` and found nothing — consistent with "never created" rather than "created and cleaned up," so this does not answer the actual question the brief calls out as most important. This is the single most consequential thing left unverified: the code review of the three stop conditions (revert broadcast, phase-leaves-ACTIVE, hard timeout at `MaxTransformTime + RevertTime`) and the collect-then-clear pattern in `stopAllHeartbeats` (`AudioController.luau:456-466`, explicitly written to avoid mutating `heartbeats` while iterating it) both read correctly, but reading correctly is not the same as a live server field, and this is exactly the class of bug (C04's revert regression) the plan calls out by name. **Needs `Debug.ForceAswangWhenSolo = true` to actually exercise.**
+
+**6. Do `CUE_WIND` / `CUE_DOGS` fire at all?** Yes, both, repeatedly, well within the lowered 8-12s window — both appear multiple times per round across `STARTING`, `ACTIVE`, and `INTERMISSION`. `artifacts/console-solo-round-cycle.txt`.
+
+## An issue found outside the brief's six questions, while investigating the footstep check
+
+**The footstep retarget (`applyFootsteps`, `AudioController.luau:276-299`) appears to never take effect**, on the one character tested. `HumanoidRootPart.Running` **is** a `Sound` by default, confirming the brief's open question — but its `SoundId`/`Volume` stayed at Roblox's stock defaults (`rbxasset://sounds/action_footsteps_plastic.mp3`, volume `0.65`) rather than `Config.Audio.Assets.CUE_FOOTSTEP` / `Config.Audio.FootstepVolume` (`0.4`), both on the character that had been alive across several rounds *and* on a character forced through a fresh `player:LoadCharacter()` respawn plus a 1.5s settle. I ruled out "something reverts it afterward" by manually writing the Sound's properties and confirming they held for 3s unmolested — so the explanation is that `applyFootsteps` itself never successfully retargets, most plausibly because `root:FindFirstChild("Running")` returns `nil` at the moment `CharacterAdded` fires (Roblox attaches the default character sounds asynchronously, after the Model itself exists) and there is no retry — `applyFootsteps` returns silently with no log line in either branch, so nothing in the console distinguishes "ran and succeeded" from "no-opped." Full transcript, including the exact `execute_luau` calls and results: `artifacts/footstep-retarget-evidence.txt`.
+
+- **New or pre-existing:** New to this session's testing — C29 introduced `applyFootsteps`/`CUE_FOOTSTEP` entirely; there is no prior behaviour to compare against.
+- **Reproduction:** In a live Play session, `HumanoidRootPart:FindFirstChild("Running").SoundId` reads the Roblox default rather than `rbxassetid://132221529613537`, both immediately after join and after a forced respawn + 1.5s.
+- **Observed:** `{"soundIdAfter1.5s":"rbxasset://sounds/action_footsteps_plastic.mp3","volume":0.6499999761581421,"matchesConfig":false}`
+- **Expected:** `SoundId = "rbxassetid://132221529613537"`, `Volume = 0.4`, per `Config.Audio.Assets.CUE_FOOTSTEP` / `Config.Audio.FootstepVolume`.
+- **Confidence:** medium. Single character, single session — I did not instrument `applyFootsteps` itself (I can't; edits to `src/` are refused), so I cannot rule out some other explanation I didn't think to test, but the "manual write persists 3s unmolested" result does rule out the most likely alternative (an engine or other-script overwrite arriving after `applyFootsteps` runs).
+
+## Asset loading
+
+No Roblox asset-load error was observed for any real `CUE_*` id across the full session (11 rounds, all ten cue types except transform/heartbeat/gate exercised at least once). The one asset-load error in the console — `Failed to load sound rbxassetid://TEST_MARKER: Request asset was not found` — is my own manual test marker from the footstep investigation, not a real cue.
+
+## Not Verified (as of the 2026-08-18 initial pass — see the 2026-08-18 follow-up below for what closed)
+
+- ~~`CUE_TRANSFORM` / `CUE_HEARTBEAT` firing, and the heartbeat's three stop conditions, including whether any `AswangHeartbeat` instance survives a round.~~ **Closed — see follow-up section below.**
+- **`CUE_GATE_OPEN` firing exactly once.** Needs either a much longer `Round.Duration` (5 tasks, 2 of which may require a second player, cannot be completed solo in 20s) or a real multi-player session. Static/structural comparison to the confirmed-once `CUE_SUNRISE` pattern is reassuring but not proof. **Still not verified** — out of scope for the follow-up per the coordinator's explicit instruction.
+- **Audible confirmation of any cue.** Per the brief, the place is unpublished and this was explicitly out of scope for this pass — logging, not sound, is what was verified.
+- **A revert triggered by a kill** (`commitKill` → `revert(killer)`, `MonsterService.luau:663-687`). Structurally unreachable solo — needs a second player as a valid kill target. See the follow-up section for why the two paths that *were* reachable solo are a reasonable stand-in.
+
+---
+
+# Follow-up verification: transform/heartbeat reachable, footstep fix, gating fixes
+
+**Date:** 2026-08-18 (same day, second Play session, after 5 `AudioController.luau` fixes + 2 `Config.luau` changes landed)
+**Scope:** same Phase 3 files, plus the eighth debug value `Config.Debug.ForceAswangWhenSolo = true` (on top of the original seven — main thread reverts all eight). Re-verifies the two items the first pass left open (`CUE_TRANSFORM`/`CUE_HEARTBEAT`/heartbeat-survival, footstep retarget) plus two named regression checks (stinger still gated correctly, gate-open still gated correctly).
+**Rojo serving:** yes, unchanged.
+**Studio reachable:** yes, same studio id.
+**SoloTesting:** on, plus `ForceAswangWhenSolo` now also on. I changed neither — confirmed via `git diff --stat` showing only the coordinator's edits (`AudioController.luau` +636/-, `Config.luau` +123/-, both larger than the first pass's diff, consistent with the described fixes).
+
+**A second instance of this session's own stale-cache lesson, caught before it mattered:** immediately after starting this follow-up, I re-read `Config` via `execute_luau` on the **Edit** datamodel and got `ForceAswangWhenSolo: false` and no `FootstepWaitSeconds` field — i.e., the *old* Config, despite `rojo serve` confirmed running (`ps aux` showed the process; the Rojo HTTP API on port 34872 answered). This was **not** a sync failure: Edit-mode's Lua VM is not reset by Stop/Start Play (only Play mode gets a fresh VM per session), so a `require()` issued in Edit mode reuses whatever it cached earlier in this same long Studio session, even after the underlying `ModuleScript.Source` has been updated on disk and pushed by Rojo. Re-reading from a **freshly started Play session's Client** datamodel instead showed the correct values immediately (`ForceAswangWhenSolo: true`, `FootstepWaitSeconds: 10`, `HeartbeatFadeSeconds` absent/deleted). Lesson generalizes: in this Studio bridge, trust Play-mode reads over Edit-mode reads for "did my source change take effect," always via a fresh Play session, and treat a long-lived Edit-mode `execute_luau` session as potentially stale.
+
+## Results
+
+| Question | Result | Evidence |
+| --- | --- | --- |
+| 1. Does any `AswangHeartbeat` survive a round? | **No, in both reachable paths.** | `search_game_tree(keywords: "Heartbeat,Stinger", path: "Workspace")` → "No instances found" checked after round #1, round #4 (revert-on-round-end path) and round #6 (revert-on-MaxTransformTime-while-still-ACTIVE path). `artifacts/console-transform-heartbeat-rounds1-6.txt` |
+| 2. `CUE_TRANSFORM` then `CUE_HEARTBEAT` on transform; `CUE_HEARTBEAT — stopped on <name>` on revert? | **Yes, every time (3/3 transforms attempted).** | Rounds #1, #4, #6 all show `cue CUE_TRANSFORM — at Demiurgos_18, 40 studs` immediately followed by `cue CUE_HEARTBEAT — on Demiurgos_18, 28 studs`, and later `cue CUE_HEARTBEAT — stopped on Demiurgos_18` paired with `[Client] revert witnessed (yours)`. `artifacts/console-transform-heartbeat-rounds1-6.txt` |
+| 3. Does the footstep retarget now land? | **Yes.** | Console: `cue CUE_FOOTSTEP — retargeted on Demiurgos_18` (the SUCCESS branch, logged during round #0's LOBBY — well before any transform). Directly confirmed via `execute_luau`: `HumanoidRootPart.Running.SoundId == "rbxassetid://132221529613537"`, `Volume == 0.4000000059604645` — both exactly `Config.Audio.Assets.CUE_FOOTSTEP` / `Config.Audio.FootstepVolume`. Re-checked again after round #6's transform/revert cycle and it still held (not disturbed by an intervening monster cue). |
+| 4. Does the stinger still fire for the transforming player, now that it's gated on `isCuePermitted`? | **Yes, all 3/3 transforms.** | Same `cue CUE_TRANSFORM — at Demiurgos_18, 40 studs` line present every time the player (state `ALIVE`, phase `ACTIVE`) transformed — `isCuePermitted("CUE_TRANSFORM", "ACTIVE", "ALIVE")` evidently still returns `true`, matching `AudioCues.luau:68` (`CUE_TRANSFORM = { STARTING = true, ACTIVE = true }`, and `ALIVE` is not in `OUTSIDE_THE_ROUND`). The gating fix did not break the cue for its own actor. |
+
+**One important nuance on Q1/Q2: two of the three revert triggers named in the brief were reached, not three.** Solo testing has no second player to be a kill target, so `commitKill`'s revert path (`MonsterService.luau:663-687`) is structurally untestable here — same limit already noted for `CUE_GATE_OPEN`. What *was* captured, distinctly:
+
+- **Rounds #1 and #4:** transform landed late in `ACTIVE` (tool round-trip latency between checking phase and pressing `T` made early-`ACTIVE` timing hard to hit reliably — see the console artifact's notes); the round then left `ACTIVE` before the 8s `MaxTransformTime` timer could fire, so `MonsterService.onPhaseChanged` reverted every transformed monster (`MonsterService.luau:924-937`) as part of leaving `ACTIVE`. Heartbeat stopped correctly both times.
+- **Round #6:** transform landed early enough that the `task.delay(Config.Monster.MaxTransformTime, ...)` forced-revert (`MonsterService.luau:526-530`) fired **while the round was still in `ACTIVE`** — the revert and the `CUE_HEARTBEAT — stopped` log both appear *before* `RoundService -> ENDING` in the console, distinguishing it cleanly from the other two rounds. Heartbeat stopped correctly here too, and no stray instance remained.
+
+Both reachable paths call the same `revert()` function under the same `if monster.Announced and character ~= nil` broadcast condition (`MonsterService.luau:435`) that the kill path also uses — the only difference between all three triggers is who calls `revert()`, not what happens afterward or what the client receives. Combined with the two live, distinct captures above, I have high confidence the kill-triggered path behaves identically, though I did not observe it directly.
+
+## Not Verified (after the follow-up)
+
+- **A kill-triggered revert**, specifically — structurally unreachable solo, as above.
+- **`CUE_GATE_OPEN` firing exactly once** — explicitly out of scope for this follow-up per the coordinator's instruction; unchanged from the first pass's "Not Verified."
+- **Audible confirmation of any cue** — unchanged, out of scope for this pass.

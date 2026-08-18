@@ -9,6 +9,7 @@
 ]]
 
 local Config = require("../src/shared/Config")
+local AudioCues = require("../src/shared/pure/AudioCues")
 
 local failures = 0
 local checked = 0
@@ -672,6 +673,131 @@ check(
 	Config.Sky.RestoreSeconds < Config.Round.Intermission,
 	`RestoreSeconds={Config.Sky.RestoreSeconds}, Intermission={Config.Round.Intermission}`
 )
+
+--[[
+	══ AUDIO (C29) ══
+
+	Four relationships, and the reason none of them is a test of a VALUE. "HeartbeatVolume is 0.7" is
+	taste and belongs in a playtest; "the heartbeat cannot out-reach the tell it belongs to" is a
+	relationship whose violation has no symptom at all — the sound simply carries further than §4.3
+	documents and nobody is ever told.
+]]
+
+--[[
+	§4.3 fixes how far a transform is audible, and `Config.Monster.TransformAudioRange` is the number
+	that documents it. The heartbeat is the same event heard continuously, so a heartbeat audible past
+	that range would rewrite the tell without anyone editing the field that records it — the monster
+	would be trackable from outside the distance the design says it can be found at.
+]]
+check(
+	"the heartbeat never carries further than the transform tell",
+	Config.Audio.HeartbeatRange <= Config.Monster.TransformAudioRange,
+	`HeartbeatRange={Config.Audio.HeartbeatRange}, TransformAudioRange={Config.Monster.TransformAudioRange}`
+)
+
+--[[
+	Appendix C.3: the sky IS the round timer, and the sunrise cue marks it landing. At 1.0 the cue
+	would fire as a stamp on the reveal rather than as the thing that announces it, and at 0 it would
+	fire at the top of the round. It has to sit inside the night and near the end of it.
+]]
+check(
+	"the sunrise cue fires inside the round, near its end",
+	Config.Audio.SunriseAtProgress > 0.5 and Config.Audio.SunriseAtProgress < 1,
+	`SunriseAtProgress={Config.Audio.SunriseAtProgress}`
+)
+
+--[[
+	§5's budget. A one-shot is destroyed on a timer rather than on `Sound.Ended`, because A BLANK
+	SoundId NEVER ENDS and every cue would otherwise leak an instance for the whole of development.
+	That timer has to beat the next schedule, or one-shots accumulate one per interval for the length
+	of a round — silently, since each is inaudible until the ids arrive.
+]]
+check(
+	"a one-shot is cleaned up before the next one is scheduled",
+	Config.Audio.CueCleanupSeconds < Config.Audio.OneShotMinSeconds,
+	`CueCleanupSeconds={Config.Audio.CueCleanupSeconds}, OneShotMinSeconds={Config.Audio.OneShotMinSeconds}`
+)
+
+check(
+	"the one-shot interval band is not inverted",
+	Config.Audio.OneShotMinSeconds < Config.Audio.OneShotMaxSeconds,
+	`min={Config.Audio.OneShotMinSeconds}, max={Config.Audio.OneShotMaxSeconds}`
+)
+
+--[[
+	The dawn bed crossfades in when the round ends, and the end screen is all the time it has. A fade
+	longer than `Round.EndScreen` would still be arriving when the screen it belongs to is gone.
+]]
+check(
+	"the dawn bed finishes fading in before the end screen is over",
+	Config.Audio.BedFadeSeconds < Config.Round.EndScreen,
+	`BedFadeSeconds={Config.Audio.BedFadeSeconds}, EndScreen={Config.Round.EndScreen}`
+)
+
+--[[
+	THE ID FORMAT, AND WHY IT IS HERE BEFORE ANY ID EXISTS.
+
+	Empty is the supported shipping state — `AudioController` builds and ranges the Sound either way —
+	so the assertion is "empty OR well-formed", never "present". Without it, C29's sourcing pass would
+	be a step whose only evidence is that somebody typed something into a table: `rbxassetid//123`,
+	a bare `123`, or a Creator Store URL pasted whole are all silent nothings at runtime, and a Sound
+	with a malformed id fails exactly the way a Sound with a blank one does.
+]]
+for cueId, assetId in Config.Audio.Assets do
+	check(
+		`asset id for {cueId} is empty or well-formed`,
+		assetId == "" or string.match(assetId, "^rbxassetid://%d+$") ~= nil,
+		`got "{assetId}"`
+	)
+end
+
+--[[
+	THE TWO TABLES CANNOT DRIFT APART.
+
+	`shared/pure/AudioCues` decides WHICH cue plays WHEN; `Config.Audio.Assets` holds WHAT it sounds
+	like. They are two files a rename touches one of, and the failure is silent in both directions: a
+	cue with a rule and no slot plays nothing forever, and a slot with no rule is a sound nobody can
+	reach. Both directions are checked below, through the module's public API.
+]]
+local PHASES_FOR_AUDIO = { "IDLE", "INTERMISSION", "STARTING", "ACTIVE", "ENDING" }
+
+-- Forward: every bed and one-shot the rule names has somewhere to put its sound.
+for _, phase in PHASES_FOR_AUDIO do
+	local bed = AudioCues.ambienceFor(phase)
+
+	check(`the {phase} bed has an asset slot`, bed ~= nil and Config.Audio.Assets[bed] ~= nil)
+
+	for _, cueId in AudioCues.oneShotsFor(phase) do
+		check(`the {cueId} one-shot has an asset slot`, Config.Audio.Assets[cueId] ~= nil)
+	end
+end
+
+--[[
+	Reverse: every slot is reachable by some rule — a bed, a one-shot, or an event cue permitted in
+	at least one phase. This is the direction that catches a rename inside `AudioCues`, since the
+	orphaned key here stops being known to the module.
+]]
+for cueId in Config.Audio.Assets do
+	local known = false
+
+	for _, phase in PHASES_FOR_AUDIO do
+		if AudioCues.ambienceFor(phase) == cueId then
+			known = true
+		end
+
+		for _, oneShot in AudioCues.oneShotsFor(phase) do
+			if oneShot == cueId then
+				known = true
+			end
+		end
+
+		if AudioCues.isCuePermitted(cueId, phase, "ALIVE") then
+			known = true
+		end
+	end
+
+	check(`the {cueId} slot is reachable by a rule`, known)
+end
 
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)

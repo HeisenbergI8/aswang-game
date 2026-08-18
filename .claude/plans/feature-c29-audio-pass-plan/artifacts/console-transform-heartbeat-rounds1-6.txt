@@ -1,0 +1,152 @@
+C29 Audio Pass — follow-up verification (transform/heartbeat/footstep/gate-gating fixes)
+Captured from Roblox Studio console (studio id 8f3a2aed-d946-457f-a90d-f8895192fe90, aswang.rbxl),
+fresh Play session after the coordinator's 5 AudioController.luau + 2 Config.luau fixes landed, with
+Debug.ForceAswangWhenSolo=true added as an eighth debug value (SoloTesting/VerboseLogging/Round.
+Intermission=8/Duration=20/EndScreen=6/Audio.OneShotMinSeconds=8/OneShotMaxSeconds=12 unchanged).
+
+Covers rounds #0 through #6. Demonstrates, in order of first appearance:
+
+  - "[AudioController] cue CUE_FOOTSTEP — retargeted on Demiurgos_18" during round #0's LOBBY —
+    the rewritten applyFootsteps (task.spawn + WaitForChild(name, FootstepWaitSeconds=10)) now
+    logs its outcome, and took the SUCCESS branch. Confirmed separately via execute_luau that
+    HumanoidRootPart.Running.SoundId == "rbxassetid://132221529613537" and Volume == 0.4 after
+    this — matching Config.Audio.Assets.CUE_FOOTSTEP / Config.Audio.FootstepVolume exactly. The
+    footstep race from the first verification pass is fixed.
+
+  - "[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3)" — every
+    round this session, confirming Debug.ForceAswangWhenSolo=true makes the solo Aswang draw
+    described in RoleDraw.luau:107-108 reachable, unblocking transform/heartbeat testing.
+
+  - ROUND #1 — transform pressed early in ACTIVE, landed late (near the 92% sunrise threshold) due
+    to tool round-trip latency between the phase check and the key press. Revert happened via the
+    round-leaving-ACTIVE path (RoundService -> ENDING, then MonsterService.onPhaseChanged reverts
+    every transformed monster):
+      [Client] TRANSFORM witnessed (yours)
+      [AudioController] cue CUE_TRANSFORM — at Demiurgos_18, 40 studs
+      [AudioController] cue CUE_HEARTBEAT — on Demiurgos_18, 28 studs
+      [AudioController] cue CUE_WIND — ambient one-shot in ACTIVE
+      [AudioController] cue CUE_SUNRISE — dawn
+      [RoundService] -> ENDING (6s)
+      ...
+      [AudioController] cue CUE_BED_DAWN — bed
+      [AudioController] cue CUE_HEARTBEAT — stopped on Demiurgos_18
+      [Client] revert witnessed (yours)
+    workspace search for "Heartbeat"/"Stinger" under Workspace: no matches.
+
+  - ROUNDS #2, #3, #5 — no transform attempted (timing misses / role-forced rounds used to let the
+    clock re-align); bed/wind/dogs/sunrise continued exactly as in the first verification pass.
+
+  - ROUND #4 — same shape as round #1: transform landed late, reverted via the round-leaving-ACTIVE
+    path, heartbeat stopped, no stray instance afterward.
+
+  - ROUND #6 — THE ISOLATING CAPTURE. Transform landed early enough in the 20s ACTIVE window that
+    the forced-revert timer (task.delay(Config.Monster.MaxTransformTime = 8, ...) in
+    MonsterService.luau:526-530) fired and reverted the transform WHILE STILL IN ACTIVE — the revert
+    and the "stopped" log both appear BEFORE "RoundService -> ENDING", not after:
+      [AudioController] cue CUE_WIND — ambient one-shot in ACTIVE
+      [Client] TRANSFORM witnessed (yours)
+      [AudioController] cue CUE_TRANSFORM — at Demiurgos_18, 40 studs
+      [AudioController] cue CUE_HEARTBEAT — on Demiurgos_18, 28 studs
+      [AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+      [Client] revert witnessed (yours)
+      [AudioController] cue CUE_HEARTBEAT — stopped on Demiurgos_18
+      [AudioController] cue CUE_SUNRISE — dawn
+      [RoundService] -> ENDING (6s)
+    This is a DIFFERENT code path from rounds #1/#4 (MonsterService's own MaxTransformTime timer
+    calling revert(), rather than onPhaseChanged reverting every monster on leaving ACTIVE) and it
+    is distinguishable here only by where in the log "-> ENDING" falls relative to the revert.
+    workspace search for "Heartbeat"/"Stinger" under Workspace immediately after: no matches.
+    HumanoidRootPart.Running still read SoundId "rbxassetid://132221529613537", Volume 0.4 —
+    confirming the footstep retarget was not disturbed by an intervening transform/revert cycle.
+
+Not reached this session: a revert triggered by a KILL (commitKill -> revert(killer) in
+MonsterService.luau:663-687+). Solo testing has no second player to be a valid kill target, so this
+path is structurally unreachable without a second client — same class of limit noted for
+CUE_GATE_OPEN in the first verification pass. The revert() function itself, and the broadcast
+condition that drives the client-side stop, are identical for all three trigger sites (kill, forced
+timer, phase-leaving-ACTIVE) — only the caller differs — so the two paths captured live here
+exercise the same client-observable contract the kill path would.
+
+--- RAW CONSOLE (rounds #0-#6, through round #6's ENDING) ---
+
+[TaskService] Pool OK — 12 task points.
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 16 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[GhostService] Chat wall attached over 3 channel(s).
+[Client] Ready. 11 controllers loaded.
+[AudioController] cue CUE_BED_LOBBY — bed
+[Client] Snapshot — INTERMISSION round #0 · tasks 0/5 · gate shut · you: LOBBY (7s left)
+[AudioController] cue CUE_FOOTSTEP — retargeted on Demiurgos_18
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[AudioController] cue CUE_WIND — ambient one-shot in STARTING
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #1 · tasks 0/5 · gate shut · you: ALIVE (19s left)
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[TeachingService] cued 11461085874: CUE_FIRST_TRANSFORM_SEEN
+[Client] TRANSFORM witnessed (yours)
+[AudioController] cue CUE_TRANSFORM — at Demiurgos_18, 40 studs
+[AudioController] cue CUE_HEARTBEAT — on Demiurgos_18, 28 studs
+[AudioController] cue CUE_WIND — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #1 · tasks 0/5 · gate shut · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[AudioController] cue CUE_HEARTBEAT — stopped on Demiurgos_18
+[Client] revert witnessed (yours)
+[RoundService] -> INTERMISSION (8s)
+... (rounds #2, #3, #5 — bed/wind/dogs/sunrise only, no transform, omitted here for length; full
+    detail identical in shape to console-solo-round-cycle.txt from the first pass) ...
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #4 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[AudioController] cue CUE_WIND — ambient one-shot in STARTING
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #4 · tasks 0/5 · gate shut · you: ALIVE (19s left)
+[AudioController] cue CUE_WIND — ambient one-shot in ACTIVE
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[Client] TRANSFORM witnessed (yours)
+[AudioController] cue CUE_TRANSFORM — at Demiurgos_18, 40 studs
+[AudioController] cue CUE_HEARTBEAT — on Demiurgos_18, 28 studs
+[RoundService] -> ENDING (6s)
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #4 · tasks 0/5 · gate shut · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[AudioController] cue CUE_HEARTBEAT — stopped on Demiurgos_18
+[Client] revert witnessed (yours)
+[RoundService] -> INTERMISSION (8s)
+... (round #5 — bed/wind/dogs/sunrise only, no transform, omitted) ...
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #6 · tasks 0/5 · gate shut · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #6 · tasks 0/5 · gate shut · you: ALIVE (19s left)
+[AudioController] cue CUE_WIND — ambient one-shot in ACTIVE
+[Client] TRANSFORM witnessed (yours)
+[AudioController] cue CUE_TRANSFORM — at Demiurgos_18, 40 studs
+[AudioController] cue CUE_HEARTBEAT — on Demiurgos_18, 28 studs
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[Client] revert witnessed (yours)
+[AudioController] cue CUE_HEARTBEAT — stopped on Demiurgos_18
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #6 · tasks 0/5 · gate shut · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed

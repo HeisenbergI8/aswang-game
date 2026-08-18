@@ -674,6 +674,117 @@ local Config = {
 	},
 
 	--[[
+		AUDIO (C29, §5 and §14.3: "audio matters more than visuals in horror… the cheapest
+		fear-per-hour you can buy").
+
+		EVERY ASSET ID IN THE GAME IS IN ONE TABLE, and that is the point of putting them here rather
+		than beside the code that plays them. The sounds are sourced and APPROVED BY A PERSON — "does
+		this sound scary" is not something any check can answer — so the ids arrive after the code
+		does, and when they arrive it must be one edit to this table and not a hunt through a
+		controller. `docs/AUDIO-ASSETS.md` carries the other half: creator, duration and date, which
+		a bare id cannot record and which is what you need when a Creator Store asset is moderated
+		away and leaves a hole.
+
+		A BLANK ID IS A VALID, SUPPORTED STATE, not a placeholder to be tidied up. `AudioController`
+		creates, positions, ranges and destroys the Sound either way and simply plays nothing — the
+		precedent the transform stinger set at C04 (see that controller's header). So the game is
+		fully playable with this table exactly as it ships below, and every phase of C29 before the
+		sourcing pass is verifiable with it empty.
+
+		KEYS MATCH `shared/pure/AudioCues`, and `tests/config.test.luau` pins BOTH directions through
+		that module's public API: every bed and one-shot it names has a slot here, and every slot
+		here is reachable by some rule of its. So a rename in either file reds the balance suite
+		rather than becoming a silent nothing at 3am in a playtest.
+
+		The one case that enumeration cannot reach is a NEW event cue id added to `AudioCues` with no
+		slot here — `PERMITTED_PHASES` is private and the API cannot list it. That case surfaces at
+		runtime instead, as the controller's `warn` for a cue id with no asset, which is weaker and
+		is the reason this note exists rather than a claim that the check is total.
+	]]
+	Audio = {
+		Assets = {
+			CUE_BED_LOBBY = "rbxassetid://9112764040",
+			CUE_BED_NIGHT = "rbxassetid://9112764573",
+			CUE_BED_DAWN = "rbxassetid://9112831284",
+			CUE_WIND = "rbxassetid://125270272833477",
+			CUE_DOGS = "rbxassetid://9120051478",
+			CUE_FOOTSTEP = "rbxassetid://132221529613537",
+			CUE_TRANSFORM = "rbxassetid://9125474505",
+			CUE_HEARTBEAT = "rbxassetid://139459003161851",
+			CUE_GATE_OPEN = "rbxassetid://133202590810335",
+			CUE_SUNRISE = "rbxassetid://4501062448",
+		},
+
+		-- The bed sits UNDER everything. A night ambience loud enough to notice is a night ambience
+		-- competing with the one sound in the game that has to be heard through a wall (§4.3's tell).
+		BedVolume = 0.35,
+		BedFadeSeconds = 2,
+
+		-- Wind and dogs, scheduled locally at a random interval in this band. Random per client and
+		-- per phase, so two players do not hear the same dog — a shared schedule would be a clock
+		-- every client agrees on, and this game has enough of those.
+		OneShotVolume = 0.5,
+		OneShotMinSeconds = 25,
+		OneShotMaxSeconds = 70,
+
+		-- IDENTICAL FOR EVERY CHARACTER IN THE GAME. There is no per-role, per-state or transformed
+		-- variant of this number and there must not be: a louder footstep for one player is a role
+		-- broadcast with no role token in it, which `check:secrecy` cannot see. See
+		-- `.claude/lessons/absence-is-observable.md`.
+		FootstepVolume = 0.4,
+
+		--[[
+			How long the footstep retarget waits for Roblox to attach its default character sounds.
+
+			It used to not wait at all, and a C29 playtest measured the consequence: the retarget lost
+			the race on every character tested. The engine creates `HumanoidRootPart.Running`
+			asynchronously after the character Model exists, so a synchronous `FindFirstChild` on
+			`CharacterAdded` reliably finds nothing.
+
+			Generous on purpose. Losing this race is not a missing sound, it is a per-character
+			DIFFERENCE in a cue whose whole safety argument is that it is a constant across every
+			player (`.claude/lessons/absence-is-observable.md`).
+		]]
+		FootstepWaitSeconds = 10,
+
+		StingerVolume = 0.9,
+
+		--[[
+			THE HEARTBEAT, AND THE ONE RELATIONSHIP THAT MATTERS ABOUT IT.
+
+			It plays only while a monster is TRANSFORMED — a state every client already knows about,
+			since `MonsterTransformed` is FireAllClients and the character wears a scale change, a red
+			tint and a head PointLight. It is created by the local client on a replicated character,
+			so it exists in no other client's instance tree.
+
+			`HeartbeatRange` MUST NOT EXCEED `Monster.TransformAudioRange` (40 studs), and
+			`tests/config.test.luau` pins that. §4.3 specifies exactly how far the transform carries;
+			a heartbeat audible past it would quietly rewrite the tell's range without anyone editing
+			the number that documents it.
+		]]
+		HeartbeatVolume = 0.7,
+		HeartbeatRange = 28,
+
+		GateVolume = 0.8,
+
+		-- Fired once per round when `SkyCycle.progressFor` crosses this. Before 1.0 deliberately: the
+		-- sound should land while the sky is still moving, not as a stamp on the reveal.
+		SunriseVolume = 0.6,
+		SunriseAtProgress = 0.92,
+
+		--[[
+			How long a one-shot Sound survives before the client destroys it. A `Sound.Ended` signal
+			would be the obvious answer and it is the wrong one: A BLANK SoundId NEVER ENDS, so every
+			cue would leak an instance for the whole of development, which is exactly the state §5's
+			budget cannot afford and exactly the state this project is in until the sourcing pass.
+			Longer than any stinger the `asset-pipeline` skill's 0.2-4s band can produce, and
+			`tests/config.test.luau` pins it BELOW `OneShotMinSeconds` so cleanup always beats the
+			next schedule and instances cannot accumulate.
+		]]
+		CueCleanupSeconds = 6,
+	},
+
+	--[[
 		Rate limits, one budget per client->server remote (C02).
 
 		A budget is a token bucket: `Capacity` tokens, refilling at `RefillPerSecond`, one token per

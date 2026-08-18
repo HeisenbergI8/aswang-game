@@ -1,0 +1,70 @@
+C29 Audio Pass — footstep retarget investigation (Step 3 of the brief: "does the default character
+footstep actually live at HumanoidRootPart.Running as a Sound")
+
+All calls made via mcp__Roblox_Studio__execute_luau against studio 8f3a2aed-d946-457f-a90d-f8895192fe90,
+datamodel_type=Client, LocalPlayer = Demiurgos_18, during a live solo round (fresh Play session, Config
+synced correctly with the full Audio block — confirmed separately).
+
+--- Call 1: does HumanoidRootPart.Running exist and is it a Sound? ---
+
+code:
+  local Players = game:GetService("Players")
+  local player = Players.LocalPlayer
+  local character = player.Character
+  local root = character:FindFirstChild("HumanoidRootPart")
+  local running = root:FindFirstChild("Running")
+  return { className = running.ClassName, isSound = running:IsA("Sound"), name = running.Name,
+           soundId = running.SoundId, volume = running.Volume }
+
+result:
+  {"name":"Running","isSound":true,"soundId":"rbxasset://sounds/action_footsteps_plastic.mp3",
+   "volume":0.6499999761581421,"className":"Sound"}
+
+CONFIRMS the brief's open question: yes, Roblox's default character footstep is a Sound named
+"Running" parented directly to HumanoidRootPart. AudioController.applyFootsteps (AudioController.luau:
+276-299) targets exactly this instance and this name, so the retarget mechanism's target assumption is
+correct.
+
+BUT the observed SoundId/Volume are Roblox's stock defaults
+("rbxasset://sounds/action_footsteps_plastic.mp3", 0.65), NOT Config.Audio.Assets.CUE_FOOTSTEP
+("rbxassetid://132221529613537") / Config.Audio.FootstepVolume (0.4). This is the character that has
+been alive and walking through several completed rounds already — applyFootsteps should have run at
+AudioController.Start() (player.Character ~= nil branch) or on the CharacterAdded that produced this
+character.
+
+--- Call 2: force a genuine respawn (Server datamodel, player:LoadCharacter()) and re-check from Client ---
+
+Server call: player:LoadCharacter() on the same player — returned immediately (character present,
+HumanoidRootPart present, waited=0s).
+
+Client call, 1.5s after confirming player.Character is the new one:
+  root = character.HumanoidRootPart; running = root.Running
+  result: {"soundId":"rbxasset://sounds/action_footsteps_plastic.mp3","matchesConfig":false,
+           "volume":0.6499999761581421}
+
+Still the Roblox default, on a genuinely fresh CharacterAdded firing. Not a one-off race from the very
+first spawn — reproducible on a forced respawn too.
+
+--- Call 3: rule out "something else overwrites it afterward" ---
+
+Manually set the SAME Running Sound's SoundId to a marker value and Volume to 0.123, then waited 3s
+before re-reading:
+  running.SoundId = "rbxassetid://TEST_MARKER"; running.Volume = 0.123
+  ... task.wait(3) ...
+  result: {"volumeAfter3s":0.12300000339746475,"stillMarker":true,
+           "soundIdAfter3s":"rbxassetid://TEST_MARKER"}
+
+The manual write PERSISTS — nothing in the engine or this codebase reverts it 3 seconds later. That
+rules out "the engine re-applies its own default after our code runs" as the explanation. The only
+consistent explanation left is that AudioController.applyFootsteps genuinely never successfully retargets
+this instance for this character — most likely because CharacterAdded fires before the engine's own
+Sound named "Running" exists under HumanoidRootPart (a known Roblox timing quirk: default character
+sounds are attached asynchronously, after the Model itself has replicated/CharacterAdded fired), so
+`root:FindFirstChild("Running")` at the moment `applyFootsteps` runs returns nil, and the function
+returns silently with no retry and no log line (applyFootsteps has no logCue/warn call in either branch,
+so nothing distinguishes "ran successfully" from "no-opped" in the console — only the instance's own
+properties do, which this investigation read directly).
+
+Follow-up test 10 rounds later (console line "Failed to load sound rbxassetid://TEST_MARKER: Request
+asset was not found") is this investigation's own marker id failing to resolve as a Roblox asset —
+expected, and unrelated to any real cue.
