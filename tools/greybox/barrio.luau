@@ -92,6 +92,14 @@ local RING = 130 -- centreline of the square ring road
 local ROAD_W = 18
 local ALLEY_W = 8
 
+--[[
+	C30 — MATERIALS ALONGSIDE THE COLOURS.
+
+	The greybox painted everything `Concrete` because `box` had one default and C17's deliverable was
+	the LAYOUT. §5's art strategy is that darkness and fog hide geometry, and the asset-pipeline skill
+	names the corollary: a correct material on a plain Part reads better in fog than a detailed mesh
+	with a plastic finish. This is the cheapest half of the dressing and it moves nothing.
+]]
 local GREY = Color3.fromRGB(112, 112, 108)
 local ROAD = Color3.fromRGB(88, 86, 82)
 local PLAZA_C = Color3.fromRGB(124, 122, 116)
@@ -146,6 +154,10 @@ local function road(name: string, cx: number, cz: number, sx: number, sz: number
 	p.CanCollide = false
 	p.CanTouch = false
 	p.CanQuery = false
+
+	-- Packed dirt. A barrio street is not paved, and `Ground` is the one material that reads as a
+	-- road at ClockTime 0 without needing a texture nobody can generate here.
+	p.Material = Enum.Material.Ground
 end
 
 --[[
@@ -164,7 +176,8 @@ local function building(
 	d: number,
 	height: number,
 	doors: { [string]: boolean },
-	wallColour: Color3
+	wallColour: Color3,
+	wallMaterial: Enum.Material?
 ): Folder
 	local folder = Instance.new("Folder")
 
@@ -175,8 +188,16 @@ local function building(
 	local door = 10
 	local hw, hd = w / 2, d / 2
 
-	box(`{name}_Floor`, cx, 0.15, cz, w, 0.3, d, WOOD, folder)
-	box(`{name}_Roof`, cx, height + 0.5, cz, w + 4, 1, d + 4, THATCH, folder)
+	local floor = box(`{name}_Floor`, cx, 0.15, cz, w, 0.3, d, WOOD, folder)
+	local roof = box(`{name}_Roof`, cx, height + 0.5, cz, w + 4, 1, d + 4, THATCH, folder)
+
+	-- Nipa thatch has no Roblox material. `Grass` at the THATCH colour is the closest read: it is the
+	-- only stock material with a fibrous, directionless grain, and a roof is seen from below and at
+	-- distance where the grain is all that survives.
+	floor.Material = Enum.Material.WoodPlanks
+	roof.Material = Enum.Material.Grass
+
+	local material = wallMaterial or Enum.Material.WoodPlanks
 
 	local function side(tag: string, isNS: boolean, sign: number)
 		local span = if isNS then w else d
@@ -194,7 +215,8 @@ local function building(
 					t,
 					wallColour,
 					folder
-				)
+				).Material =
+					material
 			else
 				box(
 					`{name}_Wall{tag}`,
@@ -206,7 +228,8 @@ local function building(
 					span,
 					wallColour,
 					folder
-				)
+				).Material =
+					material
 			end
 
 			return
@@ -227,7 +250,8 @@ local function building(
 					t,
 					wallColour,
 					folder
-				)
+				).Material =
+					material
 			else
 				box(
 					`{name}_Wall{tag}{index}`,
@@ -239,7 +263,8 @@ local function building(
 					segment,
 					wallColour,
 					folder
-				)
+				).Material =
+					material
 			end
 		end
 	end
@@ -359,7 +384,7 @@ root.Parent = workspace
 --------------------------------------------------------------------------------
 
 local ground = box("Ground", 0, -1, 0, HALF * 2 + 16, 2, HALF * 2 + 16, GRASS)
-ground.Material = Enum.Material.Grass
+ground.Material = Enum.Material.LeafyGrass
 
 local walls = Instance.new("Folder")
 walls.Name = "Perimeter"
@@ -369,6 +394,10 @@ box("Wall_N", 0, WALL_H / 2, -HALF, HALF * 2 + 8, WALL_H, 4, STONE, walls)
 box("Wall_S", 0, WALL_H / 2, HALF, HALF * 2 + 8, WALL_H, 4, STONE, walls)
 box("Wall_E", HALF, WALL_H / 2, 0, 4, WALL_H, HALF * 2 + 8, STONE, walls)
 box("Wall_W", -HALF, WALL_H / 2, 0, 4, WALL_H, HALF * 2 + 8, STONE, walls)
+
+for _, wall in walls:GetChildren() do
+	(wall :: Part).Material = Enum.Material.Cobblestone
+end
 
 --------------------------------------------------------------------------------
 -- ROADS — the loop guarantee, and it is structural rather than a promise.
@@ -391,6 +420,7 @@ roads.Parent = root
 road("Plaza", 0, 0, PLAZA * 2, PLAZA * 2, roads)
 local plazaSlab = roads:FindFirstChild("Plaza") :: Part
 plazaSlab.Color = PLAZA_C
+plazaSlab.Material = Enum.Material.Concrete
 
 local reach = HALF - 4
 
@@ -431,7 +461,8 @@ for _, alley in ALLEYS do
 				2,
 				GREY,
 				roads
-			)
+			).Material =
+				Enum.Material.Brick
 		end
 	else
 		road(alley.Name, alley.At, mid, ALLEY_W, length, roads)
@@ -447,7 +478,8 @@ for _, alley in ALLEYS do
 				length,
 				GREY,
 				roads
-			)
+			).Material =
+				Enum.Material.Brick
 		end
 	end
 end
@@ -462,9 +494,28 @@ end
 local spawnPad = workspace:FindFirstChildWhichIsA("SpawnLocation") or Instance.new("SpawnLocation")
 spawnPad.Name = "PlazaSpawn"
 spawnPad.Size = Vector3.new(24, 1, 24)
-spawnPad.Position = v(0, 0.5, 14)
+
+--[[
+	C30 — SUNK FLUSH AND MADE INVISIBLE, and both halves of that are deliberate.
+
+	A `SpawnLocation` draws Roblox's stock sun decal on its top face, and there is no property that
+	turns the decal off on its own. It was a 24-stud studio logo in the middle of the plaza and the
+	single most "unfinished Roblox place" thing in any screenshot of this map.
+
+	Transparency alone would have left an INVISIBLE ONE-STUD STEP, because the pad used to sit at
+	y = 0.5 spanning 0..1 while `Ground`'s top face is y = 0. Sinking it to span -0.9..0.1 puts its
+	walkable surface level with the plaza slab painted over it, so the step goes away with the decal
+	rather than becoming a thing you trip on and cannot see.
+
+	IT MUST STILL EXIST AND STILL COLLIDE. `RoundService` turns `CharacterAutoLoads` off and drives
+	every body through `LoadCharacterAsync`, which still requires a `SpawnLocation` to place them —
+	the zone comment above already says so. This is dressing a load-bearing part, not removing one.
+]]
+spawnPad.Position = v(0, -0.4, 14)
 spawnPad.Anchored = true
 spawnPad.Color = PLAZA_C
+spawnPad.Transparency = 1
+spawnPad.CanCollide = true
 spawnPad.Neutral = true
 spawnPad.Parent = workspace
 
@@ -484,9 +535,9 @@ local arko = Instance.new("Folder")
 arko.Name = "Arko"
 arko.Parent = root
 
-box("Arko_PillarW", -11, 8, -32, 4, 16, 4, STONE, arko)
-box("Arko_PillarE", 11, 8, -32, 4, 16, 4, STONE, arko)
-box("Arko_Lintel", 0, 17, -32, 26, 3, 4, STONE, arko)
+box("Arko_PillarW", -11, 8, -32, 4, 16, 4, STONE, arko).Material = Enum.Material.Cobblestone
+box("Arko_PillarE", 11, 8, -32, 4, 16, 4, STONE, arko).Material = Enum.Material.Cobblestone
+box("Arko_Lintel", 0, 17, -32, 26, 3, 4, STONE, arko).Material = Enum.Material.Cobblestone
 
 --[[
 	A LOW GATE LEAF UNDER A TALL ARCH, AND THE HEIGHT IS A GAMEPLAY NUMBER RATHER THAN A LOOK.
@@ -522,8 +573,8 @@ CollectionService:AddTag(gate, "EscapeGate")
 	dead end, which §5 rules out by name; the east door opens onto the outer band beyond the ring, so
 	even the building loops.
 ]]
-building("Chapel", 0, -152, 46, 36, 16, { S = true, E = true }, STONE)
-box("Chapel_Steeple", 0, 24, -164, 10, 16, 10, STONE)
+building("Chapel", 0, -152, 46, 36, 16, { S = true, E = true }, STONE, Enum.Material.Cobblestone)
+box("Chapel_Steeple", 0, 24, -164, 10, 16, 10, STONE).Material = Enum.Material.Cobblestone
 
 -- The one bright interior. Its own light rather than a lantern's: §5 asks for a lighting MOMENT, and a
 -- lit doorway seen from the dark road is the cheapest fear-per-hour in the file.
@@ -611,8 +662,14 @@ for index = 1, 8 do
 	)
 end
 
-box("Well_Pump", -58, 2.5, 40, 2, 5, 2, STONE, wellFolder)
-box("Well_LowWall", -70, 1, 48, 26, 2, 2, STONE, wellFolder)
+box("Well_Pump", -58, 2.5, 40, 2, 5, 2, STONE, wellFolder).Material = Enum.Material.CorrodedMetal
+box("Well_LowWall", -70, 1, 48, 26, 2, 2, STONE, wellFolder).Material = Enum.Material.Cobblestone
+
+for _, stone in wellFolder:GetChildren() do
+	if (stone :: Part).Name:match("^Well_Ring") then
+		(stone :: Part).Material = Enum.Material.Cobblestone
+	end
+end
 
 --[[
 	THE RICE FIELD EDGE — §5's killing field, in the south-east outer band.
@@ -740,6 +797,1165 @@ for _, salt in SALT_SPAWNS do
 	local p = anchor(salt.Name, "SaltSpawn", salt.X, salt.Z, anchors)
 
 	p.Color = Color3.fromRGB(200, 198, 188)
+end
+
+--------------------------------------------------------------------------------
+-- C30 — THE DRESSING
+--
+-- §5's art strategy and the build plan's one hard instruction for this chunk:
+-- "Do not change the layout; it passed GATE 1 and the layout is the thing that
+-- was validated." So nothing below moves a coordinate, a road, a building or an
+-- anchor. Every part in this section is NEW and additive, and the section can be
+-- deleted wholesale to get the C17 greybox back.
+--
+-- ═══ THE TWO RULES THAT KEEP THE DONE CONDITION TRUE ═══════════════════════════
+--
+-- C30's done condition is "reads as a Filipino village at night; crossing time
+-- unchanged; FPS unchanged". Both halves of that are held by construction rather
+-- than by measuring afterwards and hoping:
+--
+--   1. NOTHING HERE COLLIDES. PathfindingService builds its navmesh from collision
+--      geometry, so a non-collidable prop cannot move a route, cannot lengthen a
+--      walk, and cannot change the number `measure.luau` reports. The re-measure
+--      after this chunk is a CONFIRMATION, not a discovery — if the crossing time
+--      had moved, the rule would have been broken somewhere.
+--
+--      The cost is a market stall you can walk through. That is the right trade at
+--      this milestone: the layout's cover comes from the buildings, which still
+--      collide, and a prop that blocks SIGHT does the horror work without touching
+--      the navmesh at all. §5 wants partial information, and occlusion is what
+--      delivers it.
+--
+--   2. NOT ONE NEW DYNAMIC LIGHT. The light count stays at fourteen, and the mobile
+--      budget in `Config.Performance` is untouched. Everything here that reads as
+--      "lit" — the capiz windows, the fiesta bulbs, the chapel candles' spill — is
+--      `Enum.Material.Neon`, which is emissive SHADING and costs no light slot. The
+--      asset-pipeline skill names many point lights as the #1 mobile FPS killer, and
+--      the whole reason this map can look lit at ClockTime 0 is that almost none of
+--      the lit-looking things are lights.
+--
+--      `CastShadow = false` on every prop is the same argument one layer down. Future
+--      lighting shadows every caster against every visible light; several hundred
+--      shadow-casting props is exactly the cost this dressing exists to avoid, and a
+--      bamboo pole's shadow is invisible in fog at 220 studs anyway.
+--------------------------------------------------------------------------------
+
+local dress = Instance.new("Folder")
+dress.Name = "Dressing"
+dress.Parent = root
+
+local BAMBOO = Color3.fromRGB(104, 118, 72)
+local LEAF = Color3.fromRGB(52, 78, 42)
+local RUST = Color3.fromRGB(116, 82, 60)
+local TIN = Color3.fromRGB(96, 98, 96)
+local TARP = Color3.fromRGB(66, 74, 88)
+local WARM = Color3.fromRGB(255, 206, 140)
+local CLOTH = {
+	Color3.fromRGB(178, 176, 166),
+	Color3.fromRGB(120, 138, 150),
+	Color3.fromRGB(160, 128, 116),
+	Color3.fromRGB(136, 148, 120),
+}
+
+--[[
+	A prop: a part that is seen and never touched.
+
+	SIZE IS IN TRUE STUDS AND POSITION IS IN LAYOUT UNITS, which is the same split `anchor` makes and
+	for the same reason. A bamboo pole is a bamboo pole whatever `SCALE` is set to; only WHERE it
+	stands belongs to the map's coordinate space. The `/ SCALE` cancels the one `box` applies.
+]]
+local function prop(
+	name: string,
+	cx: number,
+	cy: number,
+	cz: number,
+	sx: number,
+	sy: number,
+	sz: number,
+	colour: Color3,
+	material: Enum.Material,
+	parent: Instance?
+): Part
+	local p = box(name, cx, cy, cz, sx / SCALE, sy, sz / SCALE, colour, parent or dress)
+
+	p.Material = material
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+
+	return p
+end
+
+-- Yaw only. Props lean and turn; nothing here needs a full orientation, and a single angle keeps the
+-- placement tables readable as data.
+local function turn(p: Part, degrees: number): Part
+	p.CFrame = CFrame.new(p.Position) * CFrame.Angles(0, math.rad(degrees), 0)
+
+	return p
+end
+
+-- A lean, applied after a yaw. Used for bamboo, which is never quite vertical, and for banana leaves.
+local function lean(p: Part, degrees: number, aboutZ: boolean?): Part
+	local angle = math.rad(degrees)
+
+	p.CFrame = p.CFrame
+		* (if aboutZ then CFrame.Angles(0, 0, angle) else CFrame.Angles(angle, 0, 0))
+
+	return p
+end
+
+-- A part stretched between two world points. Wires, ropes and washing lines are all this.
+local function span(
+	name: string,
+	from: Vector3,
+	to: Vector3,
+	thickness: number,
+	colour: Color3,
+	material: Enum.Material,
+	parent: Instance?
+): Part
+	local p = Instance.new("Part")
+	local delta = to - from
+
+	p.Name = name
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Size = Vector3.new(thickness, thickness, math.max(delta.Magnitude, 0.1))
+	p.CFrame = CFrame.lookAt(from + delta / 2, to)
+	p.Color = colour
+	p.Material = material
+	p.Parent = parent or dress
+
+	return p
+end
+
+--[[
+	A sagging line between two layout points, as `segments` straight pieces on a parabola.
+
+	One function covers the three things that hang in this map — power lines, washing lines and fiesta
+	bulbs — because they differ only in what, if anything, is hung at each node. A real catenary is a
+	cosh; a parabola is visually identical over these spans and is four operations instead of an
+	exponential.
+]]
+local function droop(
+	name: string,
+	x1: number,
+	z1: number,
+	x2: number,
+	z2: number,
+	y: number,
+	sag: number,
+	segments: number,
+	thickness: number,
+	colour: Color3,
+	parent: Instance?,
+	onNode: ((string, Vector3) -> ())?
+)
+	local function pointAt(t: number): Vector3
+		return v(x1 + (x2 - x1) * t, y - sag * 4 * t * (1 - t), z1 + (z2 - z1) * t)
+	end
+
+	local previous = pointAt(0)
+
+	for index = 1, segments do
+		local current = pointAt(index / segments)
+
+		span(
+			`{name}_Seg{index}`,
+			previous,
+			current,
+			thickness,
+			colour,
+			Enum.Material.SmoothPlastic,
+			parent
+		)
+
+		if onNode and index < segments then
+			onNode(`{name}_Node{index}`, current)
+		end
+
+		previous = current
+	end
+end
+
+--------------------------------------------------------------------------------
+-- POWER POSTS AND THE SAGGING WIRE
+--
+-- The single most recognisable thing about a Philippine street at night, and it
+-- is nearly free: a leaning wooden post, a crossarm, and a wire that droops to
+-- the next one. It also does real work for the camera — a horizontal line across
+-- the top of the frame gives the fog something to sit behind.
+--------------------------------------------------------------------------------
+
+local posts = Instance.new("Folder")
+posts.Name = "PowerLine"
+posts.Parent = dress
+
+-- Each run is a road, walked in order, with the posts set 12 studs off the centreline so they stand
+-- on the verge rather than in the street. The offsets are hand-checked against the anchor list — a
+-- post through a task pad would read as a bug in the map rather than as scenery.
+local POWER_RUNS = {
+	{ Name = "North", Points = { { 12, -58 }, { 12, -86 }, { 12, -114 } } },
+	{ Name = "South", Points = { { 12, 58 }, { 12, 86 }, { 12, 114 } } },
+	{ Name = "East", Points = { { 58, 12 }, { 86, 12 }, { 114, 12 } } },
+	{ Name = "West", Points = { { -58, 12 }, { -86, 12 }, { -114, 12 } } },
+}
+
+for _, run in POWER_RUNS do
+	for index, at in run.Points do
+		local base = `Post_{run.Name}{index}`
+
+		prop(`{base}_Pole`, at[1], 9, at[2], 1.4, 18, 1.4, WOOD, Enum.Material.Wood, posts)
+		prop(`{base}_Arm`, at[1], 16.5, at[2], 7, 0.8, 0.8, WOOD, Enum.Material.Wood, posts)
+
+		-- The transformer drum. Two per run, so the line is not a repeating stamp.
+		if index == 2 then
+			prop(
+				`{base}_Can`,
+				at[1] + 2,
+				14,
+				at[2],
+				2.4,
+				3.5,
+				2.4,
+				TIN,
+				Enum.Material.CorrodedMetal,
+				posts
+			)
+		end
+
+		if index > 1 then
+			local previous = run.Points[index - 1]
+
+			for wire = 1, 2 do
+				local offset = if wire == 1 then -2 else 2
+				local acrossX = if run.Name == "East" or run.Name == "West" then 0 else offset
+				local acrossZ = if run.Name == "East" or run.Name == "West" then offset else 0
+
+				droop(
+					`Wire_{run.Name}{index}_{wire}`,
+					previous[1] + acrossX,
+					previous[2] + acrossZ,
+					at[1] + acrossX,
+					at[2] + acrossZ,
+					16.2,
+					2.2,
+					4,
+					0.25,
+					Color3.fromRGB(28, 28, 30),
+					posts
+				)
+			end
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- THE PLAZA — a barrio's plaza is a basketball court with a plaza around it.
+--
+-- It sits on the WEST half, clear of the spawn pad (z 2..26), the arko (z = -32)
+-- and both plaza task points. Court paint is a road-style slab: flat, thin, and
+-- non-collidable exactly like the roads it borrows the trick from.
+--------------------------------------------------------------------------------
+
+local plaza = Instance.new("Folder")
+plaza.Name = "PlazaDressing"
+plaza.Parent = dress
+
+local COURT_X, COURT_Z = -26, -8
+
+prop(
+	"Court_Slab",
+	COURT_X,
+	0.12,
+	COURT_Z,
+	30 * SCALE,
+	0.14,
+	18 * SCALE,
+	Color3.fromRGB(92, 84, 76),
+	Enum.Material.Concrete,
+	plaza
+)
+
+-- Faded paint. Three lines is enough to read as a court from across the plaza, which is the only
+-- distance anyone will read it from. The LENGTHS scale with the slab; the 0.5-stud line width does
+-- not, because a painted line does not get wider when the map does.
+prop(
+	"Court_LineN",
+	COURT_X,
+	0.2,
+	COURT_Z - 9,
+	30 * SCALE,
+	0.06,
+	0.5,
+	Color3.fromRGB(196, 190, 176),
+	Enum.Material.SmoothPlastic,
+	plaza
+)
+prop(
+	"Court_LineS",
+	COURT_X,
+	0.2,
+	COURT_Z + 9,
+	30 * SCALE,
+	0.06,
+	0.5,
+	Color3.fromRGB(196, 190, 176),
+	Enum.Material.SmoothPlastic,
+	plaza
+)
+prop(
+	"Court_LineMid",
+	COURT_X,
+	0.2,
+	COURT_Z,
+	0.5,
+	0.06,
+	18 * SCALE,
+	Color3.fromRGB(196, 190, 176),
+	Enum.Material.SmoothPlastic,
+	plaza
+)
+
+for index, side in { -1, 1 } do
+	local x = COURT_X + side * 15
+
+	prop(`Hoop{index}_Pole`, x, 5, COURT_Z, 0.9, 10, 0.9, TIN, Enum.Material.CorrodedMetal, plaza)
+	prop(
+		`Hoop{index}_Board`,
+		x - side * 1.6,
+		10.5,
+		COURT_Z,
+		0.4,
+		3.5,
+		5,
+		Color3.fromRGB(186, 182, 170),
+		Enum.Material.WoodPlanks,
+		plaza
+	)
+	prop(
+		`Hoop{index}_Rim`,
+		x - side * 3,
+		9.2,
+		COURT_Z,
+		2.6,
+		0.3,
+		2.6,
+		Color3.fromRGB(196, 96, 48),
+		Enum.Material.CorrodedMetal,
+		plaza
+	)
+end
+
+--[[
+	FIESTA BULBS STRUNG BETWEEN THE FOUR PLAZA LANTERNS.
+
+	Neon spheres on a drooping wire, and NOT PointLights — see rule 2 at the top. Twelve small emissive
+	dots read as a strung plaza from anywhere in it, cost no light slot, and give the safest place on
+	the map a warmth the streets deliberately do not have. §5 wants the plaza to feel different from
+	the alleys; this is that difference, drawn rather than lit.
+]]
+local CORNERS = { { -40, -40 }, { 40, -40 }, { 40, 40 }, { -40, 40 } }
+
+for index, corner in CORNERS do
+	local nextCorner = CORNERS[if index == #CORNERS then 1 else index + 1]
+
+	droop(
+		`Fiesta{index}`,
+		corner[1],
+		corner[2],
+		nextCorner[1],
+		nextCorner[2],
+		9.6,
+		2.4,
+		10,
+		0.18,
+		Color3.fromRGB(30, 28, 26),
+		plaza,
+		function(name, at)
+			local bulb = Instance.new("Part")
+
+			bulb.Name = name
+			bulb.Anchored = true
+			bulb.CanCollide = false
+			bulb.CanQuery = false
+			bulb.CanTouch = false
+			bulb.CastShadow = false
+			bulb.Shape = Enum.PartType.Ball
+			bulb.Size = Vector3.new(0.7, 0.7, 0.7)
+			bulb.Position = at - Vector3.new(0, 0.4, 0)
+			bulb.Material = Enum.Material.Neon
+			bulb.Color = if index % 2 == 0 then WARM else Color3.fromRGB(255, 168, 132)
+			bulb.Parent = plaza
+		end
+	)
+end
+
+-- A flagpole, and benches along the plaza edge. The pole is the civic marker every barrio plaza has;
+-- the benches are where a player waiting out an intermission will stand, which is worth dressing.
+prop("Flagpole", 0, 11, -8, 0.8, 22, 0.8, Color3.fromRGB(198, 196, 188), Enum.Material.Metal, plaza)
+prop("Flag", 2.6, 19, -8, 5, 3, 0.2, Color3.fromRGB(150, 60, 56), Enum.Material.Fabric, plaza)
+
+for index, at in { { -30, 30 }, { 30, 24 }, { 26, -34 }, { -18, -30 } } do
+	prop(`Bench{index}_Seat`, at[1], 2.2, at[2], 7, 0.5, 2, WOOD, Enum.Material.WoodPlanks, plaza)
+	prop(
+		`Bench{index}_LegL`,
+		at[1] - 3,
+		1.1,
+		at[2],
+		0.6,
+		2.2,
+		1.8,
+		STONE,
+		Enum.Material.Concrete,
+		plaza
+	)
+	prop(
+		`Bench{index}_LegR`,
+		at[1] + 3,
+		1.1,
+		at[2],
+		0.6,
+		2.2,
+		1.8,
+		STONE,
+		Enum.Material.Concrete,
+		plaza
+	)
+end
+
+--------------------------------------------------------------------------------
+-- MARKET STALLS — the talipapa. Four, on the plaza's edges.
+--------------------------------------------------------------------------------
+
+local STALLS = {
+	{ Name = "Stall_NW", X = -38, Z = 28, Yaw = 12 },
+	{ Name = "Stall_NE", X = 34, Z = 38, Yaw = -8 },
+	{ Name = "Stall_SE", X = 38, Z = -28, Yaw = 24 },
+	{ Name = "Stall_SW", X = -36, Z = -24, Yaw = -18 },
+}
+
+for index, stall in STALLS do
+	local folder = Instance.new("Folder")
+
+	folder.Name = stall.Name
+	folder.Parent = dress
+
+	local x, z = stall.X, stall.Z
+
+	for leg, corner in { { -4, -3 }, { 4, -3 }, { -4, 3 }, { 4, 3 } } do
+		prop(
+			`{stall.Name}_Leg{leg}`,
+			x + corner[1],
+			3,
+			z + corner[2],
+			0.7,
+			6,
+			0.7,
+			BAMBOO,
+			Enum.Material.Wood,
+			folder
+		)
+	end
+
+	-- Corrugated tin, the roof of every informal structure in the country, and the one surface here
+	-- that catches a lantern hard enough to be seen from the next street.
+	turn(
+		prop(`{stall.Name}_Roof`, x, 6.4, z, 11, 0.4, 8, TIN, Enum.Material.CorrodedMetal, folder),
+		stall.Yaw
+	)
+	prop(
+		`{stall.Name}_Counter`,
+		x,
+		2.6,
+		z - 2.6,
+		10,
+		0.5,
+		2.2,
+		WOOD,
+		Enum.Material.WoodPlanks,
+		folder
+	)
+	prop(`{stall.Name}_Tarp`, x, 4.4, z + 3.4, 10, 3.6, 0.2, TARP, Enum.Material.Fabric, folder)
+
+	-- Produce on the counter, as three coloured heaps. At night and through fog this is the correct
+	-- amount of detail: a silhouette with colour in it, not a modelled mango.
+	for heap = 1, 3 do
+		local heapPart = prop(
+			`{stall.Name}_Heap{heap}`,
+			x - 3 + heap * 3,
+			3.2,
+			z - 2.6,
+			1.8,
+			0.9,
+			1.6,
+			CLOTH[(index + heap) % #CLOTH + 1],
+			Enum.Material.Fabric,
+			folder
+		)
+
+		heapPart.Shape = Enum.PartType.Ball
+		heapPart.Size = Vector3.new(1.8, 1.2, 1.6)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- THE HOUSES — capiz windows, washing lines, and the clutter of a lived-in yard.
+--
+-- The windows are the highest-value twenty parts in this file. A dark building
+-- is a wall; a dark building with two warm rectangles in it is a HOUSE, with
+-- somebody in it, and the barrio stops reading as an empty set of blocks. They
+-- are Neon, so they cost nothing (rule 2).
+--------------------------------------------------------------------------------
+
+local houses = Instance.new("Folder")
+houses.Name = "Houses"
+houses.Parent = dress
+
+--[[
+	A window on a wall face. `depth` deliberately EXCEEDS the wall it sits in, so the pane protrudes
+	on both sides and the room appears lit from inside as well as out — one part doing the work of two,
+	and no alignment arithmetic against `building`'s scaled wall thickness to get subtly wrong.
+]]
+local function window(
+	name: string,
+	cx: number,
+	cz: number,
+	cy: number,
+	wide: boolean,
+	parent: Instance
+)
+	local pane = prop(
+		name,
+		cx,
+		cy,
+		cz,
+		if wide then 4.5 else 4,
+		3,
+		if wide then 4 else 4.5,
+		WARM,
+		Enum.Material.Neon,
+		parent
+	)
+
+	-- Not full brightness. A capiz shell pane is translucent, not a lamp, and a solid Neon block reads
+	-- as a hole cut in the wall rather than as a window with something behind it.
+	pane.Transparency = 0.25
+end
+
+-- Kubo footprints are 24 x 20, so the N/S walls sit at cz ± 10 and the E/W walls at cx ± 12.
+local KUBO_WINDOWS = {
+	{ Name = "Kubo_NW", X = -78, Z = -78, Height = 7 },
+	{ Name = "Kubo_NE", X = 78, Z = -78, Height = 7 },
+	{ Name = "Kubo_SE", X = 78, Z = 78, Height = 7 },
+	{ Name = "Kubo_SW", X = -78, Z = 78, Height = 5.5 },
+	{ Name = "Kubo_N", X = 35, Z = -75, Height = 5.5 },
+	{ Name = "Kubo_E", X = 158, Z = -30, Height = 5.5 },
+	{ Name = "Kubo_W", X = -158, Z = 40, Height = 5.5 },
+}
+
+for _, kubo in KUBO_WINDOWS do
+	-- ±7.5 RATHER THAN ±6, AND THE REASON IS `building`'s DOOR GAP. A doored side is two segments
+	-- with a 10-stud hole between them, so the wall only exists beyond ±5. A 4.5-wide pane centred
+	-- at ±6 spanned ±3.75..±8.25 and hung half of itself in the doorway.
+	window(`{kubo.Name}_WindowN`, kubo.X - 7.5, kubo.Z - 10, kubo.Height, true, houses)
+	window(`{kubo.Name}_WindowS`, kubo.X + 7.5, kubo.Z + 10, kubo.Height, true, houses)
+	window(`{kubo.Name}_WindowE`, kubo.X + 12, kubo.Z - 6, kubo.Height, false, houses)
+end
+
+-- The chapel's are taller and colder — candlelight through glass, not a kitchen bulb.
+-- The chapel's east door is centred at z = -152 with the same 10-stud gap, so the two east panes sit
+-- outside z -157..-147 rather than straddling it. The west wall is solid and keeps the closer pair.
+for index, at in { { 23, -164 }, { 23, -140 }, { -23, -158 }, { -23, -146 } } do
+	local pane = prop(
+		`Chapel_Window{index}`,
+		at[1],
+		9,
+		at[2],
+		4,
+		6,
+		5,
+		Color3.fromRGB(240, 226, 190),
+		Enum.Material.Neon,
+		houses
+	)
+
+	pane.Transparency = 0.3
+end
+
+-- The cross on the steeple. The one piece of pure silhouette in the file: it is only ever seen
+-- against the sky, which is precisely why it is worth having.
+prop("Chapel_CrossV", 0, 36, -164, 1, 9, 1, STONE, Enum.Material.Concrete, houses)
+prop("Chapel_CrossH", 0, 37.5, -164, 5, 1, 1, STONE, Enum.Material.Concrete, houses)
+
+--[[
+	WASHING LINES between each house and a bamboo pole in its yard.
+
+	Hung at 9 studs — above head height, so it never reads as something you should be able to duck
+	under and cannot. Non-collidable like everything here, but the height means nobody tests it.
+]]
+local LINES = {
+	{ Name = "Wash_NW", X1 = -92, Z1 = -64, X2 = -64, Z2 = -64 },
+	-- MOVED OFF SaltSpawn_KuboNE (92, -66), which the far pole stood 2 layout units from. See the
+	-- salt-clearance note under the planting tables.
+	{ Name = "Wash_NE", X1 = 62, Z1 = -58, X2 = 88, Z2 = -58 },
+	{ Name = "Wash_SE", X1 = 64, Z1 = 64, X2 = 92, Z2 = 64 },
+	{ Name = "Wash_SW", X1 = -92, Z1 = 92, X2 = -64, Z2 = 92 },
+	{ Name = "Wash_N", X1 = 24, Z1 = -62, X2 = 46, Z2 = -62 },
+}
+
+for index, line in LINES do
+	prop(`{line.Name}_PoleA`, line.X1, 5, line.Z1, 0.8, 10, 0.8, BAMBOO, Enum.Material.Wood, houses)
+	prop(`{line.Name}_PoleB`, line.X2, 5, line.Z2, 0.8, 10, 0.8, BAMBOO, Enum.Material.Wood, houses)
+
+	droop(
+		`{line.Name}_Rope`,
+		line.X1,
+		line.Z1,
+		line.X2,
+		line.Z2,
+		9.4,
+		1.1,
+		4,
+		0.16,
+		Color3.fromRGB(210, 206, 190),
+		houses
+	)
+
+	-- Three garments per line, and they hang from the rope's sag rather than from a flat height, so
+	-- the middle one sits lowest. Cloth is the cheapest motion-implying shape there is.
+	for garment = 1, 3 do
+		local t = garment / 4
+		local x = line.X1 + (line.X2 - line.X1) * t
+		local z = line.Z1 + (line.Z2 - line.Z1) * t
+		local drop = 1.1 * 4 * t * (1 - t)
+
+		lean(
+			prop(
+				`{line.Name}_Cloth{garment}`,
+				x,
+				9.4 - drop - 1.8,
+				z,
+				3,
+				3.4,
+				0.15,
+				CLOTH[(index + garment) % #CLOTH + 1],
+				Enum.Material.Fabric,
+				houses
+			),
+			6 - garment * 4,
+			true
+		)
+	end
+end
+
+--[[
+	YARD CLUTTER — drums, sacks and crates, in clusters beside doors and the well.
+
+	Placed as clusters rather than individually because that is how clutter actually accumulates, and
+	because a table of nine coordinates is easier to check against the anchor list than a table of
+	thirty. Each cluster is seeded from the file's existing `rng`, so a re-run reproduces it exactly —
+	the same argument the rice field already makes.
+]]
+local CLUTTER = {
+	{ -78, -62 },
+	{ 64, -78 },
+	{ 66, 64 },
+	{ -62, 36 },
+	{ 16, -128 },
+	{ -92, 84 },
+	{ 44, -66 },
+	{ 150, -30 },
+	{ -150, 40 },
+}
+
+for index, at in CLUTTER do
+	for item = 1, rng:NextInteger(3, 5) do
+		local ox = rng:NextNumber(-4, 4)
+		local oz = rng:NextNumber(-4, 4)
+		local kind = rng:NextInteger(1, 3)
+
+		if kind == 1 then
+			local drum = prop(
+				`Clutter{index}_Drum{item}`,
+				at[1] + ox,
+				1.7,
+				at[2] + oz,
+				2.4,
+				3.4,
+				2.4,
+				RUST,
+				Enum.Material.CorrodedMetal,
+				houses
+			)
+
+			drum.Shape = Enum.PartType.Cylinder
+			drum.CFrame = CFrame.new(drum.Position) * CFrame.Angles(0, 0, math.rad(90))
+			drum.Size = Vector3.new(3.4, 2.4, 2.4)
+		elseif kind == 2 then
+			turn(
+				prop(
+					`Clutter{index}_Sack{item}`,
+					at[1] + ox,
+					0.9,
+					at[2] + oz,
+					2.2,
+					1.8,
+					1.6,
+					Color3.fromRGB(150, 136, 108),
+					Enum.Material.Fabric,
+					houses
+				),
+				rng:NextInteger(0, 180)
+			)
+		else
+			turn(
+				prop(
+					`Clutter{index}_Crate{item}`,
+					at[1] + ox,
+					1.1,
+					at[2] + oz,
+					2.4,
+					2.2,
+					2.4,
+					WOOD,
+					Enum.Material.WoodPlanks,
+					houses
+				),
+				rng:NextInteger(0, 90)
+			)
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- PLANTING — bamboo and banana, and the reason the outer band stops feeling bare.
+--
+-- The C17 header already records that two kubo were moved outside the ring
+-- because the outer band was "about a quarter of the walkable area with nothing
+-- in it, no cover, and nothing to look at". Buildings fixed the cover; this
+-- fixes the looking. Planting is the cheapest possible answer — a clump of thin
+-- vertical poles is six parts and breaks a sightline as well as a wall does.
+--------------------------------------------------------------------------------
+
+local planting = Instance.new("Folder")
+planting.Name = "Planting"
+planting.Parent = dress
+
+local BAMBOO_AT = {
+	{ -150, -110 },
+	{ -152, -152 },
+	{ 150, -150 },
+	{ 152, 60 },
+	{ 150, 112 },
+	{ -110, 150 },
+	{ -152, 150 },
+	{ -60, -150 },
+	{ 60, -150 },
+	{ 112, -150 },
+	{ -40, -112 },
+	{ -112, -40 },
+	{ 40, 118 },
+	{ 118, 40 },
+	{ -118, 108 },
+	{ 108, -118 },
+}
+
+for index, at in BAMBOO_AT do
+	for pole = 1, rng:NextInteger(5, 8) do
+		local height = rng:NextNumber(16, 26)
+		local stalk = prop(
+			`Bamboo{index}_{pole}`,
+			at[1] + rng:NextNumber(-3.5, 3.5),
+			height / 2,
+			at[2] + rng:NextNumber(-3.5, 3.5),
+			0.7,
+			height,
+			0.7,
+			BAMBOO,
+			Enum.Material.Wood,
+			planting
+		)
+
+		-- Bamboo is never vertical, and the lean is what stops sixteen clumps reading as sixteen
+		-- copies of one clump.
+		lean(turn(stalk, rng:NextInteger(0, 90)), rng:NextNumber(-7, 7), rng:NextNumber(0, 1) > 0.5)
+
+		-- A crown of leaves, only on the taller poles. Foliage is what the eye uses to tell a plant
+		-- from a post at distance.
+		if height > 20 then
+			for leaf = 1, 3 do
+				lean(
+					turn(
+						prop(
+							`Bamboo{index}_{pole}_Leaf{leaf}`,
+							stalk.Position.X / SCALE,
+							height - 1.5,
+							stalk.Position.Z / SCALE,
+							5,
+							0.2,
+							2.5,
+							LEAF,
+							Enum.Material.Grass,
+							planting
+						),
+						leaf * 60 + rng:NextInteger(-20, 20)
+					),
+					rng:NextNumber(-30, -10)
+				)
+			end
+		end
+	end
+end
+
+--[[
+	Banana: a stubby trunk and four big drooping blades. Two dozen parts per plant would be a mesh's
+	job; five is enough for a silhouette in fog.
+
+	THE CLEARANCE RULE FOR EVERY TABLE IN THIS SECTION, and it is the one an art pass breaks silently.
+
+	A prop may not come within ~4 studs of a tagged anchor's footprint. Task pads and salt spawns are
+	AFFORDANCES — `Config.Salt.PickupRangeStuds` is 6 and `Tasks.PresenceRangeStuds` is 9 — so a pole
+	or a leaf sitting on one does not break a check anywhere, it just quietly hides the thing a player
+	is meant to find. Salt is §4.6's only answer to the Aswang, and a pouch behind a banana leaf is a
+	round with no counterplay in that corner of the map.
+
+	Nothing reports this. It was found by walking every `Dressing` part against every tagged anchor
+	after the first build, which is the check worth re-running whenever a coordinate here changes.
+]]
+local BANANA_AT = {
+	{ -96, -60 },
+	{ 96, -60 },
+	{ 96, 60 },
+	{ -90, 52 }, -- moved off SaltSpawn_AlleySW (-100, 60); the leaves are 9 studs wide
+	{ -96, -96 },
+	{ 20, -96 },
+	{ 52, -58 },
+	{ -52, 56 },
+	{ -140, -60 },
+	{ 140, 100 },
+	{ 62, 140 },
+	{ -62, -140 },
+}
+
+for index, at in BANANA_AT do
+	prop(
+		`Banana{index}_Trunk`,
+		at[1],
+		3.5,
+		at[2],
+		1.6,
+		7,
+		1.6,
+		Color3.fromRGB(86, 96, 62),
+		Enum.Material.Wood,
+		planting
+	)
+
+	for blade = 1, 4 do
+		lean(
+			turn(
+				prop(
+					`Banana{index}_Leaf{blade}`,
+					at[1],
+					7.6,
+					at[2],
+					9,
+					0.25,
+					3.4,
+					LEAF,
+					Enum.Material.Grass,
+					planting
+				),
+				blade * 90 + rng:NextInteger(-25, 25)
+			),
+			rng:NextNumber(-38, -18)
+		)
+	end
+end
+
+-- Bamboo fencing along the yards, as pickets. Runs are given as two layout points; the pickets are
+-- spaced along them so a longer run simply gets more.
+local FENCES = {
+	{ Name = "Fence_NW", X1 = -94, Z1 = -94, X2 = -62, Z2 = -94 },
+	{ Name = "Fence_NE", X1 = 62, Z1 = -94, X2 = 94, Z2 = -94 },
+	{ Name = "Fence_SE", X1 = 94, Z1 = 62, X2 = 94, Z2 = 94 },
+	{ Name = "Fence_SW", X1 = -94, Z1 = 62, X2 = -94, Z2 = 94 },
+	{ Name = "Fence_Well", X1 = -84, Z1 = 20, X2 = -84, Z2 = 46 },
+	{ Name = "Fence_Chapel", X1 = -34, Z1 = -134, X2 = -34, Z2 = -166 },
+}
+
+for _, fence in FENCES do
+	local length = math.sqrt((fence.X2 - fence.X1) ^ 2 + (fence.Z2 - fence.Z1) ^ 2)
+	local count = math.max(math.floor(length / 2.2), 2)
+
+	for picket = 0, count do
+		local t = picket / count
+		local height = rng:NextNumber(4.5, 5.8)
+
+		lean(
+			prop(
+				`{fence.Name}_{picket}`,
+				fence.X1 + (fence.X2 - fence.X1) * t,
+				height / 2,
+				fence.Z1 + (fence.Z2 - fence.Z1) * t,
+				0.5,
+				height,
+				0.5,
+				BAMBOO,
+				Enum.Material.Wood,
+				planting
+			),
+			rng:NextNumber(-5, 5),
+			true
+		)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- THE RICE FIELD — §5's killing field, and the only place the dressing is
+-- allowed to make things WORSE to see. A drying rack, sacks, and two scarecrows.
+--
+-- The scarecrows are deliberate: a human silhouette that does not move is the
+-- single cheapest scare in a game whose whole tension is "is that a player".
+-- §4.3 makes the Aswang read as a player until it transforms, so a field with
+-- standing figures in it makes every glance across it cost something.
+--------------------------------------------------------------------------------
+
+local field = Instance.new("Folder")
+field.Name = "FieldDressing"
+field.Parent = dress
+
+for index, at in { { 75, 150 }, { 140, 164 } } do
+	local base = `Scarecrow{index}`
+
+	prop(`{base}_Post`, at[1], 5, at[2], 0.6, 10, 0.6, WOOD, Enum.Material.Wood, field)
+	prop(`{base}_Arms`, at[1], 8, at[2], 7, 0.5, 0.5, WOOD, Enum.Material.Wood, field)
+	turn(
+		prop(`{base}_Body`, at[1], 7, at[2], 3, 4, 1.6, CLOTH[index], Enum.Material.Fabric, field),
+		20 * index
+	)
+
+	local head = prop(
+		`{base}_Head`,
+		at[1],
+		9.6,
+		at[2],
+		1.8,
+		1.8,
+		1.8,
+		Color3.fromRGB(148, 132, 96),
+		Enum.Material.Fabric,
+		field
+	)
+
+	head.Shape = Enum.PartType.Ball
+
+	-- The hat is what makes it read as a figure rather than as a post with a bag on it, at the
+	-- distance the rice field is actually seen from.
+	prop(
+		`{base}_Hat`,
+		at[1],
+		10.6,
+		at[2],
+		4.5,
+		0.4,
+		4.5,
+		Color3.fromRGB(158, 138, 92),
+		Enum.Material.Grass,
+		field
+	)
+end
+
+-- A drying rack and its sacks: the reason a task point is out here at all.
+for index, at in { { 60, 145 }, { 112, 167 } } do
+	prop(`Rack{index}_Frame`, at[1], 2.6, at[2], 12, 0.5, 6, WOOD, Enum.Material.WoodPlanks, field)
+	prop(`Rack{index}_LegA`, at[1] - 5, 1.3, at[2], 0.6, 2.6, 0.6, WOOD, Enum.Material.Wood, field)
+	prop(`Rack{index}_LegB`, at[1] + 5, 1.3, at[2], 0.6, 2.6, 0.6, WOOD, Enum.Material.Wood, field)
+	prop(
+		`Rack{index}_Grain`,
+		at[1],
+		3,
+		at[2],
+		11,
+		0.35,
+		5,
+		Color3.fromRGB(178, 158, 108),
+		Enum.Material.Sand,
+		field
+	)
+
+	for sack = 1, 3 do
+		turn(
+			prop(
+				`Rack{index}_Sack{sack}`,
+				at[1] - 6 + sack * 3,
+				0.9,
+				at[2] + 5,
+				2.2,
+				1.8,
+				1.6,
+				Color3.fromRGB(150, 136, 108),
+				Enum.Material.Fabric,
+				field
+			),
+			rng:NextInteger(0, 180)
+		)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- THE LAST DETAILS — a graveyard beside the chapel, two parked tricycles, and
+-- puddles on the roads.
+--
+-- Puddles are the highest ratio of atmosphere to parts in the whole file: a flat
+-- dark slab with a low Reflectance catches the lanterns and the moon, and wet
+-- ground is most of why a night street looks like a night street.
+--------------------------------------------------------------------------------
+
+local details = Instance.new("Folder")
+details.Name = "Details"
+details.Parent = dress
+
+-- Beside the chapel, west of it and clear of the north road and FetchSource_Chapel.
+for index = 1, 8 do
+	local x = -50 + (index % 3) * 7
+	local z = -164 + math.floor((index - 1) / 3) * 10
+	local height = rng:NextNumber(2.4, 3.6)
+
+	lean(
+		prop(
+			`Grave{index}_V`,
+			x,
+			height / 2,
+			z,
+			0.5,
+			height,
+			0.5,
+			Color3.fromRGB(126, 124, 116),
+			Enum.Material.Concrete,
+			details
+		),
+		rng:NextNumber(-8, 8),
+		true
+	)
+	prop(
+		`Grave{index}_H`,
+		x,
+		height * 0.78,
+		z,
+		2,
+		0.5,
+		0.4,
+		Color3.fromRGB(126, 124, 116),
+		Enum.Material.Concrete,
+		details
+	)
+end
+
+-- Two tricycles, parked. The sidecar is what makes the shape unmistakable, and it is three boxes.
+for index, at in { { -22, -40 }, { 95, -90 } } do
+	local base = `Tricycle{index}`
+	local folder = Instance.new("Folder")
+
+	folder.Name = base
+	folder.Parent = details
+
+	prop(
+		`{base}_Body`,
+		at[1],
+		2,
+		at[2],
+		4.5,
+		2.2,
+		1.6,
+		Color3.fromRGB(140, 92, 72),
+		Enum.Material.Metal,
+		folder
+	)
+	prop(
+		`{base}_Sidecar`,
+		at[1],
+		2.2,
+		at[2] + 2,
+		4,
+		2.6,
+		2.4,
+		Color3.fromRGB(92, 108, 122),
+		Enum.Material.CorrodedMetal,
+		folder
+	)
+	prop(
+		`{base}_Roof`,
+		at[1],
+		4.2,
+		at[2] + 2,
+		4.4,
+		0.3,
+		2.8,
+		TIN,
+		Enum.Material.CorrodedMetal,
+		folder
+	)
+	prop(`{base}_Bars`, at[1] - 2.2, 3.2, at[2], 0.4, 2.4, 1.8, TIN, Enum.Material.Metal, folder)
+
+	-- Axis-aligned on purpose: turning the folder means turning every child about a shared centre,
+	-- and a tricycle is not worth a transform helper nothing else in the file would use.
+	for wheel, offset in { { -1.6, 0 }, { 1.6, 0 }, { 1.4, 2 } } do
+		local w = prop(
+			`{base}_Wheel{wheel}`,
+			at[1] + offset[1],
+			0.9,
+			at[2] + offset[2],
+			1.8,
+			1.8,
+			0.5,
+			Color3.fromRGB(32, 32, 34),
+			Enum.Material.Rubber,
+			folder
+		)
+
+		w.Shape = Enum.PartType.Cylinder
+		w.CFrame = CFrame.new(w.Position) * CFrame.Angles(0, math.rad(90), 0)
+		w.Size = Vector3.new(0.5, 1.8, 1.8)
+	end
+end
+
+-- On the roads, in the ruts. Reflectance rather than a material: `Ground` under a wet slab is what a
+-- puddle actually is, and 0.35 is enough to catch a lantern without turning into a mirror.
+for index, at in
+	{
+		{ 0, -70 },
+		{ 0, 76 },
+		{ 70, 0 },
+		{ -86, 0 },
+		{ 0, -112 },
+		{ 100, -100 },
+		{ -100, 48 },
+		{ 130, 62 },
+		{ -130, -70 },
+		{ 46, 100 },
+	}
+do
+	local puddle = prop(
+		`Puddle{index}`,
+		at[1],
+		0.14,
+		at[2],
+		rng:NextNumber(5, 11),
+		0.1,
+		rng:NextNumber(4, 9),
+		Color3.fromRGB(24, 26, 32),
+		Enum.Material.SmoothPlastic,
+		details
+	)
+
+	puddle.Reflectance = 0.35
+	turn(puddle, rng:NextInteger(0, 180))
 end
 
 --------------------------------------------------------------------------------
@@ -877,8 +2093,36 @@ atmosphere.Parent = Lighting
 	`StreamingEnabled` itself can only be set in Studio, which is why this file is where it happens.
 ]]
 workspace.StreamingEnabled = true
-workspace.StreamingTargetRadius = math.floor(220 * SCALE)
-workspace.StreamingMinRadius = math.floor(110 * SCALE)
+
+--[[
+	THE TWO RADII ARE NO LONGER SCRIPTABLE, AND THIS ABORTED THE WHOLE BUILD.
+
+	`workspace.StreamingTargetRadius = ...` now raises "StreamingTargetRadius is not a valid member of
+	Workspace". Both radii have left the scriptable API — they are absent from `.luau-defs/globalTypes`
+	as well, which is why `luau-lsp analyze` flags the same two lines — and they are set from the
+	Properties panel instead.
+
+	It threw at the LAST executable statement before the receipt, so the whole barrio built correctly
+	and then the script died one line before printing that it had. The symptom was an error about
+	streaming and no receipt at all, which reads as "the build failed" when nothing of the sort
+	happened. That is the same shape as the `Lighting.Technology` refusal above, so it gets the same
+	treatment: attempt it, survive the refusal, and say what a human has to do by hand.
+
+	C17's measured values, for whoever sets them: TARGET 341, MIN 170 (220 and 110 at SCALE 1.55).
+]]
+local streamingOk, streamingErr = pcall(function()
+	(workspace :: any).StreamingTargetRadius = math.floor(220 * SCALE);
+	(workspace :: any).StreamingMinRadius = math.floor(110 * SCALE)
+end)
+
+if not streamingOk then
+	warn(
+		`[barrio] streaming radii are not scriptable ({streamingErr}) — set them on Workspace by hand: `
+			.. `StreamingTargetRadius = {math.floor(220 * SCALE)}, StreamingMinRadius = {math.floor(
+				110 * SCALE
+			)}`
+	)
+end
 
 --------------------------------------------------------------------------------
 -- THE RECEIPT
@@ -911,4 +2155,62 @@ print(
 		.. `{count("FetchSource")} FetchSource, {count("SaltSpawn")} SaltSpawn, `
 		.. `{count("EscapeGate")} EscapeGate, {count("TrialSpawn")} TrialSpawn, `
 		.. `{count("TrialChase")} TrialChase, {#root:GetDescendants()} instances, scale {SCALE}`
+)
+
+--[[
+	C30's SECOND RECEIPT, and it exists because this chunk's done condition is a PERFORMANCE claim
+	as much as a visual one: "crossing time unchanged; FPS unchanged".
+
+	Two of these three numbers are the ones that could break it, and both are asserted rather than
+	merely printed — a dressing pass that quietly added a collidable prop or a PointLight would
+	otherwise be discovered by a player on a phone, which is the worst place to discover it.
+
+	  · COLLIDERS. Nothing in `Dressing` may collide. PathfindingService builds its navmesh from
+	    collision geometry, so this is the property that makes "crossing time unchanged" true by
+	    construction rather than by hoping the re-measure agrees.
+	  · LIGHTS. `Dressing` adds none. Fourteen was the count before this chunk and it is the count
+	    after it, so `Config.Performance.MaxVisibleLights` is spending exactly what it spent at C28.
+]]
+local dressing = root:FindFirstChild("Dressing")
+local dressParts, dressColliders, dressLights = 0, 0, 0
+
+if dressing then
+	for _, item in dressing:GetDescendants() do
+		if item:IsA("BasePart") then
+			dressParts += 1
+
+			if item.CanCollide then
+				dressColliders += 1
+			end
+		elseif item:IsA("Light") then
+			dressLights += 1
+		end
+	end
+end
+
+local mapLights = count("MapLight")
+local totalLights = 0
+
+for _, item in root:GetDescendants() do
+	if item:IsA("Light") then
+		totalLights += 1
+	end
+end
+
+print(
+	`[barrio] dressing — {dressParts} props, {dressColliders} colliders, {dressLights} own lights; `
+		.. `{totalLights} lights in the barrio, {mapLights} tagged MapLight`
+)
+
+assert(
+	dressColliders == 0,
+	`[barrio] C30 RULE 1 BROKEN: {dressColliders} dressing parts collide — the navmesh, and therefore the crossing time, has moved`
+)
+assert(
+	dressLights == 0,
+	`[barrio] C30 RULE 2 BROKEN: dressing added {dressLights} dynamic lights — Config.Performance.MaxVisibleLights is being overspent`
+)
+assert(
+	mapLights == totalLights,
+	`[barrio] {totalLights - mapLights} light(s) in the barrio are not tagged MapLight — PerformanceController cannot cull what it cannot see`
 )

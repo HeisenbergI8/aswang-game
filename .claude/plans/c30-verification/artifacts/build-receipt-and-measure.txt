@@ -1,0 +1,88 @@
+C30 — map art dressing. Studio Edit mode, aswang.rbxl, 2026-08-19.
+Generator run: tools/greybox/barrio.luau, then tools/greybox/measure.luau.
+
+═══ BUILD RECEIPT (barrio.luau) ═══════════════════════════════════════════════
+
+[barrio] could not set Lighting.Technology to Future (The current thread cannot write 'Technology'
+         (lacking capability RobloxScript)) — set it by hand in Studio.
+[barrio] streaming radii are not scriptable (StreamingTargetRadius is not a valid member of Workspace
+         "Workspace") — set them on Workspace by hand: StreamingTargetRadius = 341,
+         StreamingMinRadius = 170
+[barrio] built — 12 TaskPoint (+2 TrialOnly), 4 FetchSource, 6 SaltSpawn, 1 EscapeGate, 1 TrialSpawn,
+         1 TrialChase, 1141 instances, scale 1.55
+[barrio] dressing — 859 props, 0 colliders, 0 own lights; 14 lights in the barrio, 14 tagged MapLight
+
+Every map contract in barrio.luau's header is unchanged: 12 round task points, 2 trial-only, 4 fetch
+sources, 6 salt spawns, 1 gate, 1 trial spawn, 1 trial chase.
+
+The dressing line is C30's own receipt, and its three assertions all passed (the script aborts if any
+fails):
+  · 0 colliders  — nothing in Dressing collides, so the navmesh cannot have moved
+  · 0 own lights — the dressing added no dynamic light; Config.Performance is spending what C28 spent
+  · 14 == 14     — every light in the barrio is tagged MapLight
+
+MapLight WAS 0 BEFORE THIS RUN. Measured in the place at the start of the session:
+    parts=239 lights=14 | TaskPoint=14 FetchSource=4 SaltSpawn=6 EscapeGate=1 TrialSpawn=1
+    TrialChase=1 MapLight=0
+The barrio in the place file predated the tagging that `lantern()` and the chapel candle now do, so
+PerformanceController's light culler had nothing to cull and all 14 lanterns stayed lit regardless of
+the budget. Re-running the generator fixed it. This was pre-existing and is not a C30 change.
+
+═══ MEASURE, AFTER THE DRESSING (measure.luau) ════════════════════════════════
+
+[measure] barrio
+  ok    crossing: 34.8s worst (chapel -> riceSE) — §5 target 30-40s at WalkSpeed 16
+  ok    reach: 23/23 tagged parts have a walkable spot inside their own range
+  ok    loop: sealing Alley_NE leaves all 23 tagged parts reachable
+  ok    loop: sealing Alley_SW leaves all 23 tagged parts reachable
+  ok    loop: sealing Alley_SE leaves all 23 tagged parts reachable
+  ok    loop: sealing Road_N leaves all 23 tagged parts reachable
+  ok    loop: sealing Road_S leaves all 23 tagged parts reachable
+  ok    loop: sealing Road_E leaves all 23 tagged parts reachable
+  ok    loop: sealing Road_W leaves all 23 tagged parts reachable
+  ok    lights: 2 overlapping at worst of 324 sampled points (-78, 78) — §5 mobile cap ~8
+
+CROSSING TIME IS THE DONE CONDITION AND IT IS IDENTICAL, NOT MERELY CLOSE.
+C17's verification.md line 138 records "34.8s worst crossing" for the greybox. This run reports
+34.8s worst, same pair (chapel -> riceSE). That follows from the no-collider rule rather than from
+luck: PathfindingService builds its navmesh from collision geometry, and 859 non-collidable props
+are invisible to it.
+
+LIGHTS: worst-case 2 overlapping over 324 sampled points, against §5's ~8 cap. The dressing added
+none, so this number is C28's number.
+
+═══ MEASURE, BEFORE measure.luau WAS FIXED (same map, same run) ═══════════════
+
+The first post-dressing run reported eight failures, ALL of them the Solo Trial's two practice
+points, which are sealed in a corner at (-300, 300) and reachable only by teleport — by design:
+
+  FAIL  reach: 23/25 tagged parts ... — TrialTask_One, TrialTask_Two
+  FAIL  loop: sealing Alley_NE CUTS OFF TrialTask_One, TrialTask_Two
+  FAIL  loop: sealing Alley_SW CUTS OFF TrialTask_One, TrialTask_Two
+  FAIL  loop: sealing Alley_SE CUTS OFF TrialTask_One, TrialTask_Two
+  FAIL  loop: sealing Road_N  CUTS OFF TrialTask_One, TrialTask_Two
+  FAIL  loop: sealing Road_S  CUTS OFF TrialTask_One, TrialTask_Two
+  FAIL  loop: sealing Road_E  CUTS OFF TrialTask_One, TrialTask_Two
+  FAIL  loop: sealing Road_W  CUTS OFF TrialTask_One, TrialTask_Two
+
+Nothing about the map was wrong. measure.luau collected every TaskPoint-tagged part and did not make
+the `TrialOnly` exclusion that TaskService.discoverPool makes, so it had been reporting eight red
+lines on every run since C21. Fixed in measure.luau; the run above is the same map re-measured.
+
+═══ ANCHOR-CLEARANCE SWEEP (written for this chunk, run against the live map) ══
+
+Every BasePart under Barrio.Dressing walked against every tagged anchor, flagging any prop whose
+horizontal footprint comes within 4 studs of an anchor centre at reachable height.
+
+FIRST RUN — 7 hits, 2 of them real:
+  Wash_NE_PoleB      over SaltSpawn_KuboNE   at 3.1 studs   <- a bamboo pole standing on the pouch
+  Wash_NE_Rope_Seg4  over SaltSpawn_KuboNE   at 6.2 studs
+  Banana4_Leaf1..4   over SaltSpawn_AlleySW  at 6.2 studs   <- four 9-stud leaves over the pouch
+  Fiesta3_Seg4       over SaltSpawn_Plaza    at 9.3 studs   <- a wire ~7 studs overhead; not blocking
+
+AFTER MOVING Wash_NE TO (62,-58)-(88,-58) AND Banana4 TO (-90, 52):
+  BLOCKING_AT_GROUND=0
+
+This is the failure an art pass causes and no check catches: salt is §4.6's only counterplay to the
+Aswang, and a pouch behind a banana leaf is a corner of the map with no counterplay in it. No check
+script, no analyze pass and no test would have said a word.
