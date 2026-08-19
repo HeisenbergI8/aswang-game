@@ -299,9 +299,10 @@ its entire history on every remaining turn and buys nothing the plan directory d
 Finish the milestone, commit, then open a new session and read the plan index.
 
 Supporting skills: `lean-code` (before writing), `studio-sync` (before touching Studio), `asset-pipeline`
-(before making any art or sound), `playtest` (for the M5/M12 human gates), `debug-ladder` (after two
-failed fix attempts), `lesson-keeper`, `lessons-review`, `git-committer`. The built-in `/simplify`,
-`/code-review` and `/security-review` cover post-write cleanup and review — do not duplicate them.
+(before making any art or sound), `ui-polish` (before any HUD change, and for C26/C27), `playtest` (for
+the M5/M12 human gates), `debug-ladder` (after two failed fix attempts), `lesson-keeper`,
+`lessons-review`, `git-committer`. The built-in `/simplify`, `/code-review` and `/security-review` cover
+post-write cleanup and review — do not duplicate them.
 
 ### The task loop — `/build`
 

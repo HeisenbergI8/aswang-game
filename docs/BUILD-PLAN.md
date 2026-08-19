@@ -591,7 +591,54 @@ impossible.
 Now polish C18, informed by what GATE 1 told you. The end screen is where the reveal lands — §4.8 calls
 it the screenshot people share, and §8.4 says the cosmetic shop belongs here and nowhere else.
 
-**Done** every HUD element themed, readable, and animated on change; the reveal has weight.
+**Load `.claude/skills/ui-polish/SKILL.md` before starting.** It carries the motion vocabulary (which
+easing, which duration, for which moment), the mobile thumb-zone and scaling rules, the polish checklist,
+and the secrecy rules that apply to UI specifically. It exists so this chunk is not re-derived from
+general Roblox advice, which is written for menus rather than for a HUD read at a glance in fog.
+
+The three constraints that outrank taste, in short:
+
+- **Role-conditional UI lives in `PlayerGui` and nowhere else.** Anything drawn in the world — a
+  `BillboardGui`, a `Highlight`, a `ParticleEmitter` — is visible to every client.
+- **The Aswang's HUD differs in CONTENT, never in SHAPE.** Same panels, same positions, same animations.
+  §4.4's fake task list only works if the screen it sits in is indistinguishable.
+- **Numbers go in `UIController`'s `LAYOUT` / `MOTION` / `COLOUR` tables** with a `config-ok` reason.
+  `check:config` enforces this; a duration that must agree with a balance value is not `config-ok` at all
+  — `MOTION.TaskBar = Config.Round.SnapshotInterval` is the pattern.
+
+#### Animated art, if a still image is not enough
+
+Most of "animated on change" is code — a `TweenService` pulse on a value, a slide on a panel, a fade on a
+takeover. Nothing needs an art asset. Where a genuine moving image IS wanted (a title flourish, a loading
+screen, an end-screen accent), the route is a **sprite sheet**, not a video:
+
+| Route | Verdict |
+| --- | --- |
+| Tween a still `ImageLabel` in code | ✅ first choice — free, instant, no upload, no moderation wait |
+| **Sprite sheet** — one image of N frames, cycled by `ImageRectOffset` | ✅ the only real "animated asset" worth doing here. One free upload, one download, mobile-safe |
+| `VideoFrame` | ❌ **2,000 Robux per upload**, needs ID verification, max 2 playing at once, capped at 1280×720, and **no transparency** — a solid rectangle on a HUD |
+
+Sprite-sheet rules, so this does not become a performance bug later:
+
+- **Keep the sheet ≤ 1024px on its longest side.** §5's mobile budget is non-negotiable and a 4096px sheet
+  is a real memory cost on a mid-range Android.
+- **12–15 fps is plenty.** 30 costs battery for motion nobody sees through fog.
+- **The animator stops itself when the UI is hidden.** A loop still ticking during a chase is a frame cost
+  with nothing on screen to justify it.
+- Frame size, count and fps live in `LAYOUT` with `config-ok` reasons, like every other HUD number.
+
+**Who does which step:** you supply or generate the picture and turn it into a frame strip (external AI
+tooling — nothing in this project generates images; see `asset-pipeline`). The agent uploads it with
+`upload_image` and writes the cycling code. **Upload early** — assets sit in Roblox's moderation queue for
+minutes to hours before they resolve, and that is not a thing to discover on publish day.
+
+> **Scope note.** §3's OUT list says "Custom animations". That means **character** animation — the
+> Animation Editor, a custom monster rig, the thing §4.3 deliberately replaced with a scale-and-colour
+> tween. A cycling `ImageLabel` in the HUD is UI, and "Mobile-first UI" is on the ✅ IN list. If a sprite
+> sheet ever starts describing a *creature performing an action*, that is the line and it has been crossed.
+
+**Done** every HUD element themed, readable, and animated on change; the reveal has weight; the polish
+checklist in `ui-polish` passes against a screenshot.
 **Verify** playtester screenshots each phase, plus both win reveals.
 
 ---
@@ -600,6 +647,10 @@ it the screenshot people share, and §8.4 says the cosmetic shop belongs here an
 **Tier** Medium · **Runner** 🤝 · **Deps** C26
 
 §5's budget is non-negotiable — 60% of your players are on a phone.
+
+`.claude/skills/ui-polish/SKILL.md` carries the scaling rule (design at one reference size, one `UIScale`
+per ScreenGui, and clamp the floor — a pure viewport ratio puts a phone at 0.22× and makes the HUD
+unreadable), the thumb-zone and safe-inset numbers, and the UI performance traps. Read it first.
 
 - Touch buttons for transform, interact, throw, quick chat. Thumb zones, not desktop positions scaled down.
 - `StreamingEnabled` tuned; dynamic lights capped at `MaxVisibleLights` (8).
