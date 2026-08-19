@@ -43,6 +43,15 @@ export type PlayerProfile = {
 		LastClaimUTC: number,
 		Streak: number,
 	},
+	--[[
+		§6.6's fourth field, missing from the scaffold. A CACHE STAMP, not an entitlement: it records
+		when this server last asked Roblox which gamepasses the player owns, so C35 can avoid a
+		`UserOwnsGamePassAsync` call on every check. Ownership itself is never stored here — a cached
+		"owns it" is a value that survives a refund, and the authority is Roblox, not us.
+	]]
+	Purchases: {
+		GamepassCacheUTC: number,
+	},
 }
 
 -- A task instance selected for the current round.

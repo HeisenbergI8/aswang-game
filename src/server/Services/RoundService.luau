@@ -27,6 +27,9 @@ local Remotes = require(Shared.Remotes)
 -- init.server.luau swallows it into a single warn, and the server sits in IDLE forever looking exactly
 -- like "nobody has joined yet".
 local RoleService = require(script.Parent.RoleService)
+-- A LEAF. It requires nothing but Config, so it cannot participate in a require cycle — which is the
+-- reason the flush goes through it instead of this service requiring ProgressionService directly.
+local ShutdownFlush = require(script.Parent.Parent.ShutdownFlush)
 local BodyTransitions = require(Shared.pure.BodyTransitions)
 local RejoinResolve = require(Shared.pure.RejoinResolve)
 local RoundTransitions = require(Shared.pure.RoundTransitions)
@@ -1198,12 +1201,16 @@ end
 
 local function onServerClosing()
 	-- Spec §6.4: a shutdown must flush player data before the process dies, and Roblox gives you a
-	-- short window to do it. Nothing owns player data yet — ProfileStore lands at C31 — so this is
-	-- deliberately empty. It exists NOW so that there is exactly one flush point when there is
-	-- something to flush, rather than three services each binding their own and racing.
-	-- TODO(C31): flush every loaded profile here, and only here.
+	-- short window to do it. This is still the ONLY `BindToClose` in the game; C31 filled it by way
+	-- of a registry rather than by this service learning what a profile is. Anything else needing to
+	-- run before the process dies calls `ShutdownFlush.register` in its own `Start()`.
+	--
+	-- SYNCHRONOUS AND YIELDING. `flushAll` calls its handlers on this thread; a DataStore write inside
+	-- one is exactly the yield Roblox is waiting on here.
+	ShutdownFlush.flushAll()
+
 	if Config.Debug.VerboseLogging then
-		print("[RoundService] Server closing — nothing to flush yet.")
+		print("[RoundService] Server closing — flush complete.")
 	end
 end
 

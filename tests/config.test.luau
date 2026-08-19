@@ -799,6 +799,31 @@ for cueId in Config.Audio.Assets do
 	check(`the {cueId} slot is reachable by a rule`, known)
 end
 
+--[[
+	C31. Roblox's `BindToClose` window is roughly 30 seconds and then the process dies mid-write —
+	which is the exact failure the flush exists to prevent, arriving by a different door. A budget at
+	or above the window is a budget that has never actually bounded anything.
+]]
+check(
+	"the shutdown flush budget stays inside Roblox's BindToClose window",
+	Config.Profile.ShutdownFlushBudget < 30,
+	`{Config.Profile.ShutdownFlushBudget}s`
+)
+
+--[[
+	C31. A player who joins during INTERMISSION must have a profile — or a settled failure — before
+	the round they joined for begins, or the first thing C32 awards them lands on a profile that is
+	still loading and is thrown away when it arrives.
+]]
+check(
+	"session retries resolve before a round can start",
+	Config.Profile.SessionStartAttempts * Config.Profile.SessionStartRetryDelay
+		< Config.Round.Intermission + Config.Round.StartingDelay,
+	`{Config.Profile.SessionStartAttempts} x {Config.Profile.SessionStartRetryDelay}s`
+)
+
+check("at least one session attempt is made", Config.Profile.SessionStartAttempts >= 1)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end

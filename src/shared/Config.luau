@@ -438,6 +438,37 @@ local Config = {
 		XPPerLevel = 500,
 	},
 
+	--[[
+		Profile persistence (C31, §6.6).
+
+		THE SCHEMA VERSION IS NOT HERE, AND THAT IS DELIBERATE. It lives in
+		`shared/pure/ProfileMigration.luau` as `CURRENT_VERSION`, because that module must run under
+		Lune and cannot require this file — Lune has no `script`. Duplicating it here would create two
+		sources of truth for the one number where disagreement means data loss, and the copy the
+		migration actually reads would be the one nobody edited.
+	]]
+	Profile = {
+		--[[
+			The DataStore name. CHANGING THIS ORPHANS EVERY EXISTING PLAYER — it is a new namespace,
+			not a rename, and there is no migration path back. It carries no version suffix on
+			purpose: `ProfileMigration` is how the schema moves, and a name bump would make that
+			module dead code the first time it was needed.
+		]]
+		StoreName = "PlayerProfile",
+
+		-- How many times to retry `StartSessionAsync` before giving up on a player. A failed session
+		-- is not fatal — they play, nothing saves, and the warn says so — but it should be rare.
+		SessionStartAttempts = 3,
+		SessionStartRetryDelay = 4,
+
+		--[[
+			The wall-clock budget `ShutdownFlush.flushAll()` may spend inside `game:BindToClose`.
+			ROBLOX GIVES ABOUT 30 SECONDS AND THEN KILLS THE PROCESS MID-WRITE, so this must stay
+			under it with room to spare — pinned in `tests/config.test.luau` rather than trusted.
+		]]
+		ShutdownFlushBudget = 25,
+	},
+
 	-- The Solo Trial: tutorial + low-population fallback. See spec §9.1.
 	-- Exists because the closest competitor lost 79.9% of players before their
 	-- first objective (Appendix C). Must never grow into a PvE campaign.

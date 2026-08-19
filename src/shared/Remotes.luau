@@ -37,6 +37,19 @@ local EVENTS_DOWN = {
 	"SaltEffect",
 	"RoundEnded", -- includes the reveal
 	"QuickChatBroadcast",
+	--[[
+		C32/C33. STILL UNWIRED, AND THE PAYLOAD IS THE TRAP. `Types.PlayerProfile` contains
+		`Stats.AswangRounds` and `AswangWins` — a per-player history of drawing the role — so the
+		obvious implementation, "send the player their profile", ships role history to a client.
+
+		`check-secrecy.mjs` enforces its payload rule ONLY on the two allowlisted remotes (`RoundEnded`,
+		`RoleAssigned`), so a whole-profile payload here would pass `npm run verify` GREEN. Nothing
+		mechanical stops it; this comment is the stop.
+
+		Send an explicit field list — XP, Level, Coins, Equipped. If a whole profile is ever genuinely
+		wanted, add this remote to `check-secrecy.mjs`'s allowlist WITH a reason first, so the decision
+		appears in a diff instead of in a payload. (Raised by `exploit-auditor` during C31.)
+	]]
 	"ProfileUpdated",
 	--[[
 		C15. FireClient to ghosts ONLY, one payload per recipient, NEVER FireAllClients.
