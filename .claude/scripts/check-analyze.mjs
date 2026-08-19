@@ -28,7 +28,7 @@
 // `--update` refuses to run when CLAUDE_AGENT_TYPE is set: re-blessing is a human act.
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
 import { DEFS_PATH, SOURCEMAP, regenerateSourcemap, sourcemapStale } from './check-toolchain.mjs'
 
@@ -101,6 +101,23 @@ const analyze = () => {
     // see. Enforcing them strictly reports errors about the MAP, which lives in Studio and not in
     // Git — findings no code change can resolve.
     '--no-strict-dm-types',
+    // Third-party Luau is USED for type resolution but not GRADED. `src` is the only argument, but a
+    // `require` into `ServerScriptService.Packages` pulls `vendor/` in transitively, and ProfileStore
+    // reports 89 diagnostics against this repo's standard — code nobody here wrote and nobody here
+    // may edit (`vendor/README.md`).
+    //
+    // ANCHORED, AND THAT IS LOAD-BEARING. It reads `vendor/**` and NOT `**/vendor/**`: the latter
+    // matches a `vendor` segment ANYWHERE, so a type error at `src/shared/vendor/x.luau` reported
+    // `analyze: ok` — a real error inside our own tree, silently swallowed, which is the one failure
+    // this gate exists to prevent. Measured, not reasoned about; the ALLOW/DENY pair is pinned in
+    // this script's own `--self-test`, which runs the real binary over real probe files.
+    //
+    // WHY THIS AND NOT `analyze-baseline.json`. The baseline is keyed on file+kind+message, so
+    // vendored diagnostics would churn it on every dependency upgrade, and `--update` refuses to run
+    // under an agent — a dependency bump would halt an unattended build on a file we do not own. This
+    // flag says the same thing once, in a line that shows up in a diff, and leaves the baseline empty
+    // and the gate over `src/` exactly as strict as it was.
+    '--ignore=vendor/**',
     'src'
   ]
 
@@ -154,6 +171,64 @@ const selfTest = () => {
   check('a new diagnostic is fresh', grade([different], baseline).fresh.length, 1)
   check('a resolved diagnostic is reported as fixed', grade([], baseline).fixed.length, 1)
   check('a clean tree with an empty baseline passes', grade([], new Set()).fresh.length, 0)
+
+  // ── THE `--ignore` GLOB, PROVEN AGAINST THE REAL BINARY ──────────────────────
+  //
+  // Everything above is a pure function over a sample string, and none of it can see a glob. The
+  // exemption for vendored third-party Luau is decided inside `luau-lsp` by pattern matching, so the
+  // only way to pin it is to run the real analyzer over real files.
+  //
+  // This suite exists because it caught something. The first spelling was `**/vendor/**`, which
+  // matches a `vendor` segment ANYWHERE — a type error at `src/shared/vendor/x.luau` was silently
+  // swallowed and the gate reported `analyze: ok`. Both directions are pinned here so the anchoring
+  // cannot regress into the broad form again.
+  //
+  //   ALLOW — a diagnostic under `vendor/` is suppressed (that is the flag's whole job)
+  //   DENY  — a diagnostic under `src/`, INCLUDING a `src/**/vendor/**` path, is still reported
+  const globCases = () => {
+    const probes = [
+      // [label, path, must the diagnostic be reported?]
+      ['a type error under src/ is still reported', 'src/__selftest_probe.luau', true],
+      ['a `vendor` segment inside src/ does NOT exempt it', 'src/__selftest_vendor/probe.luau', true],
+      ['a type error under vendor/ is suppressed', 'vendor/__selftest_probe.luau', false]
+    ]
+
+    const created = []
+
+    try {
+      for (const [label, path, mustReport] of probes) {
+        const dir = path.slice(0, path.lastIndexOf('/'))
+
+        if (!existsSync(dir)) {
+          mkdirSync(dir, { recursive: true })
+          created.push(dir)
+        }
+
+        writeFileSync(path, '--!strict\nlocal x: number = "not a number"\nreturn x\n')
+        created.push(path)
+
+        regenerateSourcemap()
+
+        const reported = parse(analyze()).some(diagnostic => diagnostic.file.endsWith(path))
+
+        check(label, reported, mustReport)
+
+        rmSync(path, { force: true })
+      }
+    } finally {
+      // A probe left behind under `src/` poisons every later analyze run, so cleanup is unconditional.
+      for (const path of [...created].reverse()) rmSync(path, { force: true, recursive: true })
+      regenerateSourcemap()
+    }
+  }
+
+  // Skipped rather than failed when the binary is absent: the pure cases above still mean something on
+  // a machine without the toolchain, and a suite that cannot run is not a suite that failed.
+  if (existsSync(DEFS_PATH)) {
+    globCases()
+  } else {
+    console.log('  SKIP  check-analyze: glob cases need the toolchain — run `npm run check:toolchain`')
+  }
 
   console.log(failures ? `  FAIL  check-analyze: ${ran - failures}/${ran}` : `  PASS  check-analyze: ${ran}/${ran} cases`)
 
