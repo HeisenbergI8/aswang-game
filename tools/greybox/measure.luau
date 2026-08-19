@@ -158,6 +158,26 @@ local function tagged(): { { Part: BasePart, Range: number } }
 
 	for tag, range in RANGE_BY_TAG do
 		for _, instance in CollectionService:GetTagged(tag) do
+			--[[
+				`TrialOnly` IS SKIPPED HERE FOR THE SAME REASON `TaskService.discoverPool` SKIPS IT,
+				and leaving it out made this script cry wolf on every run since C21.
+
+				The Solo Trial's two practice points carry the ordinary `TaskPoint` tag and live in a
+				sealed corner at (-300, 300) that is reachable ONLY by being teleported into it —
+				`barrio.luau` says so at length, and it is deliberate: a player who can walk into the
+				tutorial mid-round finds objectives that do not count.
+
+				So they are unreachable BY DESIGN, and every check in this file that asks "can a
+				character walk here" was correctly answering "no" and reporting it as a map defect.
+				That was 1 reach failure and 7 loop failures — every corridor test "cut off" the two
+				trial points, because sealing any corridor anywhere cannot connect what was never
+				connected. Eight red lines that meant nothing, on a report whose whole value is that
+				a red line means something.
+			]]
+			if instance:GetAttribute("TrialOnly") == true then
+				continue
+			end
+
 			if instance:IsA("BasePart") and instance:IsDescendantOf(workspace) then
 				table.insert(found, { Part = instance, Range = range })
 			end
