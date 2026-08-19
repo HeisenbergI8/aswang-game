@@ -23,6 +23,34 @@ The *layout* can. `barrio.luau` is the layout — every coordinate, zone and tag
 3. File → Publish to Roblox.        ← neither script can do this, and it is the only backup
 ```
 
+### Running them through MCP without pasting 70KB every time
+
+`barrio.luau` is ~70KB. Handing it to `execute_luau` inline costs roughly 20k tokens **per run**, and
+an art pass is a dozen runs — you edit, re-run, look, edit again. Serve the folder instead and let
+Studio fetch it:
+
+```bash
+python3 -m http.server 8731 --bind 127.0.0.1 --directory tools/greybox
+```
+
+```lua
+-- in execute_luau, Edit mode. HttpEnabled is off by default in a new place.
+game:GetService("HttpService").HttpEnabled = true
+local src = game:GetService("HttpService"):GetAsync("http://127.0.0.1:8731/barrio.luau?v=1")
+local fn = assert((loadstring or load)(src, "barrio"))
+fn()
+```
+
+Each re-run is then ~200 tokens instead of ~20k. **Bump the `?v=` each time** — without it you can be
+served a cached copy of the file you just edited, which looks exactly like an edit that did nothing.
+
+Put `HttpEnabled` back to `false` when you are done. It is a published place setting, not a local one.
+
+**Two capability limits are not bugs and both warn rather than fail.** `Lighting.Technology` and the
+two streaming radii cannot be written from this context — `Technology` needs `RobloxScript`, and
+`StreamingTargetRadius` / `StreamingMinRadius` have left the scriptable API entirely. The script tells
+you the numbers to set by hand and carries on.
+
 `barrio.luau` is **idempotent**: it destroys `workspace.Barrio`, `TaskRig_TEMP`, `SaltRig_TEMP` and
 `Baseplate` before building, so re-running after an edit applies the edit rather than layering a second
 barrio on top of the first. Edit the file, re-run it, re-run `measure.luau`, publish.
