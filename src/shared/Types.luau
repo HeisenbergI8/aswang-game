@@ -647,4 +647,74 @@ export type TeachingCueId =
 	| "CUE_FIRST_TRANSFORM_SEEN"
 	| "CUE_FIRST_TWO_PERSON"
 
+--[[
+	One line of the end screen's XP breakdown (C32). Plain strings and numbers — the copy is already
+	public and no literal union travels inside this list.
+]]
+export type AwardLine = {
+	Label: string,
+	XP: number,
+	Coins: number,
+}
+
+export type RoundAward = {
+	XP: number,
+	Coins: number,
+	Lines: { AwardLine },
+}
+
+-- What the lobby's daily button needs to draw itself (C33). A preview, never a claim: pressing it
+-- fires `RequestClaimDaily` and `DailyService` re-runs `pure/DailyStreak` and decides.
+export type DailyPreview = {
+	Claimable: boolean,
+	Streak: number,
+	CycleDay: number,
+	RewardXP: number,
+	RewardCoins: number,
+}
+
+--[[
+	THE `ProfileUpdated` PAYLOAD (C32/C33/C34), AND `PlayerProfile` IS NOT IT.
+
+	READ THE RoundEndedPayload COMMENT ABOVE FIRST — both of its warnings apply here and neither guard
+	is watching this remote:
+
+	  · Luau accepts an EXTRA field on an annotated table silently. Measured, and still true.
+	  · `check-secrecy.mjs` checks payload FIELDS only for remotes on its REVEAL_ALLOWLIST, and
+	    `ProfileUpdated` is deliberately NOT on that list — it carries no role, so it must keep being
+	    scanned like any other remote rather than being skipped like the two that do.
+
+	So this type is the whole of the enforcement, and it is an EXPLICIT FIELD LIST rather than a
+	trimmed profile. `PlayerProfile.Stats` holds `AswangRounds` and `AswangWins` — a per-player history
+	of drawing the role — and the way that never reaches a client is that there is no field here for it
+	to arrive in. `Remotes.luau`'s entry says the same thing; adding a field to this type is a decision
+	to review by hand, because nothing mechanical will review it.
+
+	FIRED TO ONE PLAYER, ALWAYS. Every field describes the receiver: their own XP, their own coins,
+	their own inventory. A `FireAllClients` of this payload would hand eight clients eight players'
+	levels and owned sets, which is enough to follow a specific person across rounds.
+]]
+export type ProfileSnapshot = {
+	XP: number,
+	Level: number,
+	-- The level bar, pre-divided by `pure/XPCurve` so the client never does the arithmetic and the two
+	-- ends cannot disagree about where the fill sits. `XPForNextLevel` is 0 at the cap, and a client
+	-- that divides by it gets a NaN — so `Progress` is sent as well and is what the bar reads.
+	XPIntoLevel: number,
+	XPForNextLevel: number,
+	Progress: number, -- 0..1
+	Coins: number,
+	Equipped: {
+		Skin: string,
+		Lantern: string,
+		DeathFX: string,
+	},
+	-- The receiver's OWN inventory, as an id -> true set. Never anyone else's.
+	Owned: { [string]: boolean },
+	Daily: DailyPreview,
+	-- Present only on the push that follows a round, so the end screen can show what was earned and
+	-- every other push leaves it nil rather than repeating a stale award.
+	LastAward: RoundAward?,
+}
+
 return {}

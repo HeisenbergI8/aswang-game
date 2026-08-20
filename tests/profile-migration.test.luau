@@ -46,11 +46,23 @@ do
 		template.XP == 0 and template.Level == 1 and template.Coins == 0
 	)
 	check("§6.6's Purchases field is present", template.Purchases.GamepassCacheUTC == 0)
+	--[[
+		THE THREE SLOTS ARE FILLED, AND WITH WHAT IS PINNED NEXT DOOR.
+
+		This assertion read `== "default"` three times until C34, which is when the ids stopped being
+		interchangeable: `Config.Cosmetics.Catalogue` gives each slot its own default entry, because
+		`Cosmetics.find` resolves by id alone. Restating the three literals here would make this suite
+		a second place that has to be edited when the catalogue moves, and a stale copy would pass.
+
+		So this checks the property THIS file owns — every slot starts non-empty — and
+		`tests/cosmetics.test.luau` checks the one it does not: that each of those ids is a real
+		catalogue entry, in the right slot, that a fresh player already owns.
+	]]
 	check(
-		"the three cosmetic slots default",
-		template.Cosmetics.Equipped.Skin == "default"
-			and template.Cosmetics.Equipped.Lantern == "default"
-			and template.Cosmetics.Equipped.DeathFX == "default"
+		"the three cosmetic slots start filled",
+		#template.Cosmetics.Equipped.Skin > 0
+			and #template.Cosmetics.Equipped.Lantern > 0
+			and #template.Cosmetics.Equipped.DeathFX > 0
 	)
 
 	local first = ProfileMigration.template()

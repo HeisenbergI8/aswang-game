@@ -21,7 +21,7 @@
 
 local Config = require("../src/shared/Config")
 
--- Hand copy of Remotes.EVENTS_UP, last synced at C25. See the header for why.
+-- Hand copy of Remotes.EVENTS_UP, last synced at C34. See the header for why.
 -- C25 checked this list and added NOTHING: the quick-chat wheel ships on the `RequestQuickChat`
 -- entry that was already here, because the world ping is a DERIVED FIELD on the broadcast rather
 -- than a second remote. A ping remote would have handed the client a "draw an arrow anywhere"
@@ -40,6 +40,10 @@ local UP_REMOTES = {
 	"ReportGhostPosition",
 	"RequestGhostSpook",
 	"RequestEquipCosmetic",
+	-- C34. The equip's sibling, and a separate remote rather than an argument on it: a shop press and
+	-- a wardrobe press are different intents, and one remote doing both means an accidental tap on a
+	-- cycler can spend coins.
+	"RequestBuyCosmetic",
 	"RequestClaimDaily",
 	-- C21. Both argument-free button presses. `RequestStartTrial` is the only remote in the game whose
 	-- handler spawns an NPC and teleports a character, which is why it is budgeted rather than left to

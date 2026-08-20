@@ -8,14 +8,22 @@
 
 	THE SECRET IS NOT IN HERE, AND ONE FIELD IS WORTH NAMING. `Stats.AswangRounds` and `AswangWins` are
 	a history of how often this player drew the role. Server-only, like the rest of the profile — but
-	unlike XP they would be a genuine leak if surfaced, so no remote in this file, no attribute, no
-	tag, and NO `leaderstats` FOLDER: `leaderstats` is the standard Roblox way to show a number and it
-	replicates to every client by design. C33 surfaces progression through a deliberate remote.
+	unlike XP they would be a genuine leak if surfaced, so no attribute, no tag, and NO `leaderstats`
+	FOLDER: `leaderstats` is the standard Roblox way to show a number and it replicates to every client
+	by design.
 
-	NOTHING HERE TAKES A CLIENT VALUE — §6.6's fourth rule. `Award` and `BumpStat` are called by
-	server code with server-computed numbers; there is no `OnServerEvent` handler in this file, which
-	is why `check:ratelimit` has nothing to say about it. If that ever changes, the handler consults
-	`AntiCheatService` first and the remote is declared in `Remotes.luau` — both, or neither.
+	C32 ADDED THE DELIBERATE REMOTE THE LINE ABOVE PROMISED, AND IT SENDS A FIELD LIST RATHER THAN A
+	PROFILE. `PushProfile` fires `ProfileUpdated` with `Types.ProfileSnapshot` — XP, level, the bar's
+	two spans, coins, the equipped ids, the owned set and the daily preview. `Stats` is absent in full,
+	not trimmed, so there is no field for the role history to arrive in. FireClient to one player,
+	always; there is no FireAllClients path here and there must not be.
+
+	NOTHING HERE TAKES A CLIENT VALUE — §6.6's fourth rule, and it is still true. `Award`, `BumpStat`,
+	`SpendCoins`, `GrantCosmetic`, `SetEquipped` and `SetDaily` are called by server code with
+	server-computed numbers; there is still no `OnServerEvent` handler in this file, which is why
+	`check:ratelimit` has nothing to say about it. C33's `DailyService` and C34's `CosmeticsService`
+	own the three request handlers and consult `AntiCheatService` before calling in here — that
+	separation is the reason this file's one-way property survived those chunks.
 
 	THE WRAPPER IS THIN ON PURPOSE. Every decision about SHAPE lives in
 	`shared/pure/ProfileMigration.luau`, which runs under Lune and is tested exhaustively. What is left
@@ -28,9 +36,13 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
+local Cosmetics = require(Shared.pure.Cosmetics)
+local DailyStreak = require(Shared.pure.DailyStreak)
 local Enums = require(Shared.Enums)
 local ProfileMigration = require(Shared.pure.ProfileMigration)
+local Remotes = require(Shared.Remotes)
 local Types = require(Shared.Types)
+local XPCurve = require(Shared.pure.XPCurve)
 local RoundService = require(script.Parent.RoundService)
 local ShutdownFlush = require(script.Parent.Parent.ShutdownFlush)
 
@@ -76,6 +88,74 @@ local inFlight: { [number]: boolean } = {}
 
 local function keyFor(player: Player): string
 	return `Player_{player.UserId}`
+end
+
+--[[
+	The one down-remote this service owns, resolved once. Created by `Remotes` on the server at load,
+	so there is no WaitForChild here and no window in which a push could find nothing to fire.
+]]
+local profileUpdatedRemote = Remotes.Get("ProfileUpdated")
+
+--[[
+	The catalogue, annotated so `Cosmetics`'s functions typecheck against it rather than against
+	whatever the analyzer inferred from a Config table literal. It is DATA in `Config` and RULES in
+	`shared/pure/Cosmetics` — see that module's header for why the split is drawn there.
+]]
+local CATALOGUE: { Cosmetics.Item } = Config.Cosmetics.Catalogue
+
+-- The three parameter bundles the pure modules take, assembled from Config in one place each. Built
+-- per call rather than hoisted: they are three table constructors on paths that run once per round or
+-- once per button press, and a hoisted table is one a caller could mutate.
+local function curve(): XPCurve.Curve
+	return {
+		Base = Config.Economy.XPPerLevel,
+		Growth = Config.Economy.XPPerLevelGrowth,
+		MaxLevel = Config.Economy.MaxLevel,
+	}
+end
+
+local function rates(): XPCurve.Rates
+	return {
+		XPPerRound = Config.Economy.XPPerRound,
+		XPWinBonus = Config.Economy.XPWinBonus,
+		XPSurvivorEscapeBonus = Config.Economy.XPSurvivorEscapeBonus,
+		XPPerKill = Config.Economy.XPPerKill,
+		CoinsPerRound = Config.Economy.CoinsPerRound,
+		CoinsWinBonus = Config.Economy.CoinsWinBonus,
+	}
+end
+
+local function dailyParams(): DailyStreak.Params
+	return { Rewards = Config.Daily.Rewards }
+end
+
+--[[
+	LEVEL IS DERIVED FROM XP, AND STORED ANYWAY. The redundancy is deliberate and it is worth the line.
+
+	`XPCurve.levelFor` is the authority — the stored `Level` is never read to decide anything, and this
+	function overwrites it from `XP` after every award, so the two cannot drift. What the stored copy
+	buys is the case where they SHOULD drift: retuning `Economy.XPPerLevel` at M12 moves everybody's
+	level, and having the old value on disk is the difference between noticing that and not.
+
+	It also grants whatever the new level has earned (§7: "levels unlock cosmetics"). Run on every
+	award rather than only on a level-up, because `grantsAtLevel` answers "what should be owned at this
+	level" rather than "what is new" — so a grant missed during a DataStore outage, or one added to the
+	catalogue after a player passed its level, repairs itself on the next round instead of being lost.
+
+	Writes `Data` directly rather than going through `GrantCosmetic`, because every caller has already
+	passed the read-only latch and the finite guards by the time it gets here — and re-entering the
+	public path would `Save()` once per granted item.
+]]
+local function syncLevel(data: Profile)
+	local standing = XPCurve.levelFor(data.XP, curve())
+
+	data.Level = standing.Level
+
+	for _, id in Cosmetics.grantsAtLevel(CATALOGUE, standing.Level) do
+		if data.Cosmetics.Owned[id] ~= true then
+			data.Cosmetics.Owned[id] = true
+		end
+	end
 end
 
 -- `source` is `any`, so the cast always holds. Copying key-by-key rather than reassigning
@@ -192,8 +272,39 @@ local function startSession(player: Player)
 	sessions[userId] = profile
 	inFlight[userId] = nil
 
+	--[[
+		RECONCILE THE LEVEL WITH THE CURVE ON THE WAY IN (C32), before anything reads it.
+
+		The stored `Level` was computed by whatever `Config.Economy` said the day it was written, and
+		M12 retunes exactly those numbers. Without this a player who levelled under the old curve keeps
+		a level the curve no longer agrees with — and, worse, never receives the cosmetics their real
+		level has earned, because `grantsAtLevel` is only consulted on an award. Both repair here, once
+		per session, for the cost of one arithmetic walk.
+
+		Skipped for a read-only profile: `syncLevel` writes, and the whole point of the latch is that
+		this server never touches `Data` for a schema it does not own.
+	]]
+	if not readOnly[userId] then
+		syncLevel(profile.Data)
+	end
+
+	--[[
+		AND THE FIRST PUSH. The lobby's level bar, coin count, daily button and cosmetics list all read
+		one snapshot, so a player who joins and never finishes a round would otherwise see an empty
+		progression panel until the next round ended.
+
+		After `sessions[userId]` is set, because `PushProfile` reads through `GetProfile`, which reads
+		that table. `task.spawn`ed so a `FireClient` cannot stall the session-start thread — this runs
+		under `PlayerAdded`, and a player who leaves in the same frame is a live case.
+	]]
+	task.spawn(ProgressionService.PushProfile, player, nil)
+
 	if Config.Debug.VerboseLogging then
-		print(`[Progression] {player.Name}: {result.Outcome} from v{result.FromVersion}`)
+		print(
+			`[Progression] {player.Name}: {result.Outcome} from v{result.FromVersion} -> L{(
+				profile.Data :: Profile
+			).Level}`
+		)
 	end
 end
 
@@ -236,9 +347,11 @@ type StatName = "Rounds" | "Survived" | "AswangRounds" | "AswangWins" | "Kills" 
 	finite guard.
 
 	`local p = GetProfile(player); p.Coins += price` is the natural line for C34 to write. It compiles,
-	it runs, and it silently writes into a profile this server has latched read-only. **Currency and
-	stats go through `Award` and `BumpStat`; nothing else.** `IsReadOnly` below is how a caller that
-	genuinely needs to branch finds out, rather than discovering it by writing.
+	it runs, and it silently writes into a profile this server has latched read-only. **Currency,
+	stats, cosmetics and the daily stamp go through `Award`, `BumpStat`, `SpendCoins`,
+	`GrantCosmetic`, `SetEquipped` and `SetDaily`; nothing else.** Every one of them re-checks the
+	latch. `IsReadOnly` below is how a caller that genuinely needs to branch finds out, rather than
+	discovering it by writing.
 
 	Nil is a normal answer, not an error: a DataStore outage, a player mid-load, or a player who has
 	already left all produce one.
@@ -301,13 +414,240 @@ function ProgressionService.Award(
 	data.XP += math.floor(xp)
 	data.Coins += math.floor(coins)
 
+	syncLevel(data)
 	saveNow(userId)
 
 	if Config.Debug.VerboseLogging then
-		print(`[Progression] {player.Name} +{xp} xp +{coins} coins ({reason})`)
+		print(`[Progression] {player.Name} +{xp} xp +{coins} coins ({reason}) -> L{data.Level}`)
 	end
 
 	return true
+end
+
+--[[
+	SPEND (C34). The mirror of `Award`, and the asymmetry between them is deliberate.
+
+	`Award` cannot fail on the arithmetic — a bad number is refused and logged. A SPEND can, and its
+	failure is the entire security property: it returns false when the player cannot afford it, and
+	the caller must not deliver the goods on a false. `CosmeticsService` grants the item only after
+	this returns true, in that order, so a refused spend cannot leave a granted cosmetic behind.
+
+	THE AMOUNT IS NOT A CLIENT VALUE. `pure/Cosmetics.evaluatePurchase` reads the price out of
+	`Config.Cosmetics.Catalogue` and returns it; the request that started this carries an id and
+	nothing else. There is no number on the wire for a compromised client to shrink.
+]]
+function ProgressionService.SpendCoins(player: Player, amount: number, reason: string): boolean
+	local userId = player.UserId
+	local profile = sessions[userId]
+
+	if profile == nil or readOnly[userId] then
+		return false
+	end
+
+	-- Same finite test as `Award` — see its comment on why infinity is the case that matters. A
+	-- negative spend would be an award through the wrong door, so it is refused rather than clamped.
+	if not (amount >= 0 and amount < math.huge) then
+		warn(`[Progression] refused a malformed spend by {player.Name} ({reason}): {amount}`)
+
+		return false
+	end
+
+	local data: Profile = profile.Data
+	local cost = math.floor(amount)
+
+	if data.Coins < cost then
+		return false
+	end
+
+	data.Coins -= cost
+
+	saveNow(userId)
+
+	if Config.Debug.VerboseLogging then
+		print(`[Progression] {player.Name} -{cost} coins ({reason})`)
+	end
+
+	return true
+end
+
+--[[
+	GRANT A COSMETIC (C34). Idempotent, and bounded.
+
+	Idempotent because `grantsAtLevel` answers "what should be owned at this level" rather than "what
+	is new", so this is called with ids the player may already have on every single award. Bounded
+	because `ProfileMigration.ownedFrom` caps a stored inventory at `MAX_OWNED_COSMETICS` on the way
+	in, and a write path that could exceed it would produce a profile that silently loses entries the
+	next time it is loaded.
+
+	The id is checked against the catalogue rather than trusted, so a caller cannot write a key that
+	`Cosmetics.find` will never resolve — an unresolvable id is an inventory entry nothing can equip
+	and nothing can explain.
+]]
+function ProgressionService.GrantCosmetic(player: Player, id: string): boolean
+	local userId = player.UserId
+	local profile = sessions[userId]
+
+	if profile == nil or readOnly[userId] then
+		return false
+	end
+
+	if Cosmetics.find(CATALOGUE, id) == nil then
+		warn(`[Progression] refused a grant of unknown cosmetic "{id}" to {player.Name}`)
+
+		return false
+	end
+
+	local data: Profile = profile.Data
+
+	if data.Cosmetics.Owned[id] == true then
+		return false
+	end
+
+	data.Cosmetics.Owned[id] = true
+
+	saveNow(userId)
+
+	return true
+end
+
+--[[
+	EQUIP (C34). The three-branch write, and the branches are why this is not a table index.
+
+	`Cosmetics.Equipped` is a RECORD with three named fields, not a dictionary, so `equipped[slot]`
+	does not typecheck under `--!strict` — and the natural workaround is a cast, which would let a
+	slot string that matches no field write nothing and report success. Three explicit branches make
+	an unknown slot a `return false` that a caller can see.
+
+	The slot is not a client value: `pure/Cosmetics.evaluateEquip` reads it off the catalogue entry, so
+	a client cannot name an item in one slot and a slot in another.
+]]
+function ProgressionService.SetEquipped(player: Player, slot: string, id: string): boolean
+	local userId = player.UserId
+	local profile = sessions[userId]
+
+	if profile == nil or readOnly[userId] then
+		return false
+	end
+
+	local equipped = (profile.Data :: Profile).Cosmetics.Equipped
+
+	if slot == "Skin" then
+		equipped.Skin = id
+	elseif slot == "Lantern" then
+		equipped.Lantern = id
+	elseif slot == "DeathFX" then
+		equipped.DeathFX = id
+	else
+		warn(`[Progression] refused an equip into unknown slot "{slot}" for {player.Name}`)
+
+		return false
+	end
+
+	saveNow(userId)
+
+	return true
+end
+
+--[[
+	THE DAILY STAMP (C33). Written only after `pure/DailyStreak.evaluate` has said a claim happened.
+
+	BOTH FIELDS MOVE TOGETHER OR NEITHER DOES, which is why this is one call rather than two setters.
+	A streak advanced without its timestamp is a streak that advances again on the next button press;
+	a timestamp advanced without its streak silently resets a week. `DailyStreak` returns both from one
+	evaluation and this writes both from one call, so the two cannot drift apart in a caller's `if`.
+]]
+function ProgressionService.SetDaily(player: Player, lastClaimUTC: number, streak: number): boolean
+	local userId = player.UserId
+	local profile = sessions[userId]
+
+	if profile == nil or readOnly[userId] then
+		return false
+	end
+
+	if
+		not (lastClaimUTC >= 0 and lastClaimUTC < math.huge)
+		or not (streak >= 0 and streak < math.huge)
+	then
+		warn(`[Progression] refused a malformed daily write for {player.Name}`)
+
+		return false
+	end
+
+	local daily = (profile.Data :: Profile).Daily
+
+	daily.LastClaimUTC = math.floor(lastClaimUTC)
+	daily.Streak = math.floor(streak)
+
+	saveNow(userId)
+
+	return true
+end
+
+--[[
+	THE ONE PLACE A PROFILE REACHES A CLIENT (C32/C33/C34), AND IT SENDS A FIELD LIST.
+
+	`Types.ProfileSnapshot` is the contract and its header is where the reasoning lives; the short
+	version is that `PlayerProfile.Stats` holds `AswangRounds` and `AswangWins`, so the payload is
+	BUILT rather than trimmed and there is no field for that history to arrive in.
+
+	FIRECLIENT, TO ONE PLAYER, ALWAYS. Every field describes the receiver. A broadcast would hand eight
+	clients eight players' levels and owned sets, which is enough to follow one person across rounds —
+	so `ProfileUpdated` has no FireAllClients call site anywhere in this repo and must not acquire one.
+
+	BUILT AS A TYPED LOCAL, not inline: `FireClient` takes `...any`, so an inline literal is checked
+	against nothing at all. The annotation catches a wrong type and a missing field — but NOT an extra
+	one, which is the leak shape. Adding a field here is a decision to review by hand.
+
+	NOT CALLED FROM `Award`, deliberately. Each of the three request paths — a round's award, a daily
+	claim, a cosmetic transaction — is a transaction of several writes, and pushing after each write
+	would send two or three snapshots for one player action and leave the HUD animating a number that
+	is already stale. Every caller pushes once, at the end, which is also the only point at which
+	`lastAward` is known.
+]]
+function ProgressionService.PushProfile(player: Player, lastAward: Types.RoundAward?)
+	local data = ProgressionService.GetProfile(player)
+
+	if data == nil then
+		return
+	end
+
+	local standing = XPCurve.levelFor(data.XP, curve())
+	local preview = DailyStreak.preview({
+		LastClaimUTC = data.Daily.LastClaimUTC,
+		Streak = data.Daily.Streak,
+		NowUTC = os.time(),
+	}, dailyParams())
+
+	-- A COPY, not the live table. `GetProfile` returns the profile itself, and handing the live
+	-- inventory to `FireClient` would let a later grant mutate a table already queued for
+	-- serialisation — a race with no symptom other than an occasional wrong shop. Shallow is enough:
+	-- the values are booleans.
+	local ownedCopy: { [string]: boolean } = table.clone(data.Cosmetics.Owned)
+
+	local payload: Types.ProfileSnapshot = {
+		XP = data.XP,
+		Level = standing.Level,
+		XPIntoLevel = standing.XPIntoLevel,
+		XPForNextLevel = standing.XPForNextLevel,
+		Progress = standing.Progress,
+		Coins = data.Coins,
+		Equipped = {
+			Skin = data.Cosmetics.Equipped.Skin,
+			Lantern = data.Cosmetics.Equipped.Lantern,
+			DeathFX = data.Cosmetics.Equipped.DeathFX,
+		},
+		Owned = ownedCopy,
+		Daily = {
+			Claimable = preview.Claimable,
+			Streak = preview.Streak,
+			CycleDay = preview.CycleDay,
+			RewardXP = preview.RewardXP,
+			RewardCoins = preview.RewardCoins,
+		},
+		LastAward = lastAward,
+	}
+
+	profileUpdatedRemote:FireClient(player, payload)
 end
 
 -- Stat bookkeeping. No `Save` — see `saveNow`'s comment on what "meaningful" means.
@@ -340,37 +680,134 @@ end
 	listen. The edge points that way for a second reason too: it is why the shutdown flush goes through
 	`ShutdownFlush` rather than RoundService calling into here — the reverse require would close a cycle.
 ]]
-local function onPhaseChanged(phase: Types.RoundPhase)
-	if phase ~= Enums.RoundPhase.Ending then
-		return
-	end
+--[[
+	THE ROUND'S AWARD (C32, §4.8's end screen), AND THE REASON IT MAY READ THE ROLE.
 
+	C31 paid a flat participation XP here and its comment held the line that made that necessary: "the
+	moment the award is role-conditional, the XP number itself becomes a derived hint — a player
+	comparing their end-screen total against a friend's would learn something the round never told
+	them." §4.8's award table is role-conditional in three of its four terms, so C32 does not avoid
+	that warning, it DISCHARGES it, and the discharge is a matter of timing rather than of trimming.
+
+	THE ORDER INSIDE `enterEnding` IS THE WHOLE ARGUMENT, and it is worth being precise about because
+	it is the only thing making this safe:
+
+	    setPhase(ENDING)  ->  PhaseChanged fires  ->  THIS RUNS
+	    Remotes.Get("RoundEnded"):FireAllClients({ ..., AswangUserId = ... })
+
+	So this handler runs microseconds BEFORE the reveal is broadcast, in the same frame — and that
+	ordering does not matter, because what makes the award safe is not that the reveal has already
+	landed but that it CANNOT NOT LAND. `enterEnding` broadcasts unconditionally and is the only
+	path into ENDING; a player cannot read their XP total, compare it with anyone, and act on the
+	difference before a reveal that arrives in the same tick on the same wire.
+
+	`RoleIsPublic` is nevertheless computed rather than assumed, and it is `false` for a round that
+	reached ENDING with no Aswang recorded. `pure/XPCurve.awardFor` then collapses the award to flat
+	participation, identical for all eight players — the C31 behaviour, exactly. That branch is
+	defensive rather than reachable today (`state.AswangUserId` survives both abort paths and is
+	cleared only in `enterIdle`), and it is written because being wrong about it is the one failure
+	this game does not survive.
+
+	LOBBY AND SPECTATOR ARE THE EXCLUSIONS, not "alive" — someone who died in the third minute played
+	the round and is a GHOST at ENDING. A SPECTATOR joined after the draw and did not.
+]]
+local function awardRound()
+	local aswangUserId = RoundService.GetAswangUserId()
+	local roleIsPublic = aswangUserId ~= nil
 	--[[
-		A FLAT AWARD, AND C32 REPLACES IT. §4.8's real table — win bonus, survivor escape bonus, the
-		Aswang's own split — is C32's work and belongs in a pure `XPCurve`-shaped module where it can
-		be tested. What C31 owns is that the number reaches the profile and survives a rejoin.
-
-		IT READS `GetPlayerState` AND NEVER THE ROLE, and that line is worth holding: the moment the
-		award is role-conditional, the XP number itself becomes a derived hint — a player comparing
-		their end-screen total against a friend's would learn something the round never told them.
-
-		LOBBY IS THE EXCLUSION, not "alive" — someone who died in the third minute played the round and
-		is a GHOST at ENDING. A SPECTATOR joined after the draw and did not.
+		ANNOTATED ON ARRIVAL, and the annotation is not decoration. `GetLastResult` returns
+		`Types.RoundResult` — a literal union — and a literal union does NOT survive the `require`
+		boundary on its own: without this line the analyzer reads it as
+		`string | string | string | string` and refuses the `AwardInput` below, reporting the error in
+		THIS file about a value born in another. The scalar re-annotation is the whole fix; the same
+		trap inside a LIST has no fix at all and needs a narrowing function instead — see
+		`.claude/lessons/pure-module-unions-widen-in-lists.md`.
 	]]
-	for _, player in Players:GetPlayers() do
-		local state = RoundService.GetPlayerState(player)
+	local result: XPCurve.RoundResult = RoundService.GetLastResult()
+	local kills = RoundService.GetAswangKills()
 
-		if state == Enums.PlayerState.Lobby or state == Enums.PlayerState.Spectator then
+	for _, player in Players:GetPlayers() do
+		local playerState = RoundService.GetPlayerState(player)
+
+		if playerState == Enums.PlayerState.Lobby or playerState == Enums.PlayerState.Spectator then
 			continue
 		end
 
+		local wasAswang = roleIsPublic and player.UserId == aswangUserId
+		local survived = playerState == Enums.PlayerState.Alive
+
+		local award = XPCurve.awardFor({
+			Result = result,
+			RoleIsPublic = roleIsPublic,
+			WasAswang = wasAswang,
+			Survived = survived,
+			Kills = if wasAswang then kills else 0,
+		}, rates())
+
+		--[[
+			THE STATS, AND WHY THEY ARE WRITTEN HERE RATHER THAN AT THE MOMENT THEY HAPPEN.
+
+			`Rounds` and `Survived` are facts about the whole round and only exist once it is over.
+			`AswangRounds` and `AswangWins` are the two fields this file's header names as the genuine
+			leak risk — so they are written in the one place where the role is already public, and
+			`PushProfile` has no field to carry them out in. Nothing reads them yet; C35's `Balik-Balik`
+			badge and C41's analytics are what they are for.
+
+			`Kills` and `TasksDone` are deliberately NOT written here: they are per-event counts that
+			only `MonsterService` and `TaskService` can see, and inferring them from a round summary
+			would be a second, wrong source of truth. They stay at zero until whoever needs them wires
+			the call at the event.
+		]]
 		ProgressionService.BumpStat(player, "Rounds", 1)
-		ProgressionService.Award(
-			player,
-			Config.Economy.XPPerRound,
-			Config.Economy.CoinsPerRound,
-			"round"
-		)
+
+		if survived and not wasAswang then
+			ProgressionService.BumpStat(player, "Survived", 1)
+		end
+
+		if wasAswang then
+			ProgressionService.BumpStat(player, "AswangRounds", 1)
+
+			if result == Enums.RoundResult.AswangWins or result == Enums.RoundResult.Timeout then
+				ProgressionService.BumpStat(player, "AswangWins", 1)
+			end
+		end
+
+		local written = ProgressionService.Award(player, award.XP, award.Coins, "round")
+
+		--[[
+			PUSHED EVEN WHEN THE WRITE WAS REFUSED, and the two refusal cases differ in what the player
+			sees.
+
+			A READ-ONLY LATCH still has a loaded profile, so this pushes: the snapshot carries the
+			REAL totals (which did not move) beside the award that was earned, and the client renders
+			"+90" over a bar that did not fill. That is the honest picture of a server that cannot save,
+			and it beats either lying about the total or showing nothing.
+
+			NO PROFILE AT ALL — a DataStore outage, or a player still loading — pushes nothing, because
+			`PushProfile` has no profile to build a snapshot from and returns early. Their end screen
+			shows the reveal without a breakdown, which is the same thing every player saw before C32
+			and is the only answer available.
+
+			Either way the log line below names it, and neither is a mistake worth a `warn`: both are
+			Roblox being unavailable, which `startSession` has already warned about once.
+		]]
+		ProgressionService.PushProfile(player, {
+			XP = award.XP,
+			Coins = award.Coins,
+			Lines = award.Lines,
+		})
+
+		if not written and Config.Debug.VerboseLogging then
+			print(
+				`[Progression] {player.Name}'s round award was not banked (no profile / read-only)`
+			)
+		end
+	end
+end
+
+local function onPhaseChanged(phase: Types.RoundPhase)
+	if phase == Enums.RoundPhase.Ending then
+		awardRound()
 	end
 end
 

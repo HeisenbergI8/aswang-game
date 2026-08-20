@@ -40,6 +40,18 @@ local SERVICE_ORDER = {
 	]]
 	"TeachingService",
 	--[[
+		C33. After ProgressionService, whose guarded write paths it calls, and it needs nothing else —
+		a daily claim reads the profile and the server clock and touches no round state at all.
+	]]
+	"DailyService",
+	--[[
+		C34. AFTER MonsterService, and that position is load-bearing rather than tidy: its `Start`
+		subscribes to `MonsterService.GetCorpsesFolder()`, and the folder is created in MonsterService's
+		own `Start`. This list governs Init and Start ordering, so listing it earlier would hand it a
+		nil folder and silently turn the death effects off for the session.
+	]]
+	"CosmeticsService",
+	--[[
 		C25. After RoundService's dependants for the ordinary reason — it subscribes to PhaseChanged
 		and reads GetPlayerState — and it needs no particular position relative to the others, because
 		nothing else in the tree calls into it. Quick chat is a leaf: the client requests, this

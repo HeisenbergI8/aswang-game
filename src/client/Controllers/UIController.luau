@@ -75,6 +75,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
 local Remotes = require(Shared.Remotes)
+local Cosmetics = require(Shared.pure.Cosmetics)
 local TrialAdmission = require(Shared.pure.TrialAdmission)
 local Types = require(Shared.Types)
 
@@ -223,6 +224,17 @@ local COLOUR = {
 	Progress = Color3.fromRGB(96, 220, 120), -- config-ok: HUD palette
 	GateOpen = Color3.fromRGB(255, 214, 92), -- config-ok: HUD palette
 	Panel = Color3.fromRGB(0, 0, 0), -- config-ok: HUD palette
+
+	--[[
+		C32/C33/C34's two, and they are two rather than reused because the checklist rule is that a
+		colour carries ONE meaning on a screen. `Progress` green is task progress and `GateOpen` gold
+		is the gate — both appear during a round, and borrowing either for a level bar would mean the
+		same colour saying two things to a player who has just spent seven minutes learning the first.
+
+		They only ever appear in the lobby, so they never share a screen with the round palette.
+	]]
+	Coin = Color3.fromRGB(240, 198, 96), -- config-ok: HUD palette
+	Level = Color3.fromRGB(206, 128, 255), -- config-ok: HUD palette
 }
 
 --[[
@@ -1037,6 +1049,19 @@ local function riseIn(label: TextLabel, restingY: number, delaySeconds: number)
 end
 
 --[[
+	THE ROUND'S AWARD, HELD SEPARATELY FROM THE SNAPSHOT, because two remotes have no ordering
+	guarantee between them.
+
+	`ProfileUpdated` (carrying `LastAward`) and `RoundEnded` (which builds the end screen) are
+	different RemoteEvents, and Roblox promises ordering WITHIN a remote and not ACROSS two. So both
+	arrival orders happen and both must work: `pendingAward` covers award-then-screen, and `awardSink`
+	covers screen-then-award. Assuming either order would produce an end screen that is missing its
+	breakdown on some fraction of rounds, on some players' connections, and never in Studio.
+]]
+local pendingAward: Types.RoundAward? = nil
+local awardSink: ((Types.RoundAward) -> ())? = nil
+
+--[[
 	THE REVEAL, IN THREE BEATS, BECAUSE §4.8 CALLS THIS "THE SCREENSHOT PEOPLE SHARE".
 
 	What it did before was correct and inert: the result and the name appeared in the same frame, at
@@ -1092,14 +1117,532 @@ local function showEndScreen(payload: Types.RoundEndedPayload)
 	-- means to test — dismissal — rather than losing a race with construction.
 	screenGui.Parent = playerGui
 
+	--[[
+		THE FOURTH BEAT — WHAT THE ROUND WAS WORTH (C32, §4.8: "award XP and coins").
+
+		It arrives AFTER the name, and last on purpose. §7's "unfinished business" is the mechanic
+		here: the last thing on screen before the lobby returns should be how close the player is to
+		the next thing, and a breakdown that landed alongside the reveal would be a stat block
+		competing with the punchline. The reveal is the screenshot; this is the reason to stay.
+
+		IT IS ROLE-CONDITIONAL IN CONTENT — the Aswang's breakdown has a kill line and a survivor's has
+		an escape line — and this is the one screen in the game where that is fine, because the name of
+		the Aswang is being displayed six lines above it. `ui-polish`'s "same panels, same positions,
+		same animations" rule governs the HUD during a round; here the round is over and the secret is
+		on screen.
+	]]
+	local awardLabel = text(backdrop, "Award", LAYOUT.LabelSize, COLOUR.Dim)
+	awardLabel.Size = UDim2.new(1, 0, 0, LAYOUT.LabelSize * 8) -- config-ok: layout multiple
+
+	local function renderAward(earned: Types.RoundAward)
+		local lines = { `<b>+{earned.XP} XP</b>   ·   <b>+{earned.Coins} coins</b>` }
+
+		for _, line in earned.Lines do
+			--[[
+				Coins are only named on lines that carry them, so "round played +50 xp +25" and
+				"you survived the night +25 xp" read as the two different things they are rather than
+				as one of them having a suspicious zero in it.
+			]]
+			table.insert(
+				lines,
+				if line.Coins > 0
+					then `{line.Label}  +{line.XP} xp  +{line.Coins}`
+					else `{line.Label}  +{line.XP} xp`
+			)
+		end
+
+		awardLabel.Text = table.concat(lines, "\n")
+
+		riseIn(awardLabel, LAYOUT.RevealSize * 2, 0)
+	end
+
+	--[[
+		BOTH ARRIVAL ORDERS. `ProfileUpdated` and `RoundEnded` are different RemoteEvents and Roblox
+		orders packets within a remote, not across two — so the award can land before this screen
+		exists or after it. `pendingAward` covers the first, the sink covers the second, and the sink
+		is cleared on dismissal so a late award cannot write into a destroyed label.
+	]]
+	local earlyAward = pendingAward
+	local sink: (Types.RoundAward) -> () = function(late: Types.RoundAward)
+		if awardLabel.Parent ~= nil then
+			renderAward(late)
+		end
+	end
+
+	pendingAward = nil
+	awardSink = sink
+
+	if earlyAward ~= nil then
+		task.delay(MOTION.RevealFade + MOTION.RevealHold * 2, sink, earlyAward)
+	end
+
 	riseIn(title, -LAYOUT.RevealSize * 2, 0)
 	riseIn(reveal, LAYOUT.Pad, MOTION.RevealFade + MOTION.RevealHold)
 
 	-- Dismissed on the same clock the server uses to start the next round, so the screen is never
 	-- still up when the lobby is already running.
 	task.delay(Config.Round.EndScreen, function()
+		--[[
+			CLEARED ONLY IF IT IS STILL OURS. `showEndScreen` destroys a screen it finds already up, so
+			two of these timers can be in flight — and an unconditional `awardSink = nil` from the
+			OLDER one would silently disable the newer screen's breakdown. Comparing identity is the
+			whole fix; the sink closes over its own label and is already inert once that is destroyed.
+		]]
+		if awardSink == sink then
+			awardSink = nil
+		end
+
 		screenGui:Destroy()
 	end)
+end
+
+--------------------------------------------------------------------------------
+-- Progression — the level bar, the daily claim and the wardrobe (C32, C33, C34)
+--------------------------------------------------------------------------------
+
+--[[
+	THE LOBBY IS THE ONLY PLACE ANY OF THIS DRAWS, and that is a horror-rules decision rather than a
+	layout one. `ui-polish`'s list is explicit: "information minimalism — show a thing at the moment it
+	is needed and fade it when it is not", and "never obscure the play space". A level bar during a
+	chase is a panel competing with the thing that is chasing you.
+
+	It is also what makes the whole panel safe to be as busy as it is. Nothing here is on screen while
+	a round is running, so none of it can be a tell, and none of it costs a frame during the case §5
+	measures — 30fps on a mid-range Android, in a chase.
+
+	SECRECY: THIS PANEL NEVER READS A ROLE, and it structurally cannot. Its only input is
+	`Types.ProfileSnapshot`, which has no role field and no `Stats` at all — see that type's header for
+	why the payload is built rather than trimmed. `myRole` is not consulted anywhere below.
+]]
+
+-- The last `ProfileUpdated`. One snapshot drives every element here, so nothing on this panel can
+-- disagree with anything else on it.
+--
+-- The round's award is NOT held here — see `pendingAward` and `awardSink` above `showEndScreen`,
+-- which is the only thing that renders it and had to be declared before them.
+local profile: Types.ProfileSnapshot? = nil
+
+local progressPanel: Frame? = nil
+local levelLabel: TextLabel? = nil
+local coinLabel: TextLabel? = nil
+local xpLabel: TextLabel? = nil
+local levelFill: Frame? = nil
+local dailyButton: TextButton? = nil
+
+--[[
+	One cycler per slot, and a CURSOR per slot that is purely local.
+
+	The cursor is where the player is LOOKING, not what they are wearing. Advancing it is free and
+	tells the server nothing; acting on it fires a remote and the server decides. That is §6.2's
+	"the client requests, the server decides" applied to a wardrobe, and it is why a tap that lands on
+	a locked item costs no network traffic at all.
+]]
+local SLOTS = { "Skin", "Lantern", "DeathFX" }
+local slotButtons: { [string]: TextButton } = {}
+local slotCursor: { [string]: number } = {}
+
+local CATALOGUE: { Cosmetics.Item } = Config.Cosmetics.Catalogue
+
+-- Forward-declared because `tapSlot` redraws after moving the cursor and is defined above it. A local
+-- rather than a method on `UIController`: nothing outside this file has any business redrawing a
+-- panel it cannot see, and the public surface here is four functions that other controllers call.
+local renderProgress: () -> ()
+
+local function itemsForSlot(slot: string): { Cosmetics.Item }
+	local items: { Cosmetics.Item } = {}
+
+	for _, item in CATALOGUE do
+		if item.Slot == slot then
+			table.insert(items, item)
+		end
+	end
+
+	return items
+end
+
+local function equippedIdFor(snapshot: Types.ProfileSnapshot, slot: string): string
+	if slot == "Skin" then
+		return snapshot.Equipped.Skin
+	elseif slot == "Lantern" then
+		return snapshot.Equipped.Lantern
+	end
+
+	return snapshot.Equipped.DeathFX
+end
+
+--[[
+	WHAT THE CYCLER SAYS, AND IT IS THE SAME DECISION THE SERVER WILL MAKE.
+
+	`pure/Cosmetics.evaluatePurchase` runs here, client-side, over the snapshot this client already
+	has — exactly as the trial door runs `TrialAdmission` for display. A label that says BUY when the
+	server would refuse gets a refusal and a corrected snapshot; a label that says LOCKED when the
+	server would allow merely hides an item. Neither is a security question, which is what lets the
+	display side be approximate.
+
+	The PHASE is passed as IDLE rather than as the live phase, deliberately: this panel only exists in
+	the lobby, and reading a phase the panel cannot be shown during would make the label depend on a
+	value that is constant wherever it is read.
+]]
+local function labelFor(snapshot: Types.ProfileSnapshot, item: Cosmetics.Item): string
+	if equippedIdFor(snapshot, item.Slot) == item.Id then
+		return `{item.Slot:upper()}  {item.Name}  ·  worn`
+	end
+
+	if Cosmetics.isOwned(item, snapshot.Owned) then
+		return `{item.Slot:upper()}  {item.Name}  ·  tap to wear`
+	end
+
+	local verdict = Cosmetics.evaluatePurchase({
+		Catalogue = CATALOGUE,
+		Id = item.Id,
+		Owned = snapshot.Owned,
+		Level = snapshot.Level,
+		Coins = snapshot.Coins,
+		Phase = Enums.RoundPhase.Idle,
+	})
+
+	if verdict.Verdict == "OK" then
+		return `{item.Slot:upper()}  {item.Name}  ·  buy for {verdict.Cost}`
+	elseif verdict.Verdict == "NOT_ENOUGH_COINS" then
+		return `{item.Slot:upper()}  {item.Name}  ·  {item.Price} coins`
+	elseif verdict.Verdict == "LOCKED_BY_LEVEL" then
+		return `{item.Slot:upper()}  {item.Name}  ·  level {item.Level}`
+	end
+
+	-- NOT_FOR_SALE. The gamepass item, until C37 supplies a product id — see `Config.Cosmetics`.
+	return `{item.Slot:upper()}  {item.Name}  ·  soon`
+end
+
+--[[
+	WHAT A TAP DOES, and why a purchase takes two of them.
+
+	  · looking at something you are already wearing  -> advance the cursor
+	  · looking at something you own                  -> wear it
+	  · looking at something you can afford           -> BUY IT, and stop there
+
+	The purchase does not also equip, and the cursor does not move past an affordable item on the
+	first tap. Both are the same guard against the same accident: a wardrobe whose cycler spends coins
+	as you scroll through it is one nobody scrolls through twice.
+
+	Anything else — locked by level, not enough coins, a gamepass item before C37 — advances, because
+	there is nothing to do with it and stopping would trap the cursor.
+]]
+local function tapSlot(slot: string)
+	local snapshot = profile
+
+	if snapshot == nil then
+		return
+	end
+
+	local items = itemsForSlot(slot)
+
+	if #items == 0 then
+		return
+	end
+
+	local index = slotCursor[slot] or 1
+	local item = items[index]
+
+	if item ~= nil and equippedIdFor(snapshot, slot) ~= item.Id then
+		if Cosmetics.isOwned(item, snapshot.Owned) then
+			Remotes.Get("RequestEquipCosmetic"):FireServer(item.Id)
+
+			return
+		end
+
+		local verdict = Cosmetics.evaluatePurchase({
+			Catalogue = CATALOGUE,
+			Id = item.Id,
+			Owned = snapshot.Owned,
+			Level = snapshot.Level,
+			Coins = snapshot.Coins,
+			Phase = Enums.RoundPhase.Idle,
+		})
+
+		if verdict.Verdict == "OK" then
+			Remotes.Get("RequestBuyCosmetic"):FireServer(item.Id)
+
+			return
+		end
+	end
+
+	slotCursor[slot] = (index % #items) + 1
+
+	renderProgress()
+end
+
+--[[
+	REDRAWN FROM THE SNAPSHOT, and safe to call when there is no panel and when there is no snapshot.
+
+	Both cases are ordinary rather than defensive: `ProfileUpdated` can arrive during a round (a round
+	award lands at ENDING, when the lobby is torn down), and the lobby can be built before the first
+	snapshot has arrived on a slow join.
+]]
+function renderProgress()
+	local snapshot = profile
+	local panelFrame = progressPanel
+
+	if panelFrame == nil or panelFrame.Parent == nil then
+		return
+	end
+
+	if snapshot == nil then
+		panelFrame.Visible = false
+
+		return
+	end
+
+	panelFrame.Visible = true
+
+	local level = levelLabel
+	local coins = coinLabel
+	local xp = xpLabel
+	local fill = levelFill
+
+	if level ~= nil then
+		level.Text = `LEVEL {snapshot.Level}`
+	end
+
+	if coins ~= nil then
+		coins.Text = `{snapshot.Coins}`
+	end
+
+	if xp ~= nil then
+		--[[
+			AT THE CAP THERE IS NO "OF", because there is nothing to be out of. `XPForNextLevel` is
+			exactly 0 there and a client that divided by it would render a NaN — which is why
+			`Progress` is sent pre-divided and is what the bar actually reads.
+		]]
+		xp.Text = if snapshot.XPForNextLevel <= 0
+			then `{snapshot.XP} xp · max level`
+			else `{snapshot.XPIntoLevel} / {snapshot.XPIntoLevel + snapshot.XPForNextLevel} xp`
+	end
+
+	if fill ~= nil then
+		-- Tweened rather than assigned, so a level-up in the lobby is something a player SEES happen.
+		-- One of the few animations here that fires on arrival rather than on a per-tick change.
+		tweenTo(fill, MOTION.Fade, { Size = UDim2.fromScale(snapshot.Progress, 1) })
+	end
+
+	local daily = dailyButton
+
+	if daily ~= nil then
+		local preview = snapshot.Daily
+
+		daily.Text = if preview.Claimable
+			then `DAY {preview.CycleDay}  ·  claim +{preview.RewardXP} xp +{preview.RewardCoins}`
+			else `DAY {preview.CycleDay} tomorrow  ·  +{preview.RewardXP} xp +{preview.RewardCoins}`
+		daily.TextColor3 = if preview.Claimable then COLOUR.Coin else COLOUR.Dim
+	end
+
+	for _, slot in SLOTS do
+		-- Annotated optional: the map's value type is not, so an unannotated local reads as a
+		-- TextButton the analyzer refuses to compare against nil.
+		local button: TextButton? = slotButtons[slot]
+
+		if button == nil then
+			continue
+		end
+
+		local items = itemsForSlot(slot)
+
+		if #items == 0 then
+			continue
+		end
+
+		--[[
+			THE CURSOR STARTS ON WHAT IS WORN. Without this the panel opens showing the first
+			catalogue entry for every slot, and a player's first tap is "wear the thing I am already
+			wearing" — which reads as a button that does nothing.
+
+			Re-clamped on every render rather than only on creation, because the catalogue can shrink
+			between builds and a stale cursor would index past the end.
+		]]
+		if slotCursor[slot] == nil or slotCursor[slot] > #items then
+			local worn = equippedIdFor(snapshot, slot)
+			local found = 1
+
+			for index, item in items do
+				if item.Id == worn then
+					found = index
+				end
+			end
+
+			slotCursor[slot] = found
+		end
+
+		local item = items[slotCursor[slot]]
+
+		if item ~= nil then
+			button.Text = labelFor(snapshot, item)
+			button.TextColor3 = if equippedIdFor(snapshot, slot) == item.Id
+				then COLOUR.Text
+				else COLOUR.Dim
+		end
+	end
+end
+
+local function teardownProgress()
+	if progressPanel ~= nil then
+		progressPanel:Destroy()
+		progressPanel = nil
+	end
+
+	levelLabel = nil
+	coinLabel = nil
+	xpLabel = nil
+	levelFill = nil
+	dailyButton = nil
+	table.clear(slotButtons)
+end
+
+--[[
+	A `UIListLayout` RATHER THAN HAND-COMPUTED OFFSETS, which is `ui-polish`'s rule for a stack: manual
+	`(Height + Pad) * order` arithmetic is how alignment rots, and this stack has seven rows in it.
+
+	The panel sits on the LEFT EDGE, vertically centred. Both bottom corners belong to Roblox's
+	thumbstick and jump button and the top belongs to the CoreGui cluster; the left-middle is the one
+	region of a landscape phone that is nobody else's, and nothing here is needed during play so it
+	never has to share.
+]]
+local function buildProgress()
+	if progressPanel ~= nil and progressPanel.Parent ~= nil then
+		return
+	end
+
+	local gui = hud
+
+	if gui == nil then
+		return
+	end
+
+	local frame = panel(gui, "Progress")
+	frame.Size = UDim2.fromOffset(LAYOUT.BarWidth, LAYOUT.LabelSize * 16) -- config-ok: layout multiple
+	frame.Position = UDim2.new(0, LAYOUT.Pad, 0.5, -LAYOUT.LabelSize * 8) -- config-ok: layout multiple
+	frame.Visible = false
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, LAYOUT.Pad)
+	padding.PaddingBottom = UDim.new(0, LAYOUT.Pad)
+	padding.PaddingLeft = UDim.new(0, LAYOUT.Pad)
+	padding.PaddingRight = UDim.new(0, LAYOUT.Pad)
+	padding.Parent = frame
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, LAYOUT.Pad // 2) -- config-ok: layout multiple
+	layout.Parent = frame
+
+	local header = Instance.new("Frame")
+	header.Name = "Header"
+	header.BackgroundTransparency = 1
+	header.Size = UDim2.new(1, 0, 0, LAYOUT.PromptSize)
+	header.LayoutOrder = 1
+	header.Parent = frame
+
+	local level = text(header, "Level", LAYOUT.PromptSize, COLOUR.Level)
+	level.Size = UDim2.fromScale(0.6, 1) -- config-ok: layout split
+	level.TextXAlignment = Enum.TextXAlignment.Left
+	level.Text = "LEVEL 1"
+
+	local coins = text(header, "Coins", LAYOUT.PromptSize, COLOUR.Coin)
+	coins.Size = UDim2.fromScale(0.4, 1) -- config-ok: layout split
+	coins.Position = UDim2.fromScale(0.6, 0) -- config-ok: layout split
+	coins.TextXAlignment = Enum.TextXAlignment.Right
+	coins.Text = "0"
+
+	-- The bar, built the same way the task bar is: a scrim back and a fill whose Size.X.Scale is the
+	-- only thing that ever moves. One instance changed per update, which is what keeps this cheap.
+	local back = Instance.new("Frame")
+	back.Name = "LevelBarBack"
+	back.Size = UDim2.new(1, 0, 0, LAYOUT.BarHeight)
+	back.BackgroundColor3 = COLOUR.Panel
+	back.BackgroundTransparency = LAYOUT.BarBackScrim
+	back.BorderSizePixel = 0
+	back.LayoutOrder = 2
+	back.Parent = frame
+
+	local backCorner = Instance.new("UICorner")
+	backCorner.CornerRadius = UDim.new(0, LAYOUT.Corner)
+	backCorner.Parent = back
+
+	local fill = Instance.new("Frame")
+	fill.Name = "LevelBarFill"
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.BackgroundColor3 = COLOUR.Level
+	fill.BorderSizePixel = 0
+	fill.Parent = back
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(0, LAYOUT.Corner)
+	fillCorner.Parent = fill
+
+	local xp = text(frame, "XP", LAYOUT.LabelSize, COLOUR.Dim)
+	xp.Size = UDim2.new(1, 0, 0, LAYOUT.LabelSize)
+	xp.TextXAlignment = Enum.TextXAlignment.Left
+	xp.LayoutOrder = 3 -- config-ok: stack order, not balance
+
+	--[[
+		A BUTTON RATHER THAN AN AUTOMATIC PAYOUT, and the difference is the whole feature. §7 calls the
+		daily streak the highest-ROI retention mechanic there is, and what a player comes back FOR is
+		the press — a reward that arrives silently on join is a number that changed while they were
+		looking at a loading screen.
+	]]
+	local daily = Instance.new("TextButton")
+	daily.Name = "DailyClaim"
+	daily.Size = UDim2.new(1, 0, 0, LAYOUT.LabelSize * 2) -- config-ok: layout multiple
+	daily.BackgroundTransparency = 1
+	daily.TextColor3 = COLOUR.Dim
+	daily.TextSize = LAYOUT.LabelSize
+	daily.Font = Enum.Font.GothamBold
+	daily.TextXAlignment = Enum.TextXAlignment.Left
+	daily.TextTruncate = Enum.TextTruncate.AtEnd
+	daily.Text = ""
+	daily.LayoutOrder = 4 -- config-ok: stack order, not balance
+	daily.Parent = frame
+
+	daily.Activated:Connect(function()
+		--[[
+			FIRED WITHOUT CHECKING `Claimable` FIRST, deliberately. The label is drawn from a snapshot
+			that can be a whole UTC day old on a client that never closed the game, and the server
+			re-runs `pure/DailyStreak` on every call and answers. A refusal costs one rate-limit token
+			and pushes a corrected snapshot back, which is exactly what a client with a stale view
+			needs — whereas a client-side gate would leave it stale and silent.
+		]]
+		Remotes.Get("RequestClaimDaily"):FireServer()
+	end)
+
+	dailyButton = daily
+
+	for order, slot in SLOTS do
+		local button = Instance.new("TextButton")
+		button.Name = `Slot{slot}`
+		button.Size = UDim2.new(1, 0, 0, LAYOUT.LabelSize * 2) -- config-ok: layout multiple
+		button.BackgroundTransparency = 1
+		button.TextColor3 = COLOUR.Dim
+		button.TextSize = LAYOUT.LabelSize
+		button.Font = Enum.Font.GothamBold
+		button.TextXAlignment = Enum.TextXAlignment.Left
+		button.TextTruncate = Enum.TextTruncate.AtEnd
+		button.Text = ""
+		button.LayoutOrder = 4 + order -- config-ok: layout order, after the daily row
+		button.Parent = frame
+
+		button.Activated:Connect(function()
+			tapSlot(slot)
+		end)
+
+		slotButtons[slot] = button
+	end
+
+	progressPanel = frame
+	levelLabel = level
+	coinLabel = coins
+	xpLabel = xp
+	levelFill = fill
+
+	renderProgress()
 end
 
 --------------------------------------------------------------------------------
@@ -1160,6 +1703,11 @@ local tipIndex = 1
 local tipLoop: thread? = nil
 
 local function teardownLobby()
+	-- The progression panel shares the lobby's lifetime exactly. It is torn down HERE rather than in
+	-- `render`'s else-branch so there is one place that knows the lobby is going away, and a future
+	-- third lobby element cannot be added to the build path and forgotten in the teardown.
+	teardownProgress()
+
 	if tipLoop ~= nil then
 		task.cancel(tipLoop)
 		tipLoop = nil
@@ -1223,6 +1771,8 @@ local function buildLobby()
 	lobbyPanel = frame
 	tipLabel = tip
 	trialButton = button
+
+	buildProgress()
 
 	-- Rotating so a waiting screen is never the same screen twice. §9 item 3: a static screen reads
 	-- as broken, and that is true of a static SENTENCE as much as of a stopped clock.
@@ -1540,6 +2090,34 @@ function UIController.Start()
 	Remotes.Get("RoundSnapshot").OnClientEvent:Connect(render)
 
 	Remotes.Get("RoundEnded").OnClientEvent:Connect(showEndScreen)
+
+	--[[
+		THE PROFILE (C32/C33/C34). One remote, one cached snapshot, every progression element drawn
+		from it — so nothing on the panel can disagree with anything else on it.
+
+		`LastAward` is present ONLY on the push that follows a round, and it is lifted out here rather
+		than left on the snapshot because the two have different lifetimes: the snapshot is the current
+		truth and is replaced by every later push, while the award belongs to one end screen and must
+		survive until that screen exists to render it. Leaving it in place would mean a daily claim
+		during the end screen (a push with `LastAward = nil`) silently blanking the breakdown.
+	]]
+	Remotes.Get("ProfileUpdated").OnClientEvent:Connect(function(snapshot: Types.ProfileSnapshot)
+		profile = snapshot
+
+		local earned = snapshot.LastAward
+
+		if earned ~= nil then
+			local sink = awardSink
+
+			if sink ~= nil then
+				sink(earned)
+			else
+				pendingAward = earned
+			end
+		end
+
+		renderProgress()
+	end)
 
 	--[[
 		A round ending clears the local salt estimate, because the server clears the real one.

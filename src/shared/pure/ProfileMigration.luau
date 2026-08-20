@@ -150,12 +150,30 @@ function ProfileMigration.template(): Profile
 			Kills = 0,
 			TasksDone = 0,
 		},
+		--[[
+			THE THREE IDS BELOW ARE CATALOGUE IDS, and they must stay that way (C34).
+
+			They were all `"default"` when this file was written at C31, before a catalogue existed —
+			and `Config.Cosmetics.Catalogue` gives each slot its own default entry, because
+			`Cosmetics.find` resolves by id alone and three entries sharing one id would be three
+			things one lookup could return.
+
+			The consequence of leaving them as `"default"` is small and entirely invisible: a fresh
+			player renders correctly (`CosmeticsService.itemOrDefault` falls back to the slot's default
+			when an id names an item in another slot), but the lobby's wardrobe compares the equipped id
+			against the catalogue's and would show a player "tap to wear" for the thing they already
+			have on. `tests/cosmetics.test.luau` pins the agreement, because nothing else can see it.
+
+			An EXISTING v1 profile still carrying `"default"` in a lantern slot keeps it — a non-empty
+			string is not malformed, so `reconcile` leaves it — and renders through the same fallback.
+			That is why the fallback stays even though this makes it unnecessary for new profiles.
+		]]
 		Cosmetics = {
 			Owned = {},
 			Equipped = {
 				Skin = "default",
-				Lantern = "default",
-				DeathFX = "default",
+				Lantern = "lantern_default",
+				DeathFX = "deathfx_default",
 			},
 		},
 		Daily = {

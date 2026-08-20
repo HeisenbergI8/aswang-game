@@ -49,6 +49,16 @@ local EVENTS_DOWN = {
 		Send an explicit field list — XP, Level, Coins, Equipped. If a whole profile is ever genuinely
 		wanted, add this remote to `check-secrecy.mjs`'s allowlist WITH a reason first, so the decision
 		appears in a diff instead of in a payload. (Raised by `exploit-auditor` during C31.)
+
+		WIRED AT C32/C33/C34, AND THE FIELD LIST ABOVE WAS FOLLOWED. `Types.ProfileSnapshot` is the
+		payload: XP, Level, Coins, the level bar's two spans, the equipped ids, the OWNED set, the
+		daily preview, and the last round's award breakdown. `Stats` is absent in full — not trimmed,
+		absent — so `AswangRounds` and `AswangWins` have no field to leak through.
+
+		FireClient TO ONE PLAYER, ALWAYS, carrying only that player's own profile. There is no
+		FireAllClients path for this remote and there must not be: every field in it is per-player, so
+		a broadcast would hand eight clients eight players' inventories, and `Owned` plus a level is
+		enough to fingerprint who is who across rounds.
 	]]
 	"ProfileUpdated",
 	--[[
@@ -154,7 +164,29 @@ local EVENTS_UP = {
 	]]
 	"ReportGhostPosition",
 	"RequestGhostSpook",
+	--[[
+		C34. Carries a cosmetic id and nothing else — no slot, no price, no "and equip it".
+
+		THE SLOT IS NOT AN ARGUMENT, deliberately: it is a property of the item in
+		`Config.Cosmetics.Catalogue`, so a client cannot name an id in one slot and a slot in another
+		and see which of the two the server believes. `pure/Cosmetics.evaluateEquip` re-checks
+		ownership on every call, because the lobby only OFFERS what it thinks is owned and an offer is
+		a hint rather than a permission (§6.2).
+	]]
 	"RequestEquipCosmetic",
+	--[[
+		C34. Also carries an id alone, and the ABSENT argument is the security design.
+
+		There is no price in this request. `pure/Cosmetics.evaluatePurchase` returns the cost out of
+		the catalogue and the server spends exactly that, so there is no number here for a compromised
+		client to shrink and no path where a client's arithmetic decides what a cosmetic costs.
+	]]
+	"RequestBuyCosmetic",
+	--[[
+		C33. NO ARGUMENTS. The day is `os.time()` on the server, the streak is in the profile, and
+		`pure/DailyStreak.evaluate` decides — there is nothing a client could legitimately name, and a
+		claimed timestamp is precisely the field that would make the streak forgeable.
+	]]
 	"RequestClaimDaily",
 	--[[
 		C21. NO ARGUMENTS, deliberately, and for the same reason `RequestTimingStop` above has none.

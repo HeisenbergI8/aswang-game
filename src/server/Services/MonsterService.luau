@@ -1022,6 +1022,30 @@ function MonsterService.ForceRevert(player: Player)
 	revert(player)
 end
 
+--[[
+	THE CORPSE FOLDER (C34). Exposed as the FOLDER rather than as an event, mirroring
+	`RoundService.GetHusksFolder` and for the same reason: a caller wants to know when a body arrives,
+	and `ChildAdded` on a folder that outlives every round is a subscription that cannot go stale
+	between a corpse being created and the next one.
+
+	`CosmeticsService` uses it to play the victim's chosen death effect at the body. THAT IS SAFE
+	BECAUSE OF WHAT A CORPSE ALREADY IS: it is the victim's own avatar, anchored, in the open, visible
+	to anyone with line of sight. An effect on it is seen by exactly the people who can already see the
+	body, and it names the victim no more precisely than their own face does.
+
+	IT IS NOT A DEATH BROADCAST, and the difference matters. Since Amendment A3, `PlayerKilled` goes to
+	the VICTIM alone — WHICH of the eight are dead is a death oracle the round deliberately does not
+	publish. A local burst at a body somebody is looking at publishes nothing; a map-wide sound or a
+	global effect would, so `Config.Cosmetics`'s death numbers are a short local puff and there is no
+	remote in that path at all.
+
+	Nil before `Start` has run. Callers connect from their own `Start`, which the bootstrap runs after
+	every `Init`, and handle nil rather than assuming.
+]]
+function MonsterService.GetCorpsesFolder(): Folder?
+	return corpses
+end
+
 function MonsterService.Init()
 	table.clear(monsters)
 end

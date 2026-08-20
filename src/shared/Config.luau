@@ -430,12 +430,203 @@ local Config = {
 		DeadRadiusPx = 30,
 	},
 
+	--[[
+		XP, LEVELS AND COINS (C32, §7). The award table of §4.8's end screen, and the curve it fills.
+
+		THE TWO HALVES MUST BE TUNED TOGETHER, which is why they share a block. The award decides how
+		fast the bar fills and the curve decides how far it has to go; changing one alone is how
+		"level 5 in twenty minutes" and "level 5 in nine hours" both ship from the same table.
+		`tests/xp-curve.test.luau` walks a plausible session end-to-end and prints what a level costs
+		in rounds, so the number is measured rather than imagined.
+
+		The award is applied by `shared/pure/XPCurve.awardFor`, which is also where the reason every
+		role-conditional term below is SAFE is written down. Read that header before adding one.
+	]]
 	Economy = {
+		-- Paid to everyone dealt into the round, whatever happened. §7's argument is that a session
+		-- should end near a milestone; a losing round paying nothing ends it where it started.
 		XPPerRound = 50,
+		-- Your side won. Role-conditional, and safe only because it lands at ENDING, after the reveal.
 		XPWinBonus = 40,
+		-- You were a survivor and you were still alive at ENDING. Not paid to the Aswang, which is
+		-- alive at the end of every round it does not abort.
 		XPSurvivorEscapeBonus = 25,
+		-- The Aswang's split, per validated kill. At `Round.MaxPlayers = 8` a maximal round is five
+		-- kills, so this caps the Aswang's outcome bonus near the survivors' win-plus-escape total.
+		XPPerKill = 15,
+
 		CoinsPerRound = 25,
-		XPPerLevel = 500,
+		CoinsWinBonus = 15,
+
+		--[[
+			THE LEVEL CURVE, AS `XPCurve.Curve`. Level 1 -> 2 costs `XPPerLevel`; every level after
+			costs `XPPerLevelGrowth` more than the one before, so the cumulative cost is triangular.
+
+			Why not flat: a flat curve makes level 40 and level 4 feel identical, and §7 wants the bar
+			to mean something at both ends. Why not exponential: an exponential curve makes the second
+			half unreachable, which is the "burn your content" failure §7 opens with.
+
+			`MaxLevel` is load-bearing rather than flavour. It bounds `XPCurve.levelFor`'s walk against
+			a corrupt XP value, and it is where the next level costs nothing — the division by zero
+			that `XPCurve` pins to a full bar instead.
+		]]
+		XPPerLevel = 150,
+		XPPerLevelGrowth = 60,
+		MaxLevel = 100,
+	},
+
+	--[[
+		THE DAILY LOGIN STREAK (C33, §7) — "the single highest-ROI retention feature you can build".
+
+		SEVEN ENTRIES, AND THE SEVENTH IS THE POINT. §7 asks for "escalating rewards with a meaningful
+		day-7 payoff", so the table escalates gently for six days and then steps hard, which is what
+		makes day 7 a thing to come back FOR rather than the last of seven equal days. The cycle
+		length IS `#Rewards` — `shared/pure/DailyStreak` reads no separate number, so the two cannot
+		disagree — and it WRAPS, so day 7 recurs weekly.
+
+		PRICED SO THAT LOGGING IN NEVER BEATS PLAYING, which is the failure this table falls into on its
+		own. The first version of it paid 580 coins a week — more than `lantern_dugo` costs outright —
+		so the optimal play was to open the game and close it, seven times. `tests/config.test.luau`
+		pins the week's total against the cheapest coin unlockable, because nothing about the table
+		looks wrong when you read it; you have to add it up.
+
+		Day 7 is a STEP rather than a nudge: about four rounds' worth of coins, and more than triple day
+		six. That is what makes it a day to come back FOR instead of the last of seven equal ones.
+	]]
+	Daily = {
+		Rewards = {
+			{ XP = 10, Coins = 10 },
+			{ XP = 15, Coins = 12 },
+			{ XP = 20, Coins = 15 },
+			{ XP = 25, Coins = 20 },
+			{ XP = 30, Coins = 25 },
+			{ XP = 40, Coins = 30 },
+			{ XP = 100, Coins = 100 },
+		},
+	},
+
+	--[[
+		THE SIX COSMETICS (C34, §7, §8.2).
+
+		§7: "~6 unlockable cosmetics at launch — enough to see progress, not enough to burn your
+		content." §8.2 names the kinds worth having: "sell what appears in clips — death effects,
+		transform auras, lantern colours."
+
+		THREE SLOTS, TWO ITEMS EACH, AND NO SCHEMA CHANGE. `Skin`, `Lantern` and `DeathFX` are the
+		field names `ProfileMigration`'s `Cosmetics.Equipped` has carried since C31, and `Slot` below
+		is spelled to match them exactly because that is what `CosmeticsService` assigns into. A
+		transform aura would be a fourth slot and therefore a v2 migration, so §8.2's third example is
+		deliberately deferred rather than smuggled in.
+
+		THE MIX IS §7's: two earned by level, three bought with coins, one behind a gamepass. The
+		gamepass one is LISTED AND LOCKED — `pure/Cosmetics.evaluatePurchase` refuses it with
+		NOT_FOR_SALE until C37 supplies a real product id. C37 depends on C34 and not the reverse, so
+		the alternative was a purchase wired to gamepass id 0, which succeeds silently for everybody.
+
+		`Rgb` is a triple, matching how `Config.Monster` and `Config.Tasks` store every colour, so a
+		value stays data rather than a constructed Color3.
+	]]
+	Cosmetics = {
+		--[[
+			The lantern light's reach and strength, shared by every lantern in the catalogue so the
+			COLOUR is the only thing an item changes. A lantern that also changed brightness would be
+			a gameplay advantage sold for coins, which §8.1's "no pay-to-win" line refuses.
+		]]
+		LanternRange = 14,
+		LanternBrightness = 1.4,
+
+		-- The death burst (§4.9: "creepy and tense", not graphic — a puff and a fade, no blood).
+		DeathFXParticles = 24,
+		DeathFXLifetime = 1.6,
+		DeathFXSpeed = 7,
+
+		Catalogue = {
+			-- The three defaults. Always owned, never for sale, and present in the list so the lobby
+			-- can cycle back to them and `Cosmetics.find` answers for what a fresh profile wears.
+			{
+				Id = "default",
+				Slot = "Skin",
+				Name = "Barrio kid",
+				Source = "DEFAULT",
+				Level = 0,
+				Price = 0,
+				Rgb = { 204, 190, 170 },
+			},
+			{
+				Id = "lantern_default",
+				Slot = "Lantern",
+				Name = "Gasera",
+				Source = "DEFAULT",
+				Level = 0,
+				Price = 0,
+				Rgb = { 255, 190, 120 },
+			},
+			{
+				Id = "deathfx_default",
+				Slot = "DeathFX",
+				Name = "Hangin",
+				Source = "DEFAULT",
+				Level = 0,
+				Price = 0,
+				Rgb = { 190, 190, 200 },
+			},
+
+			-- The six. Levels are early enough that a first session reaches one of them.
+			{
+				Id = "lantern_asul",
+				Slot = "Lantern",
+				Name = "Asul",
+				Source = "LEVEL",
+				Level = 2,
+				Price = 0,
+				Rgb = { 120, 190, 255 },
+			},
+			{
+				Id = "skin_abo",
+				Slot = "Skin",
+				Name = "Abo",
+				Source = "LEVEL",
+				Level = 4,
+				Price = 0,
+				Rgb = { 122, 122, 130 },
+			},
+			{
+				Id = "lantern_dugo",
+				Slot = "Lantern",
+				Name = "Dugo",
+				Source = "COINS",
+				Level = 0,
+				Price = 450,
+				Rgb = { 255, 96, 84 },
+			},
+			{
+				Id = "deathfx_alikabok",
+				Slot = "DeathFX",
+				Name = "Alikabok",
+				Source = "COINS",
+				Level = 0,
+				Price = 600,
+				Rgb = { 226, 206, 172 },
+			},
+			{
+				Id = "skin_ginto",
+				Slot = "Skin",
+				Name = "Ginto",
+				Source = "COINS",
+				Level = 0,
+				Price = 750,
+				Rgb = { 236, 190, 92 },
+			},
+			{
+				Id = "deathfx_apoy",
+				Slot = "DeathFX",
+				Name = "Apoy",
+				Source = "GAMEPASS",
+				Level = 0,
+				Price = 0,
+				Rgb = { 255, 132, 48 },
+			},
+		},
 	},
 
 	--[[
@@ -861,6 +1052,12 @@ local Config = {
 			ReportGhostPosition = { Capacity = 10, RefillPerSecond = 5 },
 			RequestGhostSpook = { Capacity = 2, RefillPerSecond = 0.05 },
 			RequestEquipCosmetic = { Capacity = 5, RefillPerSecond = 0.5 },
+			--[[
+				C34. Priced like the equip next door rather than tighter, even though it SPENDS: the
+				limiter is not what stops a double purchase — `evaluatePurchase` returning
+				ALREADY_OWNED is — and a player browsing a six-item shop presses buy more than once.
+			]]
+			RequestBuyCosmetic = { Capacity = 5, RefillPerSecond = 0.5 },
 			RequestClaimDaily = { Capacity = 2, RefillPerSecond = 0.1 },
 			--[[
 				Both trial remotes are BUTTON PRESSES — one per session, at most, from an honest

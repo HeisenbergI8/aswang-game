@@ -824,6 +824,69 @@ check(
 
 check("at least one session attempt is made", Config.Profile.SessionStartAttempts >= 1)
 
+--[[
+	C32. BEING THE MONSTER MUST NOT BE THE ONLY WAY TO PROGRESS.
+
+	§4.2's anti-repeat draw is deliberately biased AGAINST giving a player the role twice in a row, so
+	over a session most people are survivors most of the time. If the Aswang's award table paid far
+	more, the level bar would be gated behind a draw the game is actively trying not to give you — and
+	the symptom would be "progression feels random", which is the hardest kind of complaint to trace
+	back to a number.
+
+	Both sides are measured at their CEILING: a survivor who won and survived, against an Aswang who
+	won and killed every survivor dealt in. The bound is generous — the monster's round is rarer and
+	should pay better — and it is the runaway case it exists to catch.
+
+	The per-kill rate is the knob this actually constrains, and `Config.Economy`'s comment claims the
+	relationship; this is what makes the claim checkable.
+]]
+local maxKills = Config.Round.MaxPlayers - 1
+local aswangCeiling = Config.Economy.XPPerRound
+	+ Config.Economy.XPWinBonus
+	+ Config.Economy.XPPerKill * maxKills
+local survivorCeiling = Config.Economy.XPPerRound
+	+ Config.Economy.XPWinBonus
+	+ Config.Economy.XPSurvivorEscapeBonus
+
+check(
+	"a perfect Aswang round pays more than a perfect survivor round",
+	aswangCeiling > survivorCeiling,
+	`{aswangCeiling} vs {survivorCeiling}`
+)
+check(
+	"a perfect Aswang round does not pay double a perfect survivor round",
+	aswangCeiling < survivorCeiling * 2,
+	`{aswangCeiling} vs {survivorCeiling} over {maxKills} kills`
+)
+
+--[[
+	C33/C34. THE DAILY STREAK MUST NOT OUT-EARN THE GAME.
+
+	§7 puts the streak and the coin economy in the same section, and the failure mode when they drift
+	is specific: if a week of logging in buys more than a week of playing, the optimal play is to open
+	the game and close it. Pinned against the CHEAPEST unlockable, so the streak stays a top-up rather
+	than the route.
+]]
+local weekCoins = 0
+
+for _, reward in Config.Daily.Rewards do
+	weekCoins += reward.Coins
+end
+
+local cheapest = math.huge
+
+for _, item in Config.Cosmetics.Catalogue do
+	if item.Source == "COINS" and item.Price < cheapest then
+		cheapest = item.Price
+	end
+end
+
+check(
+	"a week of daily claims does not buy the cheapest cosmetic on its own",
+	weekCoins < cheapest,
+	`{weekCoins} coins a week vs {cheapest} for the cheapest unlockable`
+)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end

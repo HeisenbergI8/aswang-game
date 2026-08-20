@@ -38,6 +38,11 @@ local WinConditions = require(Shared.pure.WinConditions)
 
 type RoundPhase = Types.RoundPhase
 type PlayerState = Types.PlayerState
+-- Aliased for the same reason as the two above, so `state.LastResult` and `GetLastResult` read the
+-- way `Phase` and `GetPhase` do. It does NOT survive the `require` boundary on its own — see
+-- `ProgressionService.awardRound`, which re-annotates on arrival, and
+-- `.claude/lessons/pure-module-unions-widen-in-lists.md` for the family of trap this belongs to.
+type RoundResult = Types.RoundResult
 
 local RoundService = {}
 
@@ -56,6 +61,17 @@ local state = {
 	-- counted from this rather than from who is still standing, because presence cannot tell a kill
 	-- from a quit — three patches failed on that before the rule changed shape.
 	AswangKills = 0,
+	--[[
+		How the LAST round ended (C32). Written by `enterEnding` and never cleared, so it survives into
+		INTERMISSION and IDLE and reads as the result of the most recent round rather than as "no round
+		is running" — which is the question nobody asks and the one a cleared field would answer.
+
+		ABORTED is the initial value on purpose. A server that has never run a round has no result, and
+		of the four `RoundResult` members ABORTED is the only one that pays nobody a win in
+		`pure/XPCurve.awardFor` — so a reader that somehow arrives before any round cannot be handed a
+		victory for a round that did not happen.
+	]]
+	LastResult = Enums.RoundResult.Aborted :: RoundResult,
 	-- Keyed by UserId. LOBBY between rounds, ALIVE for everyone dealt into a round, SPECTATOR for
 	-- anyone who joined after it started (spec §6.4), GHOST once C15 lands.
 	PlayerStates = {} :: { [number]: PlayerState },
@@ -89,6 +105,31 @@ end
 
 function RoundService.GetPlayerState(player: Player): PlayerState
 	return state.PlayerStates[player.UserId] or Enums.PlayerState.Lobby
+end
+
+--[[
+	HOW MANY VALIDATED KILLS THE ASWANG HAS THIS ROUND (C32). Server-only, like every query above it.
+
+	Read by `ProgressionService` at ENDING for §4.8's per-kill split, and by nothing else. It is a
+	COUNT and never a roster: it says how many, never who, so it carries none of the death oracle
+	Amendment A3 removed `AlivePlayerCount` to close — and it is not sent anywhere in any case.
+
+	Reset in `enterIdle` alongside the rest of the round's state, so a value read after IDLE is zero
+	rather than last round's.
+]]
+function RoundService.GetAswangKills(): number
+	return state.AswangKills
+end
+
+--[[
+	HOW THE LAST ROUND ENDED (C32). Read by `ProgressionService` at ENDING to price §4.8's award table.
+
+	A `RoundResult` names an outcome and never a player, so this is the one round query in this block
+	that carries nothing sensitive at all — it is the same value `RoundEnded` broadcasts to every
+	client. It is server-side anyway, for consistency with its neighbours rather than out of need.
+]]
+function RoundService.GetLastResult(): RoundResult
+	return state.LastResult
 end
 
 -- §4.8, C11. Read by GateService, which never writes it — the gate is derived in one place, from the
@@ -819,6 +860,17 @@ local function enterEnding(result: Types.RoundResult)
 		warn(`[RoundService] Discarded a late round result ({result}) — already ENDING.`)
 		return
 	end
+
+	--[[
+		WRITTEN BEFORE `setPhase`, AND THAT ORDER IS LOAD-BEARING (C32).
+
+		`setPhase` fires `PhaseChanged` synchronously, and `ProgressionService` subscribes to it to
+		price §4.8's award table off `GetLastResult()`. Stamped afterwards, every round would be
+		awarded against the PREVIOUS round's result — survivors paid for an escape they did not make,
+		and the very first round of a server paid against the ABORTED default. Nothing would error and
+		nothing on screen would name it; the XP would simply be wrong by one round, forever.
+	]]
+	state.LastResult = result
 
 	setPhase(Enums.RoundPhase.Ending, Config.Round.EndScreen)
 
