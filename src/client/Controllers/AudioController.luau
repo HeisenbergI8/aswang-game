@@ -64,8 +64,8 @@
 	document.
 
 	1. DOES ANY CUE TAKE A ROLE AS AN INPUT?  No. Grep this file for `YourRole` and `Role` — there is
-	   no hit. The only inputs are `snapshot.Phase`, `snapshot.YourState`, `snapshot.GateOpen`,
-	   `snapshot.SecondsRemaining` and the Character on `MonsterTransformed`. `ClientRoundSnapshot`
+	   no hit. The only inputs are `snapshot.Phase`, `snapshot.YourState`, `snapshot.SecondsRemaining`
+	   and the Character on `MonsterTransformed`. `ClientRoundSnapshot`
 	   carries `YourRole`, and this file does not read it.
 
 	2. IS ANY CUE FIRED TO ONE PLAYER AND NOT ANOTHER?  No cue is FIRED at all — nothing here is a
@@ -147,7 +147,7 @@ end
 
 	Behind `Debug.VerboseLogging` like every other non-fault line in this codebase; the playtester
 	turns it on. A missing ASSET is a warn above and is never gated, because a cue with no sound is a
-	fault and faults are ungated here (GateService's untagged-gate warn is the precedent).
+	fault and faults are ungated here — the rule is that faults are never gated behind a debug flag.
 ]]
 local function logCue(cueId: string, detail: string)
 	if Config.Debug.VerboseLogging then
@@ -551,36 +551,6 @@ local function startHeartbeat(character: Model)
 end
 
 --[[
-	THE GATE. §4.8's "5/5 tasks done AND at least one survivor reaches the escape gate" — this is the
-	first half becoming true, and it is the loudest good-news moment survivors get.
-
-	AN EDGE DETECTOR ON A FIELD EVERY CLIENT ALREADY HAS. `GateOpen` is on `ClientRoundSnapshot`
-	(`Types.luau:543`) and `RoundService` derives it from the task count — `GateService` fires no
-	remote at all and must not (`GateService.luau:20-22`), because a client-callable escape is a free
-	win behind whatever validation somebody remembers to write.
-
-	IT FIRES ON THE GATE OPENING, NOT ON ANYONE REACHING IT. `GateService`'s header requires that an
-	Aswang at an open gate produces "no refusal, no verdict, no remote, no sound, no prompt" — an
-	arrival cue would be exactly the sound that header forbids, and it would leak by omission the
-	moment an Aswang walked through and nothing played.
-]]
-local gateWasOpen = false
-
-local function onGateChanged(open: boolean)
-	if open == gateWasOpen then
-		return
-	end
-
-	gateWasOpen = open
-
-	-- The edge is consumed whether or not the cue plays, so a player who was outside the round when
-	-- the gate opened does not hear it arrive late.
-	if open and AudioCues.isCuePermitted("CUE_GATE_OPEN", phase, state) then
-		playOneShot("CUE_GATE_OPEN", Config.Audio.GateVolume, SoundService, "gate opened")
-	end
-end
-
---[[
 	THE SUNRISE. Appendix C.3's diegetic clock, given a sound.
 
 	SAME PURE FUNCTION AS THE SKY, deliberately. `SkyController` renders the round clock as a sunrise
@@ -657,7 +627,6 @@ local function onSnapshot(snapshot: Types.ClientRoundSnapshot)
 		stopAllHeartbeats()
 	end
 
-	onGateChanged(snapshot.GateOpen)
 	onSunriseProgress(snapshot)
 end
 

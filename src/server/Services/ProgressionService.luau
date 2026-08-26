@@ -77,7 +77,7 @@ ProgressionService.ProfileLoaded = Instance.new("BindableEvent")
 	FIRED AFTER A STAT ACTUALLY MOVED (C35). `(player, statName)`.
 
 	`BumpStat` is the single choke point every badge-gating counter passes through — `TasksDone` from
-	TaskService at the moment a task completes, `Rounds` and `AswangRounds` from `awardRound` at
+	the round's task system at the moment a task completed, `Rounds` and `AswangRounds` from `awardRound` at
 	ENDING. One subscription here covers three of the five badges, which is why `BadgeService` does not
 	subscribe to `PhaseChanged` alongside this service and hope the connections fire in the right
 	order. Two services listening to one event and depending on which runs first is the shape of bug
@@ -884,7 +884,7 @@ local function awardRound()
 			badge and C41's analytics are what they are for.
 
 			`Kills` and `TasksDone` are deliberately NOT written here: they are per-event counts that
-			only `MonsterService` and `TaskService` can see, and inferring them from a round summary
+			only the gameplay services can see, and inferring them from a round summary
 			would be a second, wrong source of truth. They stay at zero until whoever needs them wires
 			the call at the event.
 		]]

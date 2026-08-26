@@ -26,17 +26,13 @@ local SERVICE_ORDER = {
 	"CommunityService",
 	-- Gameplay
 	"RoleService",
-	"TaskService",
-	"GateService",
 	"MonsterService",
 	"ItemService",
-	"GhostService",
 	"TrialService",
 	--[[
-		C23. After the four services that CALL it — ItemService, GhostService, MonsterService and
-		TaskService — because those hold a module reference from their own `require` at load, and this
-		list only governs Init/Start. It is placed here so `Start` has run before any gameplay can
-		produce a cue, not because the require needs it.
+		C23/V01. After the two services that still CALL it — ItemService and MonsterService — because
+		those hold a module reference from their own `require` at load, and this list only governs
+		Init/Start. It is placed here so `Start` has run before any gameplay can produce a cue.
 	]]
 	"TeachingService",
 	--[[

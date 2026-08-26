@@ -36,7 +36,7 @@ local function check(label: string, ok: boolean, detail: string?)
 	print(`  FAIL  {label}{if detail then ` — {detail}` else ""}`)
 end
 
-local STATES: { PlayerState } = { "LOBBY", "ALIVE", "GHOST", "SPECTATOR" }
+local STATES: { PlayerState } = { "LOBBY", "ALIVE", "DEAD", "SPECTATOR" }
 local CAUSES: { Cause } = { "JOINED", "PHASE_CHANGE", "KILLED", "DIED", "LOAD_FAILED" }
 
 --[[
@@ -66,14 +66,14 @@ local EXPECTED: { [string]: Action } = {
 	["ALIVE/JOINED"] = "GRANT",
 	["ALIVE/PHASE_CHANGE"] = "GRANT",
 	["ALIVE/KILLED"] = "REVOKE",
-	["ALIVE/DIED"] = "REVOKE", -- a round death is a death; RoundService then makes them a GHOST
+	["ALIVE/DIED"] = "REVOKE", -- a round death is a death; RoundService then makes them a DEAD
 	["ALIVE/LOAD_FAILED"] = "DEFER", -- ALIVE with no body is unkillable AND counted: the worst cell
 
 	--[[
-		GHOST: dead, and KEEP ON EVERY CAUSE. Their body is the CORPSE, and MonsterService owns it.
+		DEAD: dead, and KEEP ON EVERY CAUSE. Their body is the CORPSE, and MonsterService owns it.
 
-		This row has now moved three times and the history is the point. It was REVOKE (C05, no ghost body),
-		then GRANT (C15, ghosts got real characters so they had a position), then REVOKE again (an audit
+		This row has now moved three times and the history is the point. It was REVOKE (C05, no dead player body),
+		then GRANT (C15, dead players got real characters so they had a position), then REVOKE again (an audit
 		found a replicated hidden body names the dead set), and now KEEP — because removing the body did not
 		remove the tell, it INVERTED it. `Character == nil` enumerates the dead exactly as well as a tagged
 		body did, and the Aswang is never in that set.
@@ -82,11 +82,11 @@ local EXPECTED: { [string]: Action } = {
 		§4.7 and Amendment A3 both rely on as the death signal; GRANT would spawn a fresh WALKING body for a
 		dead player; DEFER would retry that forever.
 	]]
-	["GHOST/JOINED"] = "KEEP",
-	["GHOST/PHASE_CHANGE"] = "KEEP",
-	["GHOST/KILLED"] = "KEEP",
-	["GHOST/DIED"] = "KEEP",
-	["GHOST/LOAD_FAILED"] = "KEEP", -- the corpse is not a load that can fail
+	["DEAD/JOINED"] = "KEEP",
+	["DEAD/PHASE_CHANGE"] = "KEEP",
+	["DEAD/KILLED"] = "KEEP",
+	["DEAD/DIED"] = "KEEP",
+	["DEAD/LOAD_FAILED"] = "KEEP", -- the corpse is not a load that can fail
 
 	-- SPECTATOR: joined mid-round. THE C04 REMNANT — uncounted, so it must also be bodiless.
 	["SPECTATOR/JOINED"] = "REVOKE",
@@ -121,7 +121,7 @@ for _, cause in CAUSES do
 end
 
 --[[
-	A GHOST'S BODY IS NEVER TOUCHED, on any cause — asserted as a property over every cause rather than
+	A DEAD'S BODY IS NEVER TOUCHED, on any cause — asserted as a property over every cause rather than
 	as five cells, so a future edit that acts on one of them fails here.
 
 	GRANT would give a dead player a walking body. REVOKE would destroy the corpse, which is the ONLY
@@ -131,15 +131,15 @@ end
 ]]
 for _, cause in CAUSES do
 	check(
-		`a ghost's body is left alone ({cause})`,
-		BodyTransitions.actionFor("GHOST", cause) == "KEEP",
+		`a dead player's body is left alone ({cause})`,
+		BodyTransitions.actionFor("DEAD", cause) == "KEEP",
 		"the corpse IS their character; MonsterService owns it"
 	)
 end
 
 check(
-	"a failed load for a GHOST is NOT retried",
-	BodyTransitions.actionFor("GHOST", "LOAD_FAILED") == "KEEP"
+	"a failed load for a DEAD is NOT retried",
+	BodyTransitions.actionFor("DEAD", "LOAD_FAILED") == "KEEP"
 )
 
 -- And must NOT be retried for someone owed nothing, or the retry loops forever on a spectator.

@@ -13,14 +13,14 @@
 	  · RequestThrowSalt(direction) is resolved into a hit       (C14, pure/SaltThrow)
 	  · a hit stuns, forces a revert, and glows for RevealDuration (C14)
 
-	THERE IS NO PICKUP REMOTE AND THAT IS A SECURITY DECISION, not an omission. `RequestTaskProgress`
-	set the shape at C08: the server resolves what a player is standing at from that player's own
-	character position, and the client names nothing. A `RequestPickup(pouchId)` would need a budget,
+	THERE IS NO PICKUP REMOTE AND THAT IS A SECURITY DECISION, not an omission. The rule: the server
+	resolves what a player is standing at from that player's own character position, and the client
+	names nothing. A `RequestPickup(pouchId)` would need a budget,
 	a verdict union, and validation that the named pouch is the one you are standing on — three
 	surfaces bought to replace a distance comparison the server is already positioned to make.
 
-	The pool verdict is `server/pure/TaskPool.evaluate`, shared with TaskService rather than copied.
-	It is generic over (names, required, expected) and mentions tasks nowhere.
+	The pool verdict is `server/pure/SearchPool.evaluate`, shared rather than copied. It is generic
+	over (names, required, expected) and names no mechanic at all.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -31,7 +31,7 @@ local AntiCheatService = require(script.Parent.AntiCheatService)
 local MonsterService = require(script.Parent.MonsterService)
 local RoundService = require(script.Parent.RoundService)
 local TeachingService = require(script.Parent.TeachingService)
-local TaskPool = require(script.Parent.Parent.pure.TaskPool)
+local SearchPool = require(script.Parent.Parent.pure.SearchPool)
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
@@ -46,8 +46,8 @@ local ItemService = {}
 local TAG_SPAWN = "SaltSpawn"
 
 -- Every `SaltSpawn` part in the map, keyed by Name. Rebuilt on every draw rather than cached, for the
--- reason TaskService gives at its own `discoverPool`: C17 will add, move and delete these parts while a
--- server is running, and a cached point is one that can stop existing.
+-- reason any tag-driven pool is: C17 will add, move and delete these parts while a server is running,
+-- and a cached point is one that can stop existing.
 local pointsByName: { [string]: BasePart } = {}
 
 -- The pouches actually in the world right now. One parent so a phase change clears them with a single
@@ -59,7 +59,7 @@ local pouches: Folder? = nil
 -- argument is that per-player facts about the living do not go out to everyone.
 local carried: { [number]: number } = {}
 
-local function discoverPool(): TaskPool.Report
+local function discoverPool(): SearchPool.Report
 	local names: { string } = {}
 
 	table.clear(pointsByName)
@@ -75,7 +75,7 @@ local function discoverPool(): TaskPool.Report
 
 		table.insert(names, instance.Name)
 
-		-- The `: BasePart?` is load-bearing under --!strict, same as TaskService's: indexing a
+		-- The `: BasePart?` is load-bearing under --!strict: indexing a
 		-- `{ [string]: BasePart }` yields a non-optional value, so comparing it to nil is a type error
 		-- rather than a lookup.
 		local existing: BasePart? = pointsByName[instance.Name]
@@ -85,19 +85,19 @@ local function discoverPool(): TaskPool.Report
 		end
 	end
 
-	-- Sorted for the same reason TaskService sorts: `GetTagged`'s order is engine-defined and must not
-	-- become a hidden input to a random selection.
+	-- Sorted because `GetTagged`'s order is engine-defined and must not become a hidden input to a
+	-- random selection.
 	table.sort(names)
 
-	return TaskPool.evaluate(names, Config.Salt.SpawnCount, Config.Salt.PouchPoolSize)
+	return SearchPool.evaluate(names, Config.Salt.SpawnCount, Config.Salt.PouchPoolSize)
 end
 
 --[[
-	THE LOUD HALF, ungated by VerboseLogging for the reason TaskService's `reportPool` states: this repo
-	gates routine tracing and warns unconditionally for faults, and a map with no salt in it is a fault
+	THE LOUD HALF, ungated by VerboseLogging because the rule in this repo is that routine tracing is
+	gated and faults warn unconditionally — and a map with no salt in it is a fault
 	whose only player-visible symptom is that the game is unwinnable and nobody knows why.
 ]]
-local function reportPool(report: TaskPool.Report)
+local function reportPool(report: SearchPool.Report)
 	if #report.Duplicates > 0 then
 		warn(
 			`[ItemService] {TAG_SPAWN} parts share a Name and were skipped: `
@@ -131,7 +131,7 @@ end
 	report rather than the table keeps `pointsByName` private: a caller that wanted the parts would have
 	to ask for a name it already got from the report.
 ]]
-function ItemService.EvaluatePool(): TaskPool.Report
+function ItemService.EvaluatePool(): SearchPool.Report
 	local report = discoverPool()
 
 	reportPool(report)
@@ -174,7 +174,7 @@ local function spawnPouches()
 
 	-- Fisher-Yates over a COPY, so the pool order is not mutated under the caller. `Random.new()` with
 	-- no argument, deliberately: a seeded draw is reproducible by anyone who can guess the seed, and
-	-- `Random.new(os.time())` is client-observable to the second. See TaskService's identical note.
+	-- `Random.new(os.time())` is client-observable to the second.
 	local names = table.clone(report.Unique)
 
 	for index = #names, 2, -1 do

@@ -34,7 +34,6 @@ local BodyTransitions = require(Shared.pure.BodyTransitions)
 local RejoinResolve = require(Shared.pure.RejoinResolve)
 local RoundTransitions = require(Shared.pure.RoundTransitions)
 local Types = require(Shared.Types)
-local WinConditions = require(Shared.pure.WinConditions)
 
 type RoundPhase = Types.RoundPhase
 type PlayerState = Types.PlayerState
@@ -52,8 +51,6 @@ local state = {
 	PhaseEndsAt = 0,
 	RoundNumber = 0,
 	AswangUserId = nil :: number?,
-	TasksCompleted = 0,
-	GateOpen = false,
 	-- How many SURVIVORS were dealt into this round, snapshotted at STARTING. A snapshot rather than a
 	-- live count on purpose: see enterStarting.
 	DealtInSurvivors = 0,
@@ -73,7 +70,7 @@ local state = {
 	]]
 	LastResult = Enums.RoundResult.Aborted :: RoundResult,
 	-- Keyed by UserId. LOBBY between rounds, ALIVE for everyone dealt into a round, SPECTATOR for
-	-- anyone who joined after it started (spec §6.4), GHOST once C15 lands.
+	-- anyone who joined after it started (spec §6.4), DEAD once C15 lands.
 	PlayerStates = {} :: { [number]: PlayerState },
 }
 
@@ -132,12 +129,6 @@ function RoundService.GetLastResult(): RoundResult
 	return state.LastResult
 end
 
--- §4.8, C11. Read by GateService, which never writes it — the gate is derived in one place, from the
--- task count and the phase. See `SetTasksCompleted`, which moved below `broadcastSnapshot` for C11.
-function RoundService.IsGateOpen(): boolean
-	return state.GateOpen
-end
-
 --[[
 	THE BODY RULE, applied. C04's carried-over warning from C01 (BUILD-PLAN lines ~203–219).
 
@@ -152,7 +143,7 @@ end
 
 	  · onPlayerAdded            — on join, and via Start()'s backfill
 	  · setAllPlayerStates       — every wholesale state change, after the table is fully written
-	  · MarkKilled               — a death, which clears the body for a GHOST
+	  · MarkKilled               — a death, which clears the body for a DEAD
 	  · watchForDeath, twice     — the immediate respawn, and the DEFERRED one inside task.delay
 	  · itself                   — the post-yield re-apply, when the state changed during a load
 
@@ -187,10 +178,10 @@ local lastRespawnAt: { [number]: number } = {}
 	player's state and the body must catch up. Only the failed-load retry passes anything else.
 
 	THE STATE PASSED IS THE POST-TRANSITION ONE, and that is worth stating because an audit found the
-	table's comments implying otherwise. `MarkKilled` writes GHOST *before* calling here, and
+	table's comments implying otherwise. `MarkKilled` writes DEAD *before* calling here, and
 	`setAllPlayerStates` writes the whole table before its loop, so `GetPlayerState` always answers
 	with where the player has ARRIVED, never where they came from. The cells agree either way today —
-	`ALIVE/DIED` and `GHOST/DIED` are both REVOKE — but a future cell where they differ would be read
+	`ALIVE/DIED` and `DEAD/DIED` are both REVOKE — but a future cell where they differ would be read
 	off the wrong row, so the convention is pinned here rather than left to inspection.
 ]]
 local function applyBodyRule(player: Player, cause: BodyTransitions.Cause?)
@@ -262,7 +253,7 @@ local function applyBodyRule(player: Player, cause: BodyTransitions.Cause?)
 
 						THE TABLE DECIDES WHETHER TO RETRY, not a hand-written guard here. Re-entering with
 						cause LOAD_FAILED answers DEFER for LOBBY and ALIVE — who are owed a body — and
-						KEEP for GHOST and SPECTATOR, who are owed nothing and whose retry would loop
+						KEEP for DEAD and SPECTATOR, who are owed nothing and whose retry would loop
 						against a rule that will never say yes.
 					]]
 					applyBodyRule(player, "LOAD_FAILED")
@@ -324,7 +315,7 @@ end
 
 	A ROUND DEATH IS A DEATH, which also closes reset-to-escape: without this, an Aswang cornering a
 	survivor could be beaten by Escape → Reset, which teleports the victim to spawn for free. Dying in
-	ACTIVE routes through MarkKilled and makes them a GHOST — uncounted, bodiless and unkillable, the
+	ACTIVE routes through MarkKilled and makes them a DEAD — uncounted, bodiless and unkillable, the
 	same as being killed, minus the corpse and the broadcast because nobody killed them.
 ]]
 local function watchForDeath(player: Player, character: Model)
@@ -458,9 +449,9 @@ end
 	oracle A3 closed.
 
 	Reads state.AswangUserId, which is why this cannot live in the pure module: the count is derived
-	from the secret. What crosses to WinConditions is a NUMBER, and a number is not a hint — the
-	snapshot already tells every client how many players are alive, and "one fewer than that" is
-	arithmetic anyone can do. Nothing here is broadcast.
+	from the secret. What ever crosses OUT of it is a NUMBER, and a number is not a hint — "how many
+	survivors are alive" is arithmetic anyone watching the barrio can do. Nothing here is broadcast,
+	and V11's win rule must keep it that way: it may read this count, never the id behind it.
 ]]
 local function livingSurvivorCount(): number
 	local count = 0
@@ -506,8 +497,8 @@ local dealtIn: { [number]: boolean } = {}
 
 	WHY THIS EXISTS. Without it a survivor could Alt-F4 the moment they heard the transform and return
 	invulnerable, because C01 marked every mid-round arrival SPECTATOR and a SPECTATOR cannot be killed.
-	Resolving them to GHOST would close that but still pay the quitter — they would land with the full
-	ghost feature set having never been caught. The husk makes quitting NEUTRAL: the body stays, the
+	Resolving them to DEAD would close that but still pay the quitter — they would land with the full
+	dead player feature set having never been caught. The husk makes quitting NEUTRAL: the body stays, the
 	Aswang can kill it, and the owner comes back to whatever is true when they come back.
 
 	THE HOLE THIS DOES NOT CLOSE, stated here so nobody discovers it as a surprise: Roblox does not
@@ -544,12 +535,12 @@ end
 
 local function setAllPlayerStates(newState: PlayerState)
 	--[[
-		A PLAYER LEAVING GHOST LOSES THEIR BODY EXPLICITLY, AND THIS IS A C15 REGRESSION FIX.
+		A PLAYER LEAVING DEAD LOSES THEIR BODY EXPLICITLY, AND THIS IS A C15 REGRESSION FIX.
 
-		Until C15, `mayHaveBody("GHOST")` was false, so a ghost had no body and this function had
-		nothing to clean up. C15 gave ghosts bodies — and quietly removed the only thing that was
+		Until C15, `mayHaveBody("DEAD")` was false, so a dead player had no body and this function had
+		nothing to clean up. C15 gave dead players bodies — and quietly removed the only thing that was
 		destroying them, because `applyBodyRule`'s GRANT branch is gated on `player.Character == nil`
-		and a ghost body is very much not nil. GRANT therefore no-ops and the ghost body SURVIVES the
+		and a dead player body is very much not nil. GRANT therefore no-ops and the dead player body SURVIVES the
 		transition to LOBBY.
 
 		What that shipped, before this fix: die in round N; in round N+1 you are ALIVE, invisible,
@@ -563,12 +554,12 @@ local function setAllPlayerStates(newState: PlayerState)
 		place every player's state is rewritten at once, so it is the honest place for "your old body
 		is no longer valid".
 	]]
-	local hadGhostBody: { Player } = {}
+	local hadDeadBody: { Player } = {}
 
-	if newState ~= Enums.PlayerState.Ghost then
+	if newState ~= Enums.PlayerState.Dead then
 		for _, player in Players:GetPlayers() do
-			if state.PlayerStates[player.UserId] == Enums.PlayerState.Ghost then
-				table.insert(hadGhostBody, player)
+			if state.PlayerStates[player.UserId] == Enums.PlayerState.Dead then
+				table.insert(hadDeadBody, player)
 			end
 		end
 	end
@@ -580,7 +571,7 @@ local function setAllPlayerStates(newState: PlayerState)
 
 	-- BEFORE applyBodyRule, so the GRANT below finds `Character == nil` and builds a fresh, visible,
 	-- collidable body rather than declining to act.
-	for _, player in hadGhostBody do
+	for _, player in hadDeadBody do
 		local character = player.Character
 
 		player.Character = nil
@@ -637,9 +628,6 @@ local function buildSnapshot(player: Player): Types.ClientRoundSnapshot
 		Phase = state.Phase,
 		SecondsRemaining = RoundService.GetSecondsRemaining(),
 		RoundNumber = state.RoundNumber,
-		TasksCompleted = state.TasksCompleted,
-		TasksRequired = Config.Tasks.TotalRequired,
-		GateOpen = state.GateOpen,
 		YourState = RoundService.GetPlayerState(player),
 	}
 end
@@ -649,62 +637,6 @@ end
 local function broadcastSnapshot()
 	for _, player in Players:GetPlayers() do
 		snapshotRemote:FireClient(player, buildSnapshot(player))
-	end
-end
-
---[[
-	How many of this round's tasks are done (§4.4, C08) AND, since C11, whether the gate is open.
-	WRITTEN BY TaskService, READ BY THE SNAPSHOT.
-
-	This service owns the counter for the same reason it owns PlayerStates: `buildSnapshot` is the only
-	thing that sends it, and a counter living next to its sender cannot drift from what the HUD shows.
-	TaskService owns the TASKS; this owns the NUMBER on the bar.
-
-	NOT A PHASE, AND DELIBERATELY NOT GUARDED LIKE ONE. `setPhase` stays private and stays this
-	service's alone; a count is data, and TaskService legitimately writes it in three situations —
-	a completion during ACTIVE, a reset when it clears the round's tasks on the way into INTERMISSION,
-	and the same reset again at IDLE. Refusing the call outside ACTIVE would break the middle one, and
-	that one is a real fix: `enterIdle` resets this counter and `enterIntermission` never has, so until
-	now the HUD showed last round's 4/5 for the whole intermission.
-
-	The clamp is the only validation worth having. A count above TotalRequired would render as 7/5 and
-	a negative one as -1/5, and neither is worth a caller having to remember.
-
-	THE GATE IS DERIVED HERE AND NOWHERE ELSE (§4.8, C11). It is not a second piece of state anybody
-	sets — it is a function of the count and the phase, computed at the one moment the count can
-	change. That is deliberate: a `GateOpen` with its own writer is a `GateOpen` that can disagree
-	with the task bar, and "the HUD says 5/5 but the gate is shut" is a bug report with no thread to
-	pull.
-
-	THE PHASE CONDITION IS NOT DECORATION. `clearTasks` calls this with 0 on the way into both
-	INTERMISSION and IDLE, so the count alone would already close the gate — but `enterEnding` does
-	not touch the count, and a gate left open across ENDING would be visibly open on the end screen of
-	a round the Aswang won on the clock.
-
-	THIS FUNCTION MOVED for C11: it now calls `broadcastSnapshot`, a local declared several hundred
-	lines below where it used to sit, and Luau resolves locals in declaration order.
-]]
-function RoundService.SetTasksCompleted(count: number)
-	state.TasksCompleted = math.clamp(count, 0, Config.Tasks.TotalRequired)
-
-	local open = state.Phase == Enums.RoundPhase.Active
-		and state.TasksCompleted >= Config.Tasks.TotalRequired
-
-	if open == state.GateOpen then
-		return
-	end
-
-	state.GateOpen = open
-
-	-- Immediately, rather than waiting up to SnapshotInterval. This is the single most dramatic
-	-- moment in a round (§4.8, "the finale, and the best clip moment in the game") and half a second
-	-- of every HUD lagging the world is half a second nobody gets back. MarkKilled pushes for the
-	-- same reason.
-	broadcastSnapshot()
-
-	if Config.Debug.VerboseLogging then
-		-- Safe to log: it names a round, never a player.
-		print(`[RoundService] Escape gate {if open then "OPEN" else "shut"}.`)
 	end
 end
 
@@ -737,18 +669,12 @@ end
 --------------------------------------------------------------------------------
 -- Phase handlers
 --
--- TODO(C03): assign roles via RoleService in STARTING
--- TODO(C11): win conditions in ACTIVE
--- Tasks are NOT drawn from here. TaskService subscribes to PhaseChanged and draws on STARTING, because
--- it needs SetTasksCompleted above and requiring it back from here would be a load-time require cycle
--- — see this file's header on RoleService for what that costs.
--- TODO(C15): convert dead players to ghosts via GhostService
+-- V11 owns the win conditions in ACTIVE. Until then a round ends on the sunrise timer or on the
+-- roster falling below MinPlayers, and on nothing else.
 --------------------------------------------------------------------------------
 
 local function enterIdle()
 	state.AswangUserId = nil
-	state.TasksCompleted = 0
-	state.GateOpen = false
 	state.DealtInSurvivors = 0
 	state.AswangKills = 0
 	-- The live assignments go; RoleService's HISTORY deliberately survives, because it is the whole
@@ -765,10 +691,6 @@ end
 
 local function enterIntermission()
 	RoleService.ClearRoles()
-	-- Belt and braces. `clearTasks` closes the gate via SetTasksCompleted(0) on this same transition,
-	-- but that depends on TaskService being loaded and subscribed. A lobby showing an open gate from
-	-- last round is a lie the HUD tells before anybody can act on it, so this service closes it too.
-	RoundService.SetTasksCompleted(0)
 	--[[
 		The dealt-in set and every husk go here, and the ORDER matters relative to setAllPlayerStates.
 
@@ -819,14 +741,13 @@ local function enterStarting()
 	state.AswangKills = 0
 
 	--[[
-		TaskService DRAWS ON THE PhaseChanged FIRE, and this file must not call it. The TODO that used
-		to sit on the next line asked for `TaskService.SelectTasksForRound()` right here, and following
-		it is a require cycle: TaskService needs GetPlayerState, GetPhase and SetTasksCompleted from
-		this file, so a require in this direction closes the loop. That errors at load, init.server.luau
-		swallows it into a single warn, and the server sits in IDLE looking exactly like an empty lobby.
+		GAMEPLAY SERVICES SUBSCRIBE TO PhaseChanged; this file must not call them. A service that needs
+		`GetPlayerState`, `GetPhase` or `EndRound` from here cannot also be required BY here — that
+		closes a load-time require cycle, which errors at load, `init.server.luau` swallows into a
+		single warn, and leaves the server sitting in IDLE looking exactly like an empty lobby.
 
-		MonsterService already subscribes rather than being called, for the same reason. One direction
-		only, and this is the wrong one.
+		MonsterService already subscribes rather than being called, for that reason. One direction
+		only, and this is the wrong one. V03's container service arrives the same way.
 	]]
 	setPhase(Enums.RoundPhase.Starting, Config.Round.StartingDelay)
 end
@@ -902,10 +823,10 @@ end
 	PlayerStates — MonsterService asks rather than writes, exactly as it asks for the phase rather than
 	reading a copy.
 
-	GHOST, NOT A FIFTH STATE. §4.7 already calls a dead survivor a ghost, and Types.PlayerState has
+	DEAD, NOT A FIFTH STATE. §4.7 already calls a dead survivor a dead player, and Types.PlayerState has
 	four values that this plan does not extend. Two consequences land immediately and both are wanted:
-	pure/PlayerBody says a GHOST has no body, and pure/KillValidation says a GHOST is not a valid
-	target — which is the C04 warning's "a ghost must not be killable", satisfied by construction
+	pure/PlayerBody says a DEAD has no body, and pure/KillValidation says a DEAD is not a valid
+	target — which is the C04 warning's "a dead player must not be killable", satisfied by construction
 	rather than by a rule someone has to remember at C15.
 
 	THE CALLER HAS ALREADY TAKEN THE BODY. MonsterService detaches the victim's character
@@ -926,24 +847,24 @@ function RoundService.MarkKilled(player: Player, causedByKill: boolean?)
 		return
 	end
 
-	state.PlayerStates[player.UserId] = Enums.PlayerState.Ghost
+	state.PlayerStates[player.UserId] = Enums.PlayerState.Dead
 
 	--[[
-		KILLED, AND IT IS NOW A NO-OP FOR A GHOST — deliberately, and the cause is still passed.
+		KILLED, AND IT IS NOW A NO-OP FOR A DEAD — deliberately, and the cause is still passed.
 
-		`BodyTransitions` answers KEEP for every GHOST cause since the C15 redesign, because a dead
+		`BodyTransitions` answers KEEP for every DEAD cause since the C15 redesign, because a dead
 		player's character IS THE CORPSE and `MonsterService` owns it. So this call changes nothing
 		today. It stays for two reasons: the cause is the truthful description of what happened, and an
 		audit found `"KILLED"` was previously passed by NOBODY, which made a tested cell unreachable
 		from the running system.
 
 		What it protects against is the reset/fall path. There, the dead character is still attached and
-		the player becomes a GHOST — KEEP leaves that body exactly where it is, which is what a corpse
+		the player becomes a DEAD — KEEP leaves that body exactly where it is, which is what a corpse
 		is. Before the redesign this path left a player wearing a visible corpse that no rule owned; now
 		the rule owns it by name.
 
-		NO SECOND CALL, and no `lastRespawnAt` stamp. Both existed to make a ghost body spawn, and there
-		is no ghost body to spawn any more.
+		NO SECOND CALL, and no `lastRespawnAt` stamp. Both existed to make a dead player body spawn, and there
+		is no dead player body to spawn any more.
 	]]
 	applyBodyRule(player, "KILLED")
 
@@ -953,7 +874,7 @@ function RoundService.MarkKilled(player: Player, causedByKill: boolean?)
 		That handler already ends the round when the Aswang DISCONNECTS, with the comment "end cleanly
 		rather than leaving survivors wandering a monster-free map for six minutes". Routing non-kill
 		deaths through here opened a second door to that same state which walked straight past it: the
-		Aswang presses Escape → Reset, becomes a GHOST, `KillValidation` then refuses every RequestKill
+		Aswang presses Escape → Reset, becomes a DEAD, `KillValidation` then refuses every RequestKill
 		on `KILLER_NOT_ALIVE`, and six players walk an empty Barrio for the rest of the round. Repeatable
 		every round you are drawn, without leaving the server.
 
@@ -973,7 +894,7 @@ function RoundService.MarkKilled(player: Player, causedByKill: boolean?)
 		THE ONLY PLACE A KILL IS COUNTED, and the reason `causedByKill` exists at all.
 
 		A death the Aswang did not cause — a reset, a fall, C14's salt later — still makes the player a
-		GHOST, still drops the alive count, and still shows on every HUD. It just does not advance the
+		DEAD, still drops the alive count, and still shows on every HUD. It just does not advance the
 		win, because §4.8's rule now asks how many people the Aswang KILLED rather than how many are
 		still standing.
 
@@ -994,15 +915,19 @@ function RoundService.MarkKilled(player: Player, causedByKill: boolean?)
 		This line used to broadcast, on the reasoning that a bystander's payload was unchanged so the
 		extra send carried nothing. An exploit audit showed that is false, and the attack is clean:
 		snapshots otherwise arrive on a fixed `SnapshotInterval` cadence, so a client stamps arrivals
-		and flags any gap under the interval as off-cadence. The only other off-cadence triggers are
-		SELF-IDENTIFYING — a phase change ships `PhaseChanged` in the same frame, a gate flip changes
-		`GateOpen`, a task completion changes `TasksCompleted`. So: an early snapshot with none of
-		those three changed means SOMEBODY JUST DIED, to the millisecond, delivered to all eight
-		clients. That is precisely the global sub-second death signal A3 removed `AlivePlayerCount`
-		to kill; A3 deleted the payload and left the trigger.
+		and flags any gap under the interval as off-cadence. The only other off-cadence trigger is
+		SELF-IDENTIFYING — a phase change ships `PhaseChanged` in the same frame. So: an early
+		snapshot with the phase unchanged means SOMEBODY JUST DIED, to the millisecond, delivered to
+		all eight clients. That is precisely the global sub-second death signal A3 removed
+		`AlivePlayerCount` to kill; A3 deleted the payload and left the trigger.
+
+		V01 REMOVED THE OTHER TWO TRIGGERS — the gate flip and the task count — and that NARROWS this
+		channel rather than widening it: there is now exactly one benign off-cadence push to hide
+		behind, so a broadcast here would be MORE legible than it was, not less. Anything V03 adds
+		that pushes a snapshot off-cadence must be read against this paragraph before it ships.
 
 		The victim is the only client whose snapshot actually changed — their own `YourState` is now
-		GHOST — and they are the one screen guaranteed to be looked at. Everyone else waits for the
+		DEAD — and they are the one screen guaranteed to be looked at. Everyone else waits for the
 		next tick, which is what "death is not public" means.
 	]]
 	snapshotRemote:FireClient(player, buildSnapshot(player))
@@ -1011,41 +936,6 @@ function RoundService.MarkKilled(player: Player, causedByKill: boolean?)
 		-- A UserId and a count. Never a role, and never who did it — this line is read while a round is
 		-- still running, and VerboseLogging is exactly the flag a Studio playtest leaves on.
 		print(`[RoundService] Killed {player.UserId}; {aliveCount()} alive.`)
-	end
-
-	--[[
-		§4.8's attrition win (C06). AT THE END OF MarkKilled AND NOWHERE ELSE.
-
-		Not in the step() loop: polling a win condition several times a second means the round can end
-		on a tick that no player action caused, and debugging "why did it end there" starts from a
-		timestamp instead of from an event.
-
-		Not on PlayerRemoving either, and that is the deliberate one. A survivor disconnecting reduces
-		the living count exactly as a kill does, and ending the round for it would (a) hand the Aswang a
-		win every time a phone lost signal and (b) let a losing survivor void a round by quitting. Spec
-		§6.4 already answers this for the headcount — "finish the round, then return to IDLE" — and this
-		is the same answer for the same reason.
-
-		THIS COMMENT HAS BEEN WRONG TWICE, so what it claims now is deliberately narrow. It used to say
-		a frozen `DealtInSurvivors` meant a disconnect moved neither side of a comparison; that was
-		false, because `livingSurvivorCount()` was computed live. The next version said the decrement
-		fixed it; that was false too, and provably inert above four survivors.
-
-		What is true now is structural rather than arithmetic: the rule reads `state.AswangKills`, and
-		nothing but a validated kill ever writes it. A disconnect, a reset and a fall cannot move it
-		because they do not touch it — there is no comparison left to keep balanced.
-
-		EndRound is guarded on ACTIVE inside this service, so this stays a request rather than a second
-		writer of the phase.
-	]]
-	if
-		WinConditions.aswangWinsByKills({
-			AswangKills = state.AswangKills,
-			DealtInSurvivors = state.DealtInSurvivors,
-			Threshold = Config.Round.AswangWinSurvivorThreshold,
-		})
-	then
-		RoundService.EndRound(Enums.RoundResult.AswangWins)
 	end
 end
 
@@ -1091,7 +981,7 @@ local function onPlayerAdded(player: Player)
 
 		The rule is "stay as you were": a returning player who was dealt in resumes whatever state the
 		server still holds for them. Their husk decides which one that is — untouched and they are
-		still ALIVE, killed while they were gone and they are a GHOST. `onPlayerRemoving` preserves the
+		still ALIVE, killed while they were gone and they are a DEAD. `onPlayerRemoving` preserves the
 		entry rather than deleting it, which is what makes that lookup meaningful.
 	]]
 	local resolved = RejoinResolve.evaluate({
@@ -1300,8 +1190,8 @@ function RoundService.GetHuskCharacter(userId: number): Model?
 end
 
 --[[
-	A husk was killed (§4.3, §6.4). The owner's stored state becomes GHOST, so when they reconnect
-	`RejoinResolve` returns GHOST and they come back dead — which is what actually happened to them.
+	A husk was killed (§4.3, §6.4). The owner's stored state becomes DEAD, so when they reconnect
+	`RejoinResolve` returns DEAD and they come back dead — which is what actually happened to them.
 
 	The body is left in the world for `MonsterService` to turn into a corpse, exactly as a live
 	player's is: the husk entry is dropped so nothing else claims it, but the Model is NOT destroyed
@@ -1313,7 +1203,7 @@ function RoundService.MarkHuskKilled(userId: number)
 	end
 
 	husks[userId] = nil
-	state.PlayerStates[userId] = Enums.PlayerState.Ghost
+	state.PlayerStates[userId] = Enums.PlayerState.Dead
 
 	--[[
 		The kill counts. §4.8's win condition is `AswangKills >= DealtInSurvivors - 2`, and a husk was
@@ -1337,23 +1227,6 @@ function RoundService.MarkHuskKilled(userId: number)
 		amount of "you had to find the body" covers. The corpse `makeCorpse` leaves behind is the
 		signal, exactly as it is for a live kill.
 	]]
-
-	--[[
-		THE SAME ATTRITION CHECK MarkKilled RUNS, and it has to be here rather than factored out,
-		because factoring it out is what the comment in MarkKilled warns has already been wrong twice.
-		The rule reads `state.AswangKills`, nothing but a validated kill writes it, and a husk kill IS
-		a validated kill — it went through KillValidation, range and line of sight exactly as a live
-		one does.
-	]]
-	if
-		WinConditions.aswangWinsByKills({
-			AswangKills = state.AswangKills,
-			DealtInSurvivors = state.DealtInSurvivors,
-			Threshold = Config.Round.AswangWinSurvivorThreshold,
-		})
-	then
-		RoundService.EndRound(Enums.RoundResult.AswangWins)
-	end
 end
 
 function RoundService.Init()

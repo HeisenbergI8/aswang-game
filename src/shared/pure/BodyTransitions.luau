@@ -32,7 +32,7 @@
 	decision is the part that moved.
 ]]
 
-export type PlayerState = "LOBBY" | "ALIVE" | "GHOST" | "SPECTATOR"
+export type PlayerState = "LOBBY" | "ALIVE" | "DEAD" | "SPECTATOR"
 
 --[[
 	The five ways a body's correctness can change. `LOAD_FAILED` is one of them and that is the
@@ -59,18 +59,20 @@ local BodyTransitions = {}
 
 --[[
 	LOBBY and ALIVE only. An allowlist, never `~= "SPECTATOR"`: PlayerState has four values, a denylist
-	also admits GHOST.
+	also admits DEAD.
 
-	GHOST WAS ADMITTED HERE AND HAS BEEN TAKEN BACK OUT. That is worth recording rather than reverting
-	quietly, because the reason it was admitted is still true and the reason it was removed is stronger.
+	THE DEAD WERE ADMITTED HERE AND HAVE BEEN TAKEN BACK OUT. That is worth recording rather than
+	reverting quietly, because the reason it was tried is still tempting and the reason it was removed
+	is stronger. (v1.3 called this state GHOST; V01 renamed it to DEAD and cut the flying body with it.
+	The argument below is unchanged and is the reason the state was renamed rather than collapsed into
+	SPECTATOR.)
 
-	It was admitted because §4.7 needs a ghost to have a POSITION — a ghost flies and holds task points
-	at 25%, and `TaskService` measured presence from `player.Character`. Giving them a real character
-	was the shortest path to a position.
+	It was admitted because a dead player needed a POSITION, and giving them a real character was the
+	shortest path to one.
 
 	It was removed because a server character REPLICATES. Hidden with `Transparency = 1` it is still a
 	player-named Model in `workspace` that any client can enumerate, and since the Aswang can never be
-	a ghost — their death aborts the round — every ghost body ELIMINATES A CANDIDATE. That is the same
+	dead — its death aborts the round — every such body ELIMINATES A CANDIDATE. That is the same
 	death oracle Amendment A3 deleted `AlivePlayerCount` to close, in a stronger form: named, and
 	timestamped to the frame the body appears. Three separate patch rounds tried to hide the body
 	better and each one found new leaks, because hiding a replicated object is not a thing you can win.
@@ -87,8 +89,9 @@ local BodyTransitions = {}
 	replicates, so a property scan still distinguishes a corpse from a walker. That is a known and stated
 	limitation, not a claim of closure.
 
-	A GHOST'S POSITION DOES NOT COME FROM THAT BODY. The corpse stays where they died; the ghost flies.
-	The client renders a local body and reports where it is, and `TaskService` reads that for a GHOST.
+	THE CORPSE STAYS WHERE THEY DIED, and after V01 that is the whole of it — a dead player spectates
+	rather than flying, so no client reports a second position and no remote carries one. That is a
+	strictly smaller surface than v1.3 had.
 
 	`mayBeKilled` never moved through any of this, which is why it was a separate allowlist from C05.
 ]]
@@ -101,17 +104,18 @@ end
 
 	The two rows that carry the history:
 
-	  ALIVE/DIED    -> REVOKE. A death inside a round is a death. RoundService then makes them a GHOST,
+	  ALIVE/DIED    -> REVOKE. A death inside a round is a death. RoundService then makes them DEAD,
 	                  which also closes reset-to-escape: without it, a cornered survivor could press
 	                  Escape and teleport to spawn for free.
 	  ALIVE/LOAD_FAILED -> DEFER. The worst cell in the table. An ALIVE player with no body is
 	                  unkillable (MonsterService returns early on a nil character) AND still counted by
-	                  livingSurvivorCount, which puts §4.8's attrition win permanently out of reach.
+	                  livingSurvivorCount, which puts any survivor-count win condition permanently out
+	                  of reach. V11's kill-everyone rule inherits that hazard exactly.
 ]]
 function BodyTransitions.actionFor(state: PlayerState, cause: Cause): Action
 	--[[
-		A GHOST'S BODY IS NOT THIS FUNCTION'S BUSINESS, on any cause. KEEP, always, and the short-circuit
-		is above `mayHaveBody` deliberately.
+		A DEAD PLAYER'S BODY IS NOT THIS FUNCTION'S BUSINESS, on any cause. KEEP, always, and the
+		short-circuit is above `mayHaveBody` deliberately.
 
 		A dead player's character IS THE CORPSE, and `MonsterService` owns it — it anchored it, it fades
 		it, and `clearCorpses` destroys it when the round ends. Every other action here would break that:
@@ -120,11 +124,15 @@ function BodyTransitions.actionFor(state: PlayerState, cause: Cause): Action
 		that spawn forever.
 
 		This is also what keeps `player.Character ~= nil` true for everybody. An audit found that
-		removing a ghost's body did not remove the tell, it inverted it: `Character == nil` is one line
-		to enumerate and names the dead set exactly, and the Aswang is never in it. Absence is as
+		removing a dead player's body did not remove the tell, it INVERTED it: `Character == nil` is one
+		line to enumerate and names the dead set exactly, and the Aswang is never in it. Absence is as
 		observable as presence, so the fix is that there is no absence.
+
+		THIS IS WHY V01 RENAMED THE STATE RATHER THAN COLLAPSING IT INTO SPECTATOR. SPECTATOR falls
+		through to REVOKE below, which destroys the corpse — reopening the inverted tell in one edit,
+		with `analyze` and every check still green. Four states in, four states out.
 	]]
-	if state == "GHOST" then
+	if state == "DEAD" then
 		return "KEEP"
 	end
 

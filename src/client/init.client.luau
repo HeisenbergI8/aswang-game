@@ -32,19 +32,10 @@ local CONTROLLER_ORDER = {
 	"PerformanceController",
 	"UIController",
 	"QuickChatController",
-	-- Before InputController, deliberately. The order governs Init/Start rather than requires — the
-	-- require is direct — but InputController.Start binds a key that calls into this controller, and a
-	-- bind that can fire before Init has run is a race worth not having.
-	"TaskController",
-	-- C15. Owns the ghost's LOCAL body — ghosts have no server character, because a replicated body
-	-- per dead player named the dead set to every client. Before InputController for the same reason
-	-- TaskController is: it reacts to snapshots and should be listening before any bind can fire.
-	"GhostController",
 	--[[
-		C20. After TaskController, because both react to the same `TaskPoint` tags and the objective
-		marker should sit on top of the affordance TaskController draws rather than race it. Before
-		InputController for the same reason everything else here is: it listens for a remote that can
-		arrive the instant the round goes ACTIVE.
+		C21/V01. Before InputController for the same reason everything else here is — it listens for a
+		remote that can arrive the instant the round goes ACTIVE — and it now exists only for
+		`ShowLine`: the objective waypoint went with the task system (V01).
 	]]
 	"OnboardingController",
 	--[[
@@ -126,12 +117,9 @@ Remotes.Get("RoundSnapshot").OnClientEvent:Connect(function(snapshot: Types.Clie
 		return
 	end
 
-	local gate = if snapshot.GateOpen then "OPEN" else "shut"
-	local tasks = `{snapshot.TasksCompleted}/{snapshot.TasksRequired}`
 	-- No alive count. Amendment A3 removed the field; see the comment in Types.ClientRoundSnapshot for
 	-- the names it must not come back under.
-	local line = `{snapshot.Phase} round #{snapshot.RoundNumber} · tasks {tasks} · gate {gate}`
-		.. ` · you: {snapshot.YourState}`
+	local line = `{snapshot.Phase} round #{snapshot.RoundNumber} · you: {snapshot.YourState}`
 
 	if line == lastSnapshotLine then
 		return

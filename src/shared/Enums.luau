@@ -28,15 +28,8 @@ Enums.Role = table.freeze({
 Enums.PlayerState = table.freeze({
 	Lobby = "LOBBY" :: Types.PlayerState,
 	Alive = "ALIVE" :: Types.PlayerState,
-	Ghost = "GHOST" :: Types.PlayerState,
+	Dead = "DEAD" :: Types.PlayerState, -- V01: killed in-round. Spectates; the corpse is the body
 	Spectator = "SPECTATOR" :: Types.PlayerState, -- joined mid-round
-})
-
-Enums.TaskType = table.freeze({
-	Hold = "HOLD" :: Types.TaskType,
-	Timing = "TIMING" :: Types.TaskType,
-	Fetch = "FETCH" :: Types.TaskType,
-	TwoPerson = "TWO_PERSON" :: Types.TaskType,
 })
 
 Enums.RoundResult = table.freeze({

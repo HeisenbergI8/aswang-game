@@ -7,7 +7,7 @@
 	transform and pulling the plug made you invulnerable for the rest of the round, which is a hard
 	counter to the entire monster. It is one cell in a table and it deleted the game.
 
-	The second thing asserted here is that the rule is "stay as you were" and NOT "come back a ghost":
+	The second thing asserted here is that the rule is "stay as you were" and NOT "come back a dead player":
 	a surviving husk returns its owner to ALIVE. Those two outcomes are one `if` apart in the service
 	and the difference is the whole design decision, so it is pinned rather than assumed.
 ]]
@@ -32,7 +32,7 @@ local function check(label: string, ok: boolean, detail: string?)
 end
 
 local PHASES: { RoundPhase } = { "IDLE", "INTERMISSION", "STARTING", "ACTIVE", "ENDING" }
-local STATES: { PlayerState } = { "LOBBY", "ALIVE", "GHOST", "SPECTATOR" }
+local STATES: { PlayerState } = { "LOBBY", "ALIVE", "DEAD", "SPECTATOR" }
 
 local function resolve(phase: RoundPhase, wasDealtIn: boolean, stored: PlayerState?): PlayerState
 	return RejoinResolve.evaluate({
@@ -53,13 +53,13 @@ check(
 )
 
 check(
-	"...and specifically NOT a ghost — quitting does not convert a survivor into a dead player",
-	resolve("ACTIVE", true, "ALIVE") ~= "GHOST"
+	"...and specifically NOT a dead player — quitting does not convert a survivor into a dead player",
+	resolve("ACTIVE", true, "ALIVE") ~= "DEAD"
 )
 
 check(
-	"a dealt-in player whose husk was killed while away comes back a GHOST",
-	resolve("ACTIVE", true, "GHOST") == "GHOST"
+	"a dealt-in player whose husk was killed while away comes back a DEAD",
+	resolve("ACTIVE", true, "DEAD") == "DEAD"
 )
 
 check(
@@ -75,7 +75,7 @@ for _, phase in PHASES do
 	for _, wasDealtIn in { true, false } do
 		--[[
 			WRAPPED IN A TABLE, and this is not style. Written as
-			`{ nil, "LOBBY", "ALIVE", "GHOST", "SPECTATOR" }` the leading `nil` is not iterated by a
+			`{ nil, "LOBBY", "ALIVE", "DEAD", "SPECTATOR" }` the leading `nil` is not iterated by a
 			generic `for`, so the "server has no stored state" column silently never ran — the grid
 			reported 40 cells while claiming 50, and the one case that fails CLOSED was the one missing.
 			Caught by counting the assertions rather than by reading the loop.
@@ -84,7 +84,7 @@ for _, phase in PHASES do
 			{ Value = nil },
 			{ Value = "LOBBY" },
 			{ Value = "ALIVE" },
-			{ Value = "GHOST" },
+			{ Value = "DEAD" },
 			{ Value = "SPECTATOR" },
 		}
 
@@ -176,7 +176,7 @@ do
 end
 
 --[[
-	THE ANTI-LAUNDERING PROPERTY. Reconnecting must never IMPROVE your standing. A ghost may not come
+	THE ANTI-LAUNDERING PROPERTY. Reconnecting must never IMPROVE your standing. A dead player may not come
 	back alive, a spectator may not come back alive, and nothing may come back as anything it was not.
 ]]
 do

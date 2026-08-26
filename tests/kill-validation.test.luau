@@ -240,7 +240,7 @@ end) == "TARGET_IS_ASWANG")
 -- and exactly one may be killed, and a denylist passes every case except the two nobody writes.
 --------------------------------------------------------------------------------
 
-local STATES: { PlayerState } = { "LOBBY", "ALIVE", "GHOST", "SPECTATOR" }
+local STATES: { PlayerState } = { "LOBBY", "ALIVE", "DEAD", "SPECTATOR" }
 
 for _, killerState in STATES do
 	for _, targetState in STATES do
@@ -268,8 +268,8 @@ check("a mid-round joiner cannot be killed", verdictWith(function(request)
 	request.TargetState = "SPECTATOR"
 end) == "TARGET_NOT_ALIVE")
 
-check("a ghost cannot be killed", verdictWith(function(request)
-	request.TargetState = "GHOST"
+check("a dead player cannot be killed", verdictWith(function(request)
+	request.TargetState = "DEAD"
 end) == "TARGET_NOT_ALIVE")
 
 --------------------------------------------------------------------------------
@@ -283,7 +283,7 @@ check("a wrong phase outranks everything else", verdictWith(function(request)
 end) == "WRONG_PHASE")
 
 check("the killer's own state outranks the target's", verdictWith(function(request)
-	request.KillerState = "GHOST"
+	request.KillerState = "DEAD"
 	request.TargetState = "SPECTATOR"
 end) == "KILLER_NOT_ALIVE")
 

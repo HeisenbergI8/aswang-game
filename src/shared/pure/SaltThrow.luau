@@ -26,7 +26,7 @@
 	WHY UNTRANSFORMED IS A MISS RATHER THAN A WEAKER HIT. §4.6 says salt "forces revert", which only
 	means something for a transformed target. Making salt work on a human-shaped Aswang turns four
 	pouches into four free identity probes, and the closest thing this repo has to a rule about that is
-	`pure/TaskWeight`'s: no mechanic's OBSERVABLE OUTCOME may vary by role. Here it varies by FORM, and
+	the deleted task-weight rule's: no mechanic's OBSERVABLE OUTCOME may vary by role. Here it varies by FORM, and
 	the form is already public — `MonsterTransformed` broadcasts it to everyone by design.
 
 	WHY `src/shared/pure/` IS SAFE FOR THIS, which is a fair question given the above. The module is
@@ -40,7 +40,7 @@
 ]]
 
 export type RoundPhase = "IDLE" | "INTERMISSION" | "STARTING" | "ACTIVE" | "ENDING"
-export type PlayerState = "LOBBY" | "ALIVE" | "GHOST" | "SPECTATOR"
+export type PlayerState = "LOBBY" | "ALIVE" | "DEAD" | "SPECTATOR"
 
 export type Verdict = "OK" | "WRONG_PHASE" | "THROWER_NOT_ALIVE" | "NO_POUCH" | "MISS"
 
@@ -168,8 +168,8 @@ function SaltThrow.evaluate(request: Request): Verdict
 		return "WRONG_PHASE"
 	end
 
-	-- ALLOWLIST of ALIVE. A ghost throwing salt is C15's shape of this bug, and the denylist form
-	-- admits them the moment Phase 6 gives a ghost a body and a position.
+	-- ALLOWLIST of ALIVE. A dead player throwing salt is this bug's shape, and the denylist form
+	-- admits them the moment anything gives a dead player a body and a position.
 	if request.ThrowerState ~= "ALIVE" then
 		return "THROWER_NOT_ALIVE"
 	end

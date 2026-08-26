@@ -9,7 +9,9 @@
 	through the Roblox API, permanently, for free — which is exactly how Appendix C reconstructed the
 	competitor's funnel from the outside. Mirroring our own funnel in badges buys a retention dashboard
 	that no analytics outage can lose and no client can forge, and §10's launch gate reads directly off
-	it: `First Task / Welcome` must clear 50%, against the 20.1% that killed them.
+	it: `First Task / Welcome` must clear 50%, against the 20.1% that killed them. (V01 removed the
+	thing that increments `TasksDone`, so this ratio is FLAT until V4 rebinds the badge to searching.
+	The badge id is a live Roblox award and cannot be renamed without a migration — see V01's log.)
 
 	SERVER-SIDE ONLY, AND NOTHING HERE TAKES A CLIENT VALUE. There is no remote in this file and no
 	`OnServerEvent` handler — a client that could ask for a badge could forge the one dataset the

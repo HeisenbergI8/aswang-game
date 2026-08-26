@@ -85,7 +85,7 @@ for _, phrase in QuickChatPhrases.All do
 		pinging += 1
 	end
 
-	if not phrase.GhostMay then
+	if not phrase.DeadMay then
 		ghostForbidden += 1
 	end
 end
@@ -97,21 +97,21 @@ for sector = 0, QuickChatPhrases.Sectors - 1 do
 end
 
 --[[
-	EXACTLY ONE PHRASE RESOLVES A TARGET, and exactly that one is closed to ghosts.
+	EXACTLY ONE PHRASE RESOLVES A TARGET, and exactly that one is closed to dead players.
 
 	These two counts are the security shape of the whole feature in two numbers. A second
-	target-taking phrase is a second place the server picks a player from a position; a ghost-allowed
+	target-taking phrase is a second place the server picks a player from a position; a dead player-allowed
 	accusation resolves "nearest" from a client-reported position the server cannot verify, which is
 	the impersonation exploit C25's row forbids with one extra step.
 ]]
 check("exactly one phrase takes a target", targetTaking == 1, `got {targetTaking}`)
-check("exactly one phrase is closed to ghosts", ghostForbidden == 1, `got {ghostForbidden}`)
+check("exactly one phrase is closed to dead players", ghostForbidden == 1, `got {ghostForbidden}`)
 
 local accuse = QuickChatPhrases.get("ACCUSE")
 
 check("ACCUSE exists", accuse ~= nil)
 check("ACCUSE is the target-taking one", accuse ~= nil and accuse.NeedsTarget == true)
-check("ACCUSE is the ghost-forbidden one", accuse ~= nil and accuse.GhostMay == false)
+check("ACCUSE is the one the dead may not send", accuse ~= nil and accuse.DeadMay == false)
 check("ACCUSE does not also ping", accuse ~= nil and accuse.Pings == false)
 
 check("some phrases ping", pinging > 0, `got {pinging}`)

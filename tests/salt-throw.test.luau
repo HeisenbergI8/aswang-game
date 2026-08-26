@@ -33,7 +33,7 @@ local function v(x: number, y: number, z: number): Vec3
 	return { X = x, Y = y, Z = z }
 end
 
-local STATES: { PlayerState } = { "LOBBY", "ALIVE", "GHOST", "SPECTATOR" }
+local STATES: { PlayerState } = { "LOBBY", "ALIVE", "DEAD", "SPECTATOR" }
 local PHASES: { RoundPhase } = { "IDLE", "INTERMISSION", "STARTING", "ACTIVE", "ENDING" }
 
 --[[
@@ -260,13 +260,13 @@ end
 
 check(
 	"phase outranks everything",
-	SaltThrow.evaluate(request({ Phase = "ENDING", ThrowerState = "GHOST", Carried = 0 }))
+	SaltThrow.evaluate(request({ Phase = "ENDING", ThrowerState = "DEAD", Carried = 0 }))
 		== "WRONG_PHASE"
 )
 
 check(
 	"thrower state outranks the pouch",
-	SaltThrow.evaluate(request({ ThrowerState = "GHOST", Carried = 0 })) == "THROWER_NOT_ALIVE"
+	SaltThrow.evaluate(request({ ThrowerState = "DEAD", Carried = 0 })) == "THROWER_NOT_ALIVE"
 )
 
 check(

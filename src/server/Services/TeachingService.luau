@@ -6,7 +6,7 @@
 
 	"Once ever" has to survive a rejoin, and a client-side flag does not: leave and come back and the
 	game teaches you salt again, which is exactly the repetition C23's done condition forbids. It is
-	also where the equivalent already lives — `TaskService`'s `everCompleted` is this same idea with
+	also where the equivalent already lived — the old task service's `everCompleted` was this same idea with
 	one trigger, and its comment says the same thing: in memory now, in the profile at C40.
 
 	═══ WHY IT IS ONE SERVICE AND NOT FOUR SETS ══════════════════════════════════
@@ -46,7 +46,7 @@ local TeachingService = {}
 	taught" flag, because a shared flag would teach a player exactly one thing in their entire first
 	round and pass every obvious test. `tests/teaching-lines.test.luau` pins that distinction.
 
-	IN MEMORY AND DELIBERATELY SO, matching `TaskService.everCompleted` rather than introducing a
+	IN MEMORY AND DELIBERATELY SO, matching that same shape rather than introducing a
 	second policy. It resets with the server, so "once ever" is really "once per server" until C40
 	moves both tables into the profile together. A veteran seeing one repeated line costs a moment; a
 	beginner never seeing one costs the player.

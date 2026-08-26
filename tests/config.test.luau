@@ -33,13 +33,6 @@ check(
 	`Trial.OfferBelowPlayerCount={Config.Trial.OfferBelowPlayerCount}, Round.MinPlayers={Config.Round.MinPlayers}`
 )
 
--- Spec §4.4: five tasks are drawn from twelve locations. Required > pool is unwinnable by construction.
-check(
-	"there are more task locations than tasks required",
-	Config.Tasks.PoolSize > Config.Tasks.TotalRequired,
-	`PoolSize={Config.Tasks.PoolSize}, TotalRequired={Config.Tasks.TotalRequired}`
-)
-
 -- Spec §9: small servers fill faster and feel full sooner. Max below min is unstartable.
 check(
 	"the server can actually reach the minimum",
@@ -85,14 +78,6 @@ check(
 	`RevealDuration={Config.Salt.RevealDuration}, StunDuration={Config.Salt.StunDuration}`
 )
 
--- Spec §4.7: ghosts contribute at reduced speed. At 0 they are spectators, which is the retention leak
--- the ghost system exists to close; at 1 dying is free.
-check(
-	"ghosts contribute, but less than the living",
-	Config.Ghost.TaskContributionMult > 0 and Config.Ghost.TaskContributionMult < 1,
-	`TaskContributionMult={Config.Ghost.TaskContributionMult}`
-)
-
 -- Spec §4.6, C13: four pouches cannot be placed at three points. This is the relation that turns a
 -- map defect into a startable round with less salt than the design assumes, and the only symptom
 -- otherwise is "salt feels rarer than it should" six playtests later.
@@ -123,45 +108,6 @@ check(
 	`ThrowConeDegrees={Config.Salt.ThrowConeDegrees}`
 )
 
--- C13: a pickup radius wider than the presence radius picks pouches up through walls and from across
--- a task point. See Config.Salt.PickupRangeStuds.
-check(
-	"a pouch is picked up closer than a task is held",
-	Config.Salt.PickupRangeStuds < Config.Tasks.PresenceRangeStuds,
-	`PickupRangeStuds={Config.Salt.PickupRangeStuds}, `
-		.. `PresenceRangeStuds={Config.Tasks.PresenceRangeStuds}`
-)
-
--- Spec §5's mobile budget, C15: the ghost roster only changes when somebody dies, so pushing it
--- faster than the HUD snapshot is a per-player per-tick cost with nothing behind it.
-check(
-	"the ghost roster is not pushed faster than the snapshot",
-	Config.Ghost.RosterInterval >= Config.Round.SnapshotInterval,
-	`RosterInterval={Config.Ghost.RosterInterval}, SnapshotInterval={Config.Round.SnapshotInterval}`
-)
-
--- Spec §4.7, C16: "one spook per round". At zero the feature is silently off, and the symptom is a
--- dead player pressing a button that does nothing — which reads as a bug, not as a balance choice.
-check(
-	"a ghost gets at least one spook",
-	Config.Ghost.SpooksPerRound >= 1,
-	`SpooksPerRound={Config.Ghost.SpooksPerRound}`
-)
-
---[[
-	Spec §4.7, C16: a spook nobody perceives is a button that does nothing, which reads as a bug rather
-	than as a balance choice — the same argument `SpooksPerRound >= 1` already makes for the count.
-
-	The upper bound matters too and is the less obvious half: a flicker lasting longer than the salt
-	reveal would make the ghost's flavour effect more visually persistent than the game's one real
-	reveal, which inverts what a player learns to pay attention to.
-]]
-check(
-	"a spook lasts long enough to notice and not longer than the reveal",
-	Config.Ghost.SpookDuration > 0 and Config.Ghost.SpookDuration < Config.Salt.RevealDuration,
-	`SpookDuration={Config.Ghost.SpookDuration}, RevealDuration={Config.Salt.RevealDuration}`
-)
-
 --[[
 	C14/C15, and this relationship became load-bearing for a SECRECY invariant rather than for balance.
 
@@ -175,16 +121,6 @@ check(
 	"the kill cooldown outlasts the salt stun",
 	Config.Monster.KillCooldown > Config.Salt.StunDuration,
 	`KillCooldown={Config.Monster.KillCooldown}, StunDuration={Config.Salt.StunDuration}`
-)
-
--- Spec §4.7, C16: the spook must not localise the ghost. Larger than both the Aswang's reach and the
--- task presence radius, so "a light flickered near me" narrows nothing a player could act on.
-check(
-	"a spook does not point at the ghost that caused it",
-	Config.Ghost.SpookRangeStuds > Config.Monster.KillRange
-		and Config.Ghost.SpookRangeStuds > Config.Tasks.PresenceRangeStuds,
-	`SpookRangeStuds={Config.Ghost.SpookRangeStuds}, KillRange={Config.Monster.KillRange}, `
-		.. `PresenceRangeStuds={Config.Tasks.PresenceRangeStuds}`
 )
 
 -- Spec §4.1: total cycle ≈ 7.5 min, and §2 demands "under 8 minutes, back in within 30 seconds".
@@ -286,18 +222,6 @@ check(
 -- C05 / C06 / C07 (this plan)
 --------------------------------------------------------------------------------
 
--- Spec §4.8. On a FULL server the attrition rule must still be a rule: a threshold at or above the
--- survivor count of an 8-player round would mean the Aswang wins before killing anybody. The
--- MinPlayers end of the range is NOT pinned here on purpose — at 3 players the literal rule is
--- degenerate no matter what this number is, and pure/WinConditions' dealt-in clamp is what handles it.
-check(
-	"the attrition win is reachable but not free on a full server",
-	Config.Round.AswangWinSurvivorThreshold >= 1
-		and Config.Round.AswangWinSurvivorThreshold
-			< Config.Round.MaxPlayers - Config.Roles.AswangCount,
-	`threshold={Config.Round.AswangWinSurvivorThreshold}, survivors on a full server={Config.Round.MaxPlayers - Config.Roles.AswangCount}`
-)
-
 -- Spec §4.3 step 4: the corpse "remains for 45s, then fades". A fade longer than the lifetime means
 -- the body is translucent for its whole existence and never reads as a body at all.
 check(
@@ -315,14 +239,6 @@ check(
 	`CorpseDuration={Config.Monster.CorpseDuration}, KillCooldown={Config.Monster.KillCooldown}`
 )
 
--- Spec §4.4. Two selected task points within kill range of each other are one location wearing two
--- hats: the Aswang covers both from a standstill and the "spread" in the draw buys nothing.
-check(
-	"selected task points are spread further apart than the Aswang can reach",
-	Config.Tasks.MinSpacingStuds > Config.Monster.KillRange,
-	`MinSpacingStuds={Config.Tasks.MinSpacingStuds}, KillRange={Config.Monster.KillRange}`
-)
-
 -- The respawn cooldown throttles a CLIENT-CONTROLLED trigger (Humanoid.Died, reachable from the stock
 -- reset button), so it must be positive or the throttle does not exist. It must also stay well under
 -- Intermission, or a player who dies in the lobby is still bodiless when STARTING deals them in —
@@ -333,110 +249,6 @@ check(
 	Config.Round.RespawnCooldown > 0
 		and Config.Round.RespawnCooldown * 2 < Config.Round.Intermission,
 	`RespawnCooldown={Config.Round.RespawnCooldown}, Intermission={Config.Round.Intermission}`
-)
-
---[[
-	Spec §4.4. `RequestTaskProgress` carries no arguments, so the server resolves which task point a
-	player is at from their position alone. Keeping the presence radius under half the spacing means
-	two selected points are normally not in range at once.
-
-	THIS IS DEFENCE IN DEPTH, NOT THE GUARANTEE. An earlier version of this comment said two selected
-	points "are guaranteed to be MinSpacingStuds apart" — they are not. `TaskSelection.select`'s
-	fallback pass drops spacing rather than return a short round, and an audit measured 2000/2000 draws
-	violating it for a pool packed into one room. The real protection is `taskPointAt` resolving to the
-	nearest INCOMPLETE point, which makes an overlap untidy instead of an unwinnable round. Keep this
-	invariant anyway: it is what keeps the overlap rare enough to be a warning rather than the norm.
-]]
-check(
-	"a player can only ever be present at one task point at a time",
-	Config.Tasks.PresenceRangeStuds * 2 < Config.Tasks.MinSpacingStuds,
-	`PresenceRangeStuds={Config.Tasks.PresenceRangeStuds}, MinSpacingStuds={Config.Tasks.MinSpacingStuds}`
-)
-
--- A holding player must not blink out of presence between two heartbeats, or an 8-second hold becomes
--- a stutter of accumulation with gaps in it and the task takes visibly longer than HoldTime.
-check(
-	"a continuously held task never lapses between heartbeats",
-	Config.Tasks.PresenceGraceSeconds > Config.Tasks.HeartbeatInterval * 2,
-	`Grace={Config.Tasks.PresenceGraceSeconds}, Heartbeat={Config.Tasks.HeartbeatInterval}`
-)
-
---[[
-	The honest client must fit inside its own budget. C02's comment on RequestTaskProgress already says
-	the budget "must out-pace the snapshot tick or a player holding a task is throttled while doing
-	exactly what the game asked of them" — this is that sentence, pinned against the number that
-	actually drives the sends.
-]]
-check(
-	"a holding client stays inside its own rate-limit budget",
-	Config.Tasks.HeartbeatInterval > 0
-		and 1 / Config.Tasks.HeartbeatInterval
-			< Config.AntiCheat.Budgets.RequestTaskProgress.RefillPerSecond,
-	`{1 / Config.Tasks.HeartbeatInterval}/s vs refill={Config.AntiCheat.Budgets.RequestTaskProgress.RefillPerSecond}/s`
-)
-
---[[
-	§4.4, C09. A green zone that runs off either end of the track is not a skill moment, it is a
-	button — and it fails invisibly, because the bar still sweeps and stops still land.
-]]
-check(
-	"the timing green zone sits inside the bar",
-	Config.Tasks.TimingGreenCenter - Config.Tasks.TimingGreenHalfWidth > 0
-		and Config.Tasks.TimingGreenCenter + Config.Tasks.TimingGreenHalfWidth < 1,
-	`center={Config.Tasks.TimingGreenCenter}, half={Config.Tasks.TimingGreenHalfWidth}`
-)
-
---[[
-	THE LATENCY ALLOWANCE MUST STAY SMALLER THAN THE ZONE IT WIDENS.
-
-	The grace is in SECONDS and the zone is in BAR UNITS, so they are not comparable until the sweep
-	speed converts one to the other: the bar crosses the whole 0..1 track twice per period, so it
-	moves at `2 / TimingBarPeriod` bar units per second. This is exactly the conversion inside
-	`server/pure/TimingWindow.luau`, restated here against Config's own numbers — which is the point.
-	Lower the period at M12 and the same grace in seconds silently becomes a much wider window; this
-	is the line that notices.
-]]
-check(
-	"the timing grace widens the zone rather than replacing it",
-	Config.Tasks.TimingBarPeriod > 0
-		and Config.Tasks.TimingGraceSeconds * (2 / Config.Tasks.TimingBarPeriod)
-			< Config.Tasks.TimingGreenHalfWidth,
-	`grace={Config.Tasks.TimingGraceSeconds * (2 / Config.Tasks.TimingBarPeriod)} bar units `
-		.. `vs half={Config.Tasks.TimingGreenHalfWidth}`
-)
-
--- §4.4, C09: the cost of a fetch is the TRAVEL. A deliver hold approaching the whole errand budget
--- has quietly turned the task into a Hold with a walk in front of it.
-check(
-	"the fetch deliver hold is a small part of the errand",
-	Config.Tasks.FetchDeliverTime > 0 and Config.Tasks.FetchDeliverTime * 2 < Config.Tasks.FetchTime,
-	`deliver={Config.Tasks.FetchDeliverTime}, errand={Config.Tasks.FetchTime}`
-)
-
---[[
-	§4.4 asks a two-person task for "2 survivors present"; §4.7 asks ghosts to "still matter", not to
-	substitute. C10 derives its participant count from TaskWeight, so what separates those two
-	sentences is this single relation between two numbers in this file — and nothing else. If a ghost
-	ever weighed a full contribution, two dead players would open the game's most social task and
-	nobody would see a test go red.
-]]
-check(
-	"a ghost is not a two-person participant",
-	Config.Ghost.TaskContributionMult < Config.Tasks.FullContributionWeight
-		and Config.Tasks.TwoPersonParticipants >= 2,
-	`ghost={Config.Ghost.TaskContributionMult}, full={Config.Tasks.FullContributionWeight}, `
-		.. `required={Config.Tasks.TwoPersonParticipants}`
-)
-
---[[
-	§4.8's finale (C11). The Aswang camping an open gate is the last thirty seconds of a good round;
-	a gate that triggers from beyond the monster's reach deletes it, and the symptom is "the endings
-	feel flat" rather than anything a log would show.
-]]
-check(
-	"the escape gate stays inside the Aswang's reach",
-	Config.Tasks.GateRangeStuds > 0 and Config.Tasks.GateRangeStuds <= Config.Monster.KillRange,
-	`gate={Config.Tasks.GateRangeStuds}, kill={Config.Monster.KillRange}`
 )
 
 --------------------------------------------------------------------------------
@@ -483,12 +295,6 @@ check(
 	"the trial's offer threshold and the round's floor are the same line",
 	Config.Trial.OfferBelowPlayerCount == Config.Round.MinPlayers,
 	"a gap or an overlap here means a count where both a round and a trial believe they may start"
-)
-
-check(
-	"the trial's two tasks can actually be drawn",
-	Config.Trial.TasksToComplete >= 1 and Config.Trial.TasksToComplete <= Config.Tasks.PoolSize,
-	"a trial asking for more tasks than exist can never be completed and always times out"
 )
 
 --[[
@@ -542,21 +348,6 @@ check(
 	"the accusation reaches further than the Aswang kills",
 	Config.QuickChat.AccuseRangeStuds > Config.Monster.KillRange,
 	`AccuseRangeStuds={Config.QuickChat.AccuseRangeStuds}, KillRange={Config.Monster.KillRange}`
-)
-
---[[
-	AND IT MUST STAY FAR SHORT OF MAP SCALE. This is the security half.
-
-	The phrase resolves its target from the sender's own position, so a large range turns it into a
-	proximity radar the sender can poll — and the player with most to gain from "who is near me" is
-	the Aswang hunting. Line of sight and the FOV term are the primary defences; this is the third,
-	and it is the one an M12 balance pass could undo without noticing.
-]]
-check(
-	"the accusation is not a map-scale radar",
-	Config.QuickChat.AccuseRangeStuds < Config.Tasks.MarkerVisibleStuds / 2,
-	`AccuseRangeStuds={Config.QuickChat.AccuseRangeStuds}, `
-		.. `MarkerVisibleStuds={Config.Tasks.MarkerVisibleStuds}`
 )
 
 --[[

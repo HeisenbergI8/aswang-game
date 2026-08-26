@@ -52,15 +52,13 @@ export const OUT_OF_SCOPE = [
   { word: /^weapons?$/i, why: 'a generic weapon system', cite: '§3 OUT — no weapon beyond the buntot pagi' },
   { word: /^(machete|bolo)$/i, why: 'a weapon', cite: '§3 OUT — no weapon beyond the buntot pagi' },
   { word: /^microphones?$/i, why: 'a mic-driven mechanic', cite: '§4.5 — rejected on three independent grounds' },
-  // DEFERRED TO V01 — `{ word: /^ghosts?$/i, why: 'the ghost system', cite: '§4.7 — cut in v2.0' }`
+  // ARMED AT V01, with the ghost system deleted in the same diff. §4.7 cuts ghosts; dead players
+  // spectate, and `PlayerState`'s dead member is spelled DEAD for exactly this reason — a state
+  // literal is a string, and the scanner reads strings.
   //
-  // §4.7 cuts ghosts, so this belongs here. It is commented out because the ghost code v2.0 deletes is
-  // still standing: enabling it now produces 154 findings across nine live modules, a red tree, and a
-  // commit guard that refuses every commit until the demolition lands. A guard that blocks work it is
-  // meant to protect gets disabled rather than obeyed.
-  //
-  // V01 deletes the ghost system AND uncomments this line, in the same diff. The self-test case below
-  // is already written and will start passing then.
+  // The two ALLOW cases below — a corpse and a husk — are the near misses this must not catch. Both
+  // are real, both survive v2.0, and neither contains the bare word.
+  { word: /^ghosts?$/i, why: 'the ghost system', cite: '§4.7 — cut in v2.0' },
   { word: /^sabotage[ds]?$/i, why: 'sabotage systems', cite: '§3 OUT' },
   { word: /^trades?$|^trading$/i, why: 'trading', cite: '§3 OUT' },
   { word: /^guilds?$/i, why: 'guilds', cite: '§3 OUT' },
@@ -148,6 +146,8 @@ const selfTest = () => {
   check('a campaign flag', 'if profile.CampaignChapter > 3 then end', true)
   check('a UI label offering to vote', 'button.Text = "Vote to eject"', true)
   check('a mic-driven mechanic', 'local microphoneLevel = 0', true)
+  check('the ghost system', 'local GhostService = {}', true)
+  check('a ghost in a UI string', 'label.Text = "your chat reaches ghosts only"', true)
 
   // ALLOW
   check('the one monster in scope', 'local MonsterService = require(script.Parent.MonsterService)', false)

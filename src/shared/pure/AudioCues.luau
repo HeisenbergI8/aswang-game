@@ -29,7 +29,7 @@
 ]]
 
 export type RoundPhase = "IDLE" | "INTERMISSION" | "STARTING" | "ACTIVE" | "ENDING"
-export type PlayerState = "LOBBY" | "ALIVE" | "GHOST" | "SPECTATOR"
+export type PlayerState = "LOBBY" | "ALIVE" | "DEAD" | "SPECTATOR"
 
 local AudioCues = {}
 
@@ -77,7 +77,6 @@ local ONE_SHOTS: { [string]: { string } } = {
 local PERMITTED_PHASES: { [string]: { [string]: boolean } } = {
 	CUE_TRANSFORM = { STARTING = true, ACTIVE = true },
 	CUE_HEARTBEAT = { ACTIVE = true },
-	CUE_GATE_OPEN = { ACTIVE = true },
 	CUE_SUNRISE = { ACTIVE = true, ENDING = true },
 	CUE_FOOTSTEP = {
 		IDLE = true,
@@ -96,9 +95,9 @@ local PERMITTED_PHASES: { [string]: { [string]: boolean } } = {
 	outside the round is information reaching a Discord call. §4.3's tell is for players who are in
 	the barrio and can be killed by it.
 
-	GHOST is allowed. A ghost is in the world with a local body (C15) and can already SEE a
-	transformed monster; refusing them the audio would remove nothing and would make dead players
-	audibly different from living ones, which is the failure mode `absence-is-observable` names.
+	DEAD is allowed. A dead player is still in the world spectating and can already SEE a transformed
+	monster; refusing them the audio would remove nothing and would make dead players audibly
+	different from living ones, which is the failure mode `absence-is-observable` names.
 ]]
 local MONSTER_CUES: { [string]: boolean } = {
 	CUE_TRANSFORM = true,

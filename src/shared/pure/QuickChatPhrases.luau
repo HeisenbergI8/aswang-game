@@ -44,20 +44,20 @@ export type Phrase = {
 	-- phrases ping and the five social ones do not, which removes a boolean from the wire.
 	Pings: boolean,
 	--[[
-		May a GHOST send this? All but one, and the exception is not squeamishness.
+		May a DEAD send this? All but one, and the exception is not squeamishness.
 
-		A ghost has NO SERVER CHARACTER (see `ReportGhostPosition`'s header in Remotes.luau), so the
+		A dead player has NO SERVER CHARACTER (see `ReportGhostPosition`'s header in Remotes.luau), so the
 		only position available to resolve "nearest" from is the client-reported one that the same
 		header says the server cannot independently verify. Resolving an accusation target from a
 		client-supplied position IS the impersonation exploit C25's row forbids, one level of
 		indirection removed — the client does not name the player, it names the point the server
 		will pick the player from, which is the same power with an extra step.
 
-		`Pings` phrases are allowed for ghosts because a ghost's ping goes only to other ghosts, and
-		the ping is the sender's own reported position — a ghost lying about where it is buys it
+		`Pings` phrases are allowed for dead players because a dead player's ping goes only to other dead players, and
+		the ping is the sender's own reported position — a dead player lying about where it is buys it
 		nothing it does not already have.
 	]]
-	GhostMay: boolean,
+	DeadMay: boolean,
 }
 
 local QuickChatPhrases = {}
@@ -74,7 +74,7 @@ local PHRASES: { Phrase } = {
 		Order = 0,
 		NeedsTarget = false,
 		Pings = false,
-		GhostMay = true,
+		DeadMay = true,
 	},
 	{
 		Id = "BODY_HERE" :: QuickChatPhraseId,
@@ -82,15 +82,20 @@ local PHRASES: { Phrase } = {
 		Order = 1,
 		NeedsTarget = false,
 		Pings = true,
-		GhostMay = true,
+		DeadMay = true,
 	},
 	{
+		-- V01: the TEXT is now mechanic-neutral because the task system is gone. The ID is deliberately
+		-- NOT renamed here — `QuickChatPhraseId` is a closed union read by `Types`, the wheel layout and
+		-- analytics, and V03 owns the search vocabulary that will give this slot its real name. A
+		-- player-facing string naming a mechanic that does not exist is the bug V01 must fix; an
+		-- internal id that is merely stale is V03's to rename with the rest of the wheel.
 		Id = "TASK_HERE" :: QuickChatPhraseId,
-		Text = "Task here",
+		Text = "Over here",
 		Order = 2,
 		NeedsTarget = false,
 		Pings = true,
-		GhostMay = true,
+		DeadMay = true,
 	},
 	{
 		Id = "FOLLOW_ME" :: QuickChatPhraseId,
@@ -98,7 +103,7 @@ local PHRASES: { Phrase } = {
 		Order = 3,
 		NeedsTarget = false,
 		Pings = true,
-		GhostMay = true,
+		DeadMay = true,
 	},
 	{
 		-- THE ONLY PHRASE WITH A SERVER-RESOLVED TARGET. `{name}` is filled by the RECEIVER from
@@ -108,7 +113,7 @@ local PHRASES: { Phrase } = {
 		Order = 4,
 		NeedsTarget = true,
 		Pings = false,
-		GhostMay = false,
+		DeadMay = false,
 	},
 	{
 		Id = "RUN" :: QuickChatPhraseId,
@@ -116,7 +121,7 @@ local PHRASES: { Phrase } = {
 		Order = 5,
 		NeedsTarget = false,
 		Pings = false,
-		GhostMay = true,
+		DeadMay = true,
 	},
 	{
 		Id = "IM_ALONE" :: QuickChatPhraseId,
@@ -124,7 +129,7 @@ local PHRASES: { Phrase } = {
 		Order = 6,
 		NeedsTarget = false,
 		Pings = false,
-		GhostMay = true,
+		DeadMay = true,
 	},
 	{
 		Id = "TRUST_ME" :: QuickChatPhraseId,
@@ -132,7 +137,7 @@ local PHRASES: { Phrase } = {
 		Order = 7,
 		NeedsTarget = false,
 		Pings = false,
-		GhostMay = true,
+		DeadMay = true,
 	},
 }
 

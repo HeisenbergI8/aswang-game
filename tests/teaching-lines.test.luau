@@ -28,10 +28,8 @@ end
 -- The four moments C23's row lists. Written out here so the test fails if the table grows a fifth,
 -- which is the whole point: a fifth line is a design decision, not a copy edit.
 local EXPECTED_IDS = {
-	"CUE_FIRST_GHOST_DEATH",
 	"CUE_FIRST_SALT",
 	"CUE_FIRST_TRANSFORM_SEEN",
-	"CUE_FIRST_TWO_PERSON",
 }
 
 local ids = TeachingLines.ids()

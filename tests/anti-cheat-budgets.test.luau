@@ -28,17 +28,10 @@ local Config = require("../src/shared/Config")
 -- primitive — including on top of a player, which accuses by geometry while the phrase says
 -- something innocent.
 local UP_REMOTES = {
-	"RequestTaskProgress",
-	"RequestTimingStop",
 	"RequestTransform",
 	"RequestKill",
 	"RequestThrowSalt",
 	"RequestQuickChat",
-	-- C15. The one up-remote that is not a Request: a ghost REPORTS where its client-side body is,
-	-- because ghosts have no server character. Named differently on purpose — it is the only remote in
-	-- the game whose payload the server cannot independently verify, and the name should say so.
-	"ReportGhostPosition",
-	"RequestGhostSpook",
 	"RequestEquipCosmetic",
 	-- C34. The equip's sibling, and a separate remote rather than an argument on it: a shop press and
 	-- a wardrobe press are different intents, and one remote doing both means an accidental tap on a
@@ -108,15 +101,6 @@ end
 -- The relationships. A limiter tighter than legitimate play is a gameplay bug.
 --------------------------------------------------------------------------------
 
--- Spec §4.4: task progress is reported as PRESENCE while the server accumulates. A player standing at
--- a task point reports at least as often as the HUD updates, so a slower refill throttles correct play.
-check(
-	"task progress refills faster than the snapshot tick",
-	Config.AntiCheat.Budgets.RequestTaskProgress.RefillPerSecond
-		>= 1 / Config.Round.SnapshotInterval,
-	`refill={Config.AntiCheat.Budgets.RequestTaskProgress.RefillPerSecond}`
-)
-
 -- Spec §4.3: the Aswang may transform once per kill cycle. One token must be available at least that
 -- often or the limiter, not the cooldown, becomes the thing gating the monster.
 check(
@@ -130,26 +114,6 @@ check(
 check(
 	"salt throws burst at least as far as the carry limit",
 	Config.AntiCheat.Budgets.RequestThrowSalt.Capacity >= Config.Salt.CarryLimit
-)
-
--- Spec §4.7: one spook per round. Capacity below that refuses the feature outright.
-check(
-	"the ghost can afford its one spook",
-	Config.AntiCheat.Budgets.RequestGhostSpook.Capacity >= Config.Ghost.SpooksPerRound
-)
-
---[[
-	§4.4, C09. The honest cadence at a timing bar is one stop per sweep, so a refill slower than that
-	throttles a player for playing the minigame at the only rate the minigame allows. This is the same
-	failure the RequestTaskProgress budget's comment warns about, one remote over.
-]]
-check(
-	"an honest timing player out-paces nothing but the bar",
-	Config.Tasks.TimingBarPeriod > 0
-		and 1 / Config.Tasks.TimingBarPeriod
-			< Config.AntiCheat.Budgets.RequestTimingStop.RefillPerSecond,
-	`{1 / Config.Tasks.TimingBarPeriod}/s vs refill=`
-		.. `{Config.AntiCheat.Budgets.RequestTimingStop.RefillPerSecond}/s`
 )
 
 --------------------------------------------------------------------------------

@@ -13,10 +13,10 @@
 	six pouches, and the one counterplay item in the game stops being a decision and becomes an arsenal.
 
 	WHY A VERDICT RATHER THAN A BOOLEAN — the same argument TransformRules and KillValidation make. The
-	server logs WHY it declined, and "you are a ghost standing on a pouch" and "you already have one"
+	server logs WHY it declined, and "you are dead and standing on a pouch" and "you already have one"
 	send a reader to two different places. C41 reads those lines.
 
-	NOTHING HERE IS SECRET AND NOTHING HERE MAY BECOME SECRET. The weight rule in `pure/TaskWeight` had
+	NOTHING HERE IS SECRET AND NOTHING HERE MAY BECOME SECRET. The deleted task-weight rule had
 	to earn its role-blindness with a grid; this module never takes a role at all, and it must not start.
 	A carry limit that differed for the Aswang would be a role oracle readable by standing on a pouch.
 
@@ -24,7 +24,7 @@
 	than assumed: are the inputs client-suppliable, and is there a seed? There is no seed, and every
 	input is already on the client — the phase and `YourState` ride the snapshot, and `CarryLimit` is in
 	the replicated Config. A client that requires and runs this module learns that it may not carry two
-	pouches, which it could also learn by trying. `TaskPool` is server-side because its inputs are the
+	pouches, which it could also learn by trying. `SearchPool` is server-side because its inputs are the
 	map's pool contents; this module has nothing of the sort.
 
 	NO `script.Parent` REQUIRES. Both unions are re-declared; Luau unions are structural, so these and
@@ -32,7 +32,7 @@
 ]]
 
 export type RoundPhase = "IDLE" | "INTERMISSION" | "STARTING" | "ACTIVE" | "ENDING"
-export type PlayerState = "LOBBY" | "ALIVE" | "GHOST" | "SPECTATOR"
+export type PlayerState = "LOBBY" | "ALIVE" | "DEAD" | "SPECTATOR"
 
 export type Verdict = "OK" | "WRONG_PHASE" | "NOT_ALIVE" | "AT_LIMIT" | "NO_LIMIT_SET"
 
@@ -50,8 +50,9 @@ local SaltCarry = {}
 	the player, then the count. A log full of AT_LIMIT is a UX finding — players walking over pouches
 	they cannot take — and a log full of anything above it is a correctness finding.
 
-	NOT_ALIVE is an ALLOWLIST of ALIVE, never `~= "SPECTATOR"`. A GHOST must not pick up salt: §4.7
-	gives ghosts contribution and a spook, not the counterplay item, and C15 makes GHOST a state that a
+	NOT_ALIVE is an ALLOWLIST of ALIVE, never `~= "SPECTATOR"`. A DEAD player must not pick up salt —
+	the counterplay item belongs to players who can still be killed by the thing it defends against —
+	and DEAD is a state that a
 	body walks around in — so the denylist form starts admitting them the moment Phase 6 lands. This is
 	`pure/PlayerBody`'s warning in a second file, and it is the specific mistake that file predicted.
 ]]

@@ -11,7 +11,7 @@
 	`evaluate` lands on one of those four and on nothing else.
 ]]
 
-local TaskPool = require("../src/server/pure/TaskPool")
+local SearchPool = require("../src/server/pure/SearchPool")
 
 local REQUIRED = 5
 local EXPECTED = 12
@@ -41,29 +41,29 @@ local function names(count: number): { string }
 end
 
 -- The reason this module exists. An untagged map must be reported, not shrugged at.
-local empty = TaskPool.evaluate({}, REQUIRED, EXPECTED)
+local empty = SearchPool.evaluate({}, REQUIRED, EXPECTED)
 
 check("an empty pool is EMPTY", empty.Verdict == "EMPTY", empty.Verdict)
 check("an empty pool has no unique points", #empty.Unique == 0)
 
--- One below the gate's requirement: the round could never reach 5/5, so this must block.
-local short = TaskPool.evaluate(names(REQUIRED - 1), REQUIRED, EXPECTED)
+-- One below the round's requirement: the pool could never satisfy it, so this must block.
+local short = SearchPool.evaluate(names(REQUIRED - 1), REQUIRED, EXPECTED)
 
 check("a pool one short of the requirement is SHORT", short.Verdict == "SHORT", short.Verdict)
 
 -- Exactly enough is fine. The draw returns all of them and the spacing filter falls back; that is
 -- TaskSelection's contract, already proven in tests/task-selection.test.luau.
-local exact = TaskPool.evaluate(names(REQUIRED), REQUIRED, EXPECTED)
+local exact = SearchPool.evaluate(names(REQUIRED), REQUIRED, EXPECTED)
 
 check("a pool of exactly the requirement is OK", exact.Verdict == "OK", exact.Verdict)
 
-local full = TaskPool.evaluate(names(EXPECTED), REQUIRED, EXPECTED)
+local full = SearchPool.evaluate(names(EXPECTED), REQUIRED, EXPECTED)
 
 check("the intended 12-point pool is OK", full.Verdict == "OK", full.Verdict)
 check("the intended pool keeps all 12", #full.Unique == EXPECTED, `{#full.Unique}`)
 
 -- Non-blocking, but a defect: C17 left a thirteenth tag somewhere.
-local oversized = TaskPool.evaluate(names(EXPECTED + 1), REQUIRED, EXPECTED)
+local oversized = SearchPool.evaluate(names(EXPECTED + 1), REQUIRED, EXPECTED)
 
 check(
 	"a pool larger than PoolSize is OVERSIZED",
@@ -79,7 +79,7 @@ local duplicated = names(EXPECTED)
 
 table.insert(duplicated, "TaskPoint_3")
 
-local dupes = TaskPool.evaluate(duplicated, REQUIRED, EXPECTED)
+local dupes = SearchPool.evaluate(duplicated, REQUIRED, EXPECTED)
 
 check("a repeated Name is DUPLICATE_ID", dupes.Verdict == "DUPLICATE_ID", dupes.Verdict)
 check("the duplicate is named for the log", dupes.Duplicates[1] == "TaskPoint_3")
@@ -94,7 +94,7 @@ local shortAndDuplicated = names(REQUIRED - 1)
 
 table.insert(shortAndDuplicated, "TaskPoint_1")
 
-local both = TaskPool.evaluate(shortAndDuplicated, REQUIRED, EXPECTED)
+local both = SearchPool.evaluate(shortAndDuplicated, REQUIRED, EXPECTED)
 
 check(
 	"a short pool reports SHORT even when it also has duplicates",
@@ -104,13 +104,13 @@ check(
 check("the duplicate is still reported alongside it", #both.Duplicates == 1)
 
 -- A pool of nothing but the same name is EMPTY of usable points, not DUPLICATE_ID.
-local allSame = TaskPool.evaluate({ "A", "A", "A" }, REQUIRED, EXPECTED)
+local allSame = SearchPool.evaluate({ "A", "A", "A" }, REQUIRED, EXPECTED)
 
 check("a pool of one repeated name is SHORT, not OK", allSame.Verdict == "SHORT", allSame.Verdict)
 check("it keeps exactly one", #allSame.Unique == 1)
 
 if failures > 0 then
-	error(`{failures} task-pool assertion(s) failed`, 0)
+	error(`{failures} search-pool assertion(s) failed`, 0)
 end
 
-print(`  PASS  task-pool: {checked} assertions across the pool set`)
+print(`  PASS  search-pool: {checked} assertions across the pool set`)

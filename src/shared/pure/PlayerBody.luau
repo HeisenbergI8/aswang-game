@@ -15,7 +15,7 @@
 	  · mayBeKilled  — ALIVE, and nothing else. That is C05's "both alive" rule.
 
 	Both are ALLOWLISTS. `state ~= "SPECTATOR"` reads identically today for either one and admits LOBBY
-	and GHOST — and C15 makes GHOST real, at which point a dead player is killable again. PlayerState has
+	and DEAD, at which point a dead player is killable again. PlayerState has
 	four values; each function names the ones it permits and returns false for everything else, so a
 	fifth value added later defaults to the safe answer and shows up in this file's test as a hole.
 
@@ -26,25 +26,26 @@
 	the client already holds about itself (`ClientRoundSnapshot.YourState`). Logic is not secret.
 ]]
 
-export type PlayerState = "LOBBY" | "ALIVE" | "GHOST" | "SPECTATOR"
+export type PlayerState = "LOBBY" | "ALIVE" | "DEAD" | "SPECTATOR"
 
 local PlayerBody = {}
 
 --[[
 	Whether the server should load a character for this player.
 
-	GHOST RETURNS FALSE, AND THIS ROW HAS NOW MOVED THREE TIMES. The history is the useful part.
+	DEAD RETURNS FALSE, AND THIS ROW HAS NOW MOVED THREE TIMES. The history is the useful part.
 
-	The C05-era comment predicted C15 would flip it: "C15 gives ghosts their own body and will change
-	this row." It did — §4.7 needs a ghost to have a position. An exploit audit flipped it back, because
-	a hidden server character still replicates and enumerating it named the dead set. Then a SECOND audit
+	It was false, then true — a dead player needed a position, so the row was flipped to give them one.
+	An exploit audit flipped it back, because a hidden server character still replicates and
+	enumerating it named the dead set. Then a SECOND audit
 	found that removing the body did not remove the tell, it INVERTED it: `Character == nil` enumerates
 	the dead exactly as well, and the Aswang is never among them. Absence is as observable as presence.
 
 	SO THE ANSWER STOPPED BEING ABOUT THIS PREDICATE. A dead player DOES have a character — the corpse,
 	kept attached for the round — but it is not GRANTED by the body rule; `MonsterService` made it and
-	owns it. `BodyTransitions.actionFor` short-circuits GHOST to KEEP before ever consulting this
-	function, so "may the body rule give a ghost a body" is false while "does a ghost have one" is true.
+	owns it. `BodyTransitions.actionFor` short-circuits DEAD to KEEP before ever consulting this
+	function, so "may the body rule give a dead player a body" is false while "does one have a body" is
+	true.
 	Those are different questions and this one answers the first.
 
 	`mayBeKilled` DID NOT MOVE through either flip. That is the whole reason these were two allowlists

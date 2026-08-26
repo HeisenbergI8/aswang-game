@@ -56,7 +56,7 @@
 	handler that hangs. Removing the category beats sanitising it.
 
 	PHASE OWNERSHIP. This service SUBSCRIBES to `RoundService.PhaseChanged` and never calls
-	`setPhase` — spec §6.4, and the same shape ItemService and TaskService use.
+	`setPhase` — spec §6.4, and the same shape every gameplay service uses.
 ]]
 
 local Players = game:GetService("Players")
@@ -65,7 +65,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
-local GhostChat = require(Shared.pure.GhostChat)
+local ChatAudience = require(Shared.pure.ChatAudience)
 local QuickChatPhrases = require(Shared.pure.QuickChatPhrases)
 local QuickChatTarget = require(Shared.pure.QuickChatTarget)
 local Remotes = require(Shared.Remotes)
@@ -128,24 +128,24 @@ end
 	  the reason the payload carries a UserId rather than a name: a name resolved server-side would
 	  have frozen a departed player's name into every HUD permanently.
 	· THE SENDER DIES IN THE SAME FRAME. `GetPlayerState` is read once at the top of the handler and
-	  again in `broadcast` at the fire site. A player who died between the two delivers to ghosts,
+	  again in `broadcast` at the fire site. A player who died between the two delivers to dead players,
 	  which is the safe direction — the alternative would put a dead player's words in front of the
 	  living.
 	· THE ROUND ENDS WITH THE WHEEL OPEN. The wheel is client state. A request arriving after ACTIVE
 	  is refused `WRONG_PHASE`, and nothing here holds a lock.
-	· A PLAYER JOINS MID-ROUND. They are SPECTATOR, and `GhostChat.shouldDeliver` gives them their
+	· A PLAYER JOINS MID-ROUND. They are SPECTATOR, and `ChatAudience.shouldDeliver` gives them their
 	  own island: they hear the living, and neither side hears them. Identical to text chat since C15.
-	· A GHOST REJOINS AS AN ALT. Unchanged by C25 — `pure/RejoinResolve` owns it, and this wheel adds
+	· A DEAD REJOINS AS AN ALT. Unchanged by C25 — `pure/RejoinResolve` owns it, and this wheel adds
 	  no channel a returning account could read that text chat did not already expose.
 ]]
 
 --[[
 	The sender's own root part, from the SERVER's copy of their character.
 
-	⚠ A GHOST DOES HAVE A CHARACTER, AND IT IS NOT WHERE THEY ARE. Since C15 the corpse stays attached
+	⚠ A DEAD DOES HAVE A CHARACTER, AND IT IS NOT WHERE THEY ARE. Since C15 the corpse stays attached
 	as `player.Character` — that is the whole shape `.claude/lessons/absence-is-observable.md` records,
 	because a dead player with no character is a one-line roster of the dead. So this returns the
-	CORPSE's root for a ghost, not nil, and every caller has to know that.
+	CORPSE's root for a dead player, not nil, and every caller has to know that.
 
 	It returns nil only for a player mid-respawn or one whose character the body rule has parked.
 ]]
@@ -264,7 +264,7 @@ local function resolveTarget(sender: Player, senderRoot: BasePart): number?
 		--[[
 			Both characters are excluded from the cast, and they are gathered as a list of the ones
 			that actually exist rather than cast through `:: Instance`. `Player.Character` is `Model?`
-			— it is nil for a ghost and during a respawn — and a nil in
+			— it is nil for a dead player and during a respawn — and a nil in
 			`FilterDescendantsInstances` is an error inside a connection, which Roblox swallows into
 			one warn and the accusation silently stops working for everybody.
 		]]
@@ -272,7 +272,7 @@ local function resolveTarget(sender: Player, senderRoot: BasePart): number?
 			UserId = other.UserId,
 			DistanceStuds = (otherRoot.Position - senderRoot.Position).Magnitude,
 			--[[
-				A GHOST OR SPECTATOR IS NOT A CANDIDATE, and the reason is a leak rather than a
+				A DEAD OR SPECTATOR IS NOT A CANDIDATE, and the reason is a leak rather than a
 				nicety: they are not rendered to the living, so naming one would tell every recipient
 				that somebody nobody can see is standing somewhere — a death signal with a position
 				attached, which is the exact shape Amendment A3 removed `AlivePlayerCount` to close.
@@ -282,7 +282,7 @@ local function resolveTarget(sender: Player, senderRoot: BasePart): number?
 				handler refuses a LOBBY player as a SENDER on the grounds that they are not in the
 				round, while `isLivingSide` admitted them as a TARGET. `PlayerBody`'s header warns
 				that the "can be killed" allowlist and the "is living-side" allowlist must never be
-				merged, and this picked the wider one. A GHOST or SPECTATOR is excluded for a
+				merged, and this picked the wider one. A DEAD or SPECTATOR is excluded for a
 				stronger reason still: they are not rendered to the living, so naming one announces
 				that somebody nobody can see is standing somewhere — a death signal with a position
 				attached, which is the shape Amendment A3 removed `AlivePlayerCount` to close.
@@ -303,14 +303,14 @@ end
 --[[
 	Deliver to everyone entitled to hear it, and to nobody else.
 
-	`FireClient` IN A LOOP, NEVER `FireAllClients`, and the reason is the same one `GhostRoster`
+	`FireClient` IN A LOOP, NEVER `FireAllClients`, and the reason is the same one the dead-roster remote once
 	gives: what makes this safe is its AUDIENCE, not its contents. A `FireAllClients` here would put
-	a ghost's accusation in front of the living, which is the rule `pure/GhostChat`'s header calls
+	a dead player's accusation in front of the living, which is the rule `pure/ChatAudience`'s header calls
 	the most dangerous one in the game.
 
 	AND `check:secrecy` CANNOT POLICE IT. It reads payload fields and call shapes, and
 	`FireClient(player, payload)` inside a loop over the wrong list is textually identical to one
-	over the right list. So the state test lives HERE, at the fire site, exactly as GhostService's
+	over the right list. So the state test lives HERE, at the fire site, exactly as the deleted ghost service's
 	roster does — the check script is not the thing keeping this correct, this loop is.
 ]]
 local function broadcast(sender: Player, payload: Types.QuickChatBroadcastPayload)
@@ -322,19 +322,19 @@ local function broadcast(sender: Player, payload: Types.QuickChatBroadcastPayloa
 		--[[
 			THE SAME PREDICATE TEXT CHAT USES, REUSED RATHER THAN REIMPLEMENTED.
 
-			`pure/GhostChat` is a sixteen-cell grid precisely so a second feature does not get a
+			`pure/ChatAudience` is a sixteen-cell grid precisely so a second feature does not get a
 			second, subtly different wall — its own header notes that an earlier single-wall version
-			delivered GHOST -> SPECTATOR, which an audit caught and a hand-rolled `if` here would
-			have reintroduced. `tests/ghost-chat.test.luau` now pins both features against it.
+			delivered DEAD -> SPECTATOR, which an audit caught and a hand-rolled `if` here would
+			have reintroduced. `tests/chat-audience.test.luau` now pins both features against it.
 
-			The casts cross a pure-module boundary: `Types.PlayerState` and `GhostChat.PlayerState`
+			The casts cross a pure-module boundary: `Types.PlayerState` and `ChatAudience.PlayerState`
 			are the same structural union, declared twice because a pure module may not require
 			`Types`.
 		]]
 		if
-			GhostChat.shouldDeliver(
-				senderState :: GhostChat.PlayerState,
-				recipientState :: GhostChat.PlayerState
+			ChatAudience.shouldDeliver(
+				senderState :: ChatAudience.PlayerState,
+				recipientState :: ChatAudience.PlayerState
 			)
 		then
 			broadcastRemote:FireClient(recipient, payload)
@@ -353,7 +353,7 @@ function QuickChatService.Start()
 		`AntiCheatService.Consume` IS THE FIRST STATEMENT IN THE HANDLER, and it must stay inside this
 		function body rather than being hoisted into a helper. `check-ratelimit.mjs` matches the
 		Consume call within a character window of the `.OnServerEvent:Connect(`, so a handler limited
-		somewhere else reads as unguarded — the same note GhostService carries above its spook
+		somewhere else reads as unguarded — the same note the old ghost service carried above its spook
 		handler.
 	]]
 	Remotes.Get("RequestQuickChat").OnServerEvent
@@ -398,10 +398,10 @@ function QuickChatService.Start()
 			local senderState = RoundService.GetPlayerState(player)
 
 			--[[
-				GHOSTS MAY SPEAK, BUT NOT ACCUSE, and the refusal is a CONSEQUENCE rather than a
+				THE DEAD MAY SPEAK, BUT NOT ACCUSE, and the refusal is a CONSEQUENCE rather than a
 				policy.
 
-				A ghost has no server character (see `ReportGhostPosition`'s header in Remotes.luau),
+				A dead player has no server character (V01 removed the remote that used to report one),
 				so there is no server-owned position to resolve "nearest" from. The only position
 				available is the client-reported one that the same header states plainly the server
 				cannot verify — and resolving an accusation target from a client-supplied position is
@@ -409,11 +409,11 @@ function QuickChatService.Start()
 				of it. The client would not be naming the player; it would be naming the point the
 				server picks the player from, which is the same power.
 
-				`GhostMay` lives on the phrase in `pure/QuickChatPhrases` rather than as an `if` here,
+				`DeadMay` lives on the phrase in `pure/QuickChatPhrases` rather than as an `if` here,
 				so the rule is enumerable and `tests/quick-chat-phrases.test.luau` pins that the one
-				ghost-forbidden phrase is exactly the one that needs a target.
+				dead player-forbidden phrase is exactly the one that needs a target.
 			]]
-			if senderState == Enums.PlayerState.Ghost and not phrase.GhostMay then
+			if senderState == Enums.PlayerState.Dead and not phrase.DeadMay then
 				recordVerdict("NOT_ALLOWED_FOR_STATE")
 				return
 			end
@@ -425,10 +425,7 @@ function QuickChatService.Start()
 				are not in, and letting them say it would let a spectator-adjacent account inject
 				into the living channel.
 			]]
-			if
-				senderState ~= Enums.PlayerState.Alive
-				and senderState ~= Enums.PlayerState.Ghost
-			then
+			if senderState ~= Enums.PlayerState.Alive and senderState ~= Enums.PlayerState.Dead then
 				recordVerdict("NOT_ALLOWED_FOR_STATE")
 				return
 			end
@@ -452,7 +449,7 @@ function QuickChatService.Start()
 					alone, which is a free position hint about a player who did not choose to give
 					one. Rendering the phrase with an empty name gives "It's !" and reads as broken.
 
-					NOT ECHOED TO THE SENDER EITHER, which is the less obvious half. GhostService's
+					NOT ECHOED TO THE SENDER EITHER, which is the less obvious half. The old ghost service's
 					spook handler refuses to return its verdict for exactly this reason — a refusal a
 					client can read is a state oracle. The sender learns it failed by not seeing their
 					own message appear, and an absence carries no detail to probe with.
@@ -470,13 +467,13 @@ function QuickChatService.Start()
 			--[[
 				THE PING IS THE SENDER'S OWN POSITION, and it is derived here rather than sent.
 
-				A GHOST PINGS THEIR CORPSE, NOT THEMSELVES, AND THAT IS DELIBERATE.
+				A DEAD PINGS THEIR CORPSE, NOT THEMSELVES, AND THAT IS DELIBERATE.
 
-				`rootPartOf` returns the corpse for a ghost — see its header; the corpse is
+				`rootPartOf` returns the corpse for a dead player — see its header; the corpse is
 				`player.Character` since C15. The alternative is a client-reported flying position
 				the server cannot verify, which is the "draw an arrow anywhere" primitive this
 				service refuses. Pinging the body is the honest, server-owned answer, it only ever
-				reaches other ghosts, and "here is where I died" is a useful thing for a ghost to
+				reaches other dead players, and "here is where I died" is a useful thing for a dead player to
 				say.
 			]]
 			if phrase.Pings and senderRoot ~= nil then

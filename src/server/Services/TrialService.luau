@@ -16,7 +16,7 @@
 	  · WRITES nothing in RoundService, ever
 
 	It does NOT call setPhase (a file-local in RoundService and unreachable from here by construction),
-	SetTasksCompleted, EndRound, MarkKilled, GetAswangUserId, or touch state.PlayerStates. The trial's
+	EndRound, MarkKilled, GetAswangUserId, or touch state.PlayerStates. The trial's
 	two tasks are counted in `sessions` below and never reach the round's task bar.
 
 	ONE DIRECTION ONLY, and for the exact reason RoundService's own header gives about RoleService: a
@@ -123,7 +123,7 @@ function TrialService.IsInTrial(userId: number): boolean
 end
 
 --[[
-	The trial zone's parts, rediscovered on every call for the same reason `TaskService.discoverPool`
+	The trial zone's parts, rediscovered on every call for the same reason any tag-driven pool
 	is: C17's generator adds, moves and deletes these while a server is running, and a cached part is
 	one that may no longer exist.
 
@@ -321,22 +321,26 @@ end
 --[[
 	THE TRIAL'S TASKS ARE NOT THE ROUND'S TASKS, AND THIS IS WHERE THAT IS TRUE OR NOT.
 
-	The tempting shortcut is to reuse TaskService: it already has hold-to-complete, presence range, a
-	progress bar and a completion path. Rejected, and the reason is the whole plan. TaskService's
-	completion path calls `RoundService.SetTasksCompleted` — the number the round's HUD renders and
+	The tempting shortcut was to reuse the round's task system: it already had hold-to-complete,
+	presence range, a progress bar and a completion path. Rejected, and the reason is the whole plan.
+	Its completion path called `RoundService.SetTasksCompleted` — the number the round's HUD rendered and
 	the escape gate derives from. A trial task routed through it would increment a live round's task
 	bar and, at TotalRequired, OPEN THE ESCAPE GATE. That is C21's row made literal: a trial that ends
 	a live round.
 
-	It cannot happen today, because a trial only opens while the phase is IDLE and `SetTasksCompleted`
+	It could not happen even then, because a trial only opens while the phase is IDLE and that setter
 	only opens the gate during ACTIVE. But "it is safe because two conditions happen not to overlap"
 	is the kind of safety that survives exactly until someone relaxes one of them, and the relaxation
 	would look harmless in review. The trial counts its own tasks in its own session and shares no
 	code path with the round's counter.
 
 	WHAT IS SHARED IS THE MAP, and only by tag. The trial's task points are TaskPoint parts inside the
-	TrialZone, discovered the same way TaskService discovers its pool but never entered into
-	TaskService's draw — `discoverPool` excludes anything carrying the zone attribute.
+	TrialZone, discovered the same way any tagged pool is but kept out of every other service's draw —
+	`discoverPool` excludes anything carrying the zone attribute.
+
+	V01 DELETED THE ROUND'S TASK SYSTEM ENTIRELY, so the collision this argues against can no longer
+	happen. The separation is kept because V03's container search will occupy exactly the slot the
+	task system did, and the argument applies to it unchanged.
 ]]
 local function noteTrialTaskComplete(userId: number)
 	local session = sessions[userId]
@@ -351,10 +355,15 @@ local function noteTrialTaskComplete(userId: number)
 end
 
 --[[
-	Hold-to-complete, reusing the round's NUMBERS and none of its CODE. `PresenceRangeStuds` and
-	`HoldTime` are read from `Config.Tasks` deliberately: a tutorial that teaches an eight-second hold
-	and then hands the player a six-second one has taught them the wrong thing, which is the failure
-	§10 exists to delete.
+	Hold-to-complete, and the numbers behind it are the trial's OWN since V01 (`Config.Trial`). They
+	began as the round task system's `PresenceRangeStuds` and `HoldTime`, borrowed on purpose: a
+	tutorial that teaches an eight-second hold and then hands the player a six-second one has taught
+	them the wrong thing, which is the failure §10 exists to delete.
+
+	V01 deleted the block they were borrowed from, so they moved rather than died — the argument was
+	never about WHERE the number lived, it was about the trial and the round agreeing. From V03 the
+	thing this must agree with is the container search, so both values are worth revisiting when
+	`Config.Search` lands rather than being treated as settled.
 ]]
 local function advanceTrialTask(userId: number, session: Session, delta: number)
 	local player = Players:GetPlayerByUserId(userId)
@@ -377,7 +386,7 @@ local function advanceTrialTask(userId: number, session: Session, delta: number)
 
 		local distance = (point.Position - root.Position).Magnitude
 
-		if distance <= Config.Tasks.PresenceRangeStuds and distance < nearestDistance then
+		if distance <= Config.Trial.PresenceRangeStuds and distance < nearestDistance then
 			nearest = point
 			nearestDistance = distance
 		end
@@ -399,7 +408,7 @@ local function advanceTrialTask(userId: number, session: Session, delta: number)
 
 	session.HeldFor += delta
 
-	if session.HeldFor < Config.Tasks.HoldTime then
+	if session.HeldFor < Config.Trial.HoldTime then
 		return
 	end
 

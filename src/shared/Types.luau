@@ -10,8 +10,7 @@
 
 export type RoundPhase = "IDLE" | "INTERMISSION" | "STARTING" | "ACTIVE" | "ENDING"
 export type Role = "SURVIVOR" | "ASWANG"
-export type PlayerState = "LOBBY" | "ALIVE" | "GHOST" | "SPECTATOR"
-export type TaskType = "HOLD" | "TIMING" | "FETCH" | "TWO_PERSON"
+export type PlayerState = "LOBBY" | "ALIVE" | "DEAD" | "SPECTATOR"
 export type RoundResult = "SURVIVORS_ESCAPED" | "ASWANG_WINS" | "TIMEOUT" | "ABORTED"
 
 export type PlayerStats = {
@@ -78,15 +77,6 @@ export type PlayerProfile = {
 		what the server trusts.
 	]]
 	GroupRewardClaimed: boolean,
-}
-
--- A task instance selected for the current round.
-export type ActiveTask = {
-	Id: string,
-	Type: TaskType,
-	SpawnPointName: string,
-	Progress: number, -- 0..1
-	Completed: boolean,
 }
 
 --[[
@@ -244,7 +234,7 @@ export type PlayerKilledPayload = {
 }
 
 --[[
-	The verdict from `server/pure/TaskPool.luau` (C07) — is the map's TaskPoint pool usable.
+	The verdict from `server/pure/SearchPool.luau` (C07, V01) — is the map's tagged pool usable.
 
 	EMPTY and SHORT are the two that BLOCK a draw. DUPLICATE_ID and OVERSIZED are loud and
 	non-blocking: the round still runs, and the map still has a defect somebody has to fix. That split
@@ -254,148 +244,7 @@ export type PlayerKilledPayload = {
 	This one is SAFE TO LOG AND SAFE TO SHOW. It describes the map, not a player, and every fact in it
 	is readable off the workspace by any client that cares to count tagged parts.
 ]]
-export type TaskPoolVerdict = "OK" | "EMPTY" | "SHORT" | "DUPLICATE_ID" | "OVERSIZED"
-
---[[
-	Why the server refused a RequestTaskProgress. Same shape and same rule as KillVerdict: a union so
-	the server can log WHY, and NEVER echoed to any client.
-
-	The echo rule is not inherited caution here, it is the specific hazard C08 has to design around.
-	Under Amendment A2 no verdict names a role — the Aswang's holds count in full — but the refusal
-	set still describes the round's private state, and NO_TASK_IN_RANGE in particular would tell a
-	client which of the twelve points are live faster than walking there would. There is no safe
-	subset to return, so the handler returns NOTHING on every refusal, exactly as the kill does.
-
-	NO_TASK_IN_RANGE covers both "you are nowhere near one" and "that point is not one of this round's
-	five". They are deliberately the same value: distinguishing them would tell a client which of the
-	twelve are live faster than walking there would.
-]]
-export type TaskProgressVerdict =
-	"OK"
-	| "WRONG_PHASE"
-	| "NOT_ALIVE"
-	| "NO_TASK_IN_RANGE"
-	| "ALREADY_COMPLETE"
-
---[[
-	The task bar (§4.4, C08). THREE FIELDS, AND THE THIRD IS THE ONE WITH A DESIGN BEHIND IT.
-
-	It does NOT carry who did what — not a UserId, not a name, not a count of who is present. §4.4 says
-	"a global task bar shows overall progress (not who did what)" and this payload is that sentence.
-
-	`YourTaskProgress` is the 0..1 fill of the ONE task point the receiving player is standing at, and
-	nil for everyone else. It is fired with FireClient per player and never with FireAllClients.
-
-	BE PRECISE ABOUT WHAT THAT DOES AND DOES NOT BUY, because an earlier version of this comment
-	overstated it. This field carries the WORLD's fill for that point, not the receiver's own
-	contribution, and becoming "the person standing on it" costs one keypress — so per-player firing
-	restricts who ASKS, and anyone may ask. It is a bandwidth saving and a narrowing, not a seal.
-
-	The reason that is safe is Amendment A2, not this remote: no task's fill is a function of anyone's
-	role, so a frozen bar says "nobody is holding" and never "the holder is the Aswang". Keep it that
-	way. If a future change makes any player's contribution differ by role, this field becomes a role
-	oracle readable in two seconds by any bystander, and per-player firing will not save it.
-
-	READ THE RoundEndedPayload COMMENT ABOVE BEFORE ADDING A FIELD. An EXTRA field on an annotated
-	table is accepted silently by the typechecker, and `TaskProgressChanged` is not on
-	check-secrecy.mjs's REVEAL_ALLOWLIST — so its broadcast rule DOES run over this call, which catches
-	a field named `role` or `aswang` or `killer` and catches nothing else. A field named
-	`PresentPlayerCount` would pass every check in this repo and would still be the oracle above.
-]]
-export type TaskProgressPayload = {
-	TasksCompleted: number,
-	TasksRequired: number,
-	YourTaskProgress: number?,
-}
-
---[[
-	Why the server refused (or failed) a RequestTimingStop (§4.4, C09). Same shape and same rule as
-	TaskProgressVerdict: a union so the server can log WHY, and NEVER echoed to any client.
-
-	MISS IS A VERDICT AND NOT AN ERROR, and it is the one worth reading twice. A miss is a legitimate
-	outcome of a legitimate request — the player pressed at the wrong moment — so unlike every other
-	value here it corresponds to a state change (the hit count resets). It is still never echoed: the
-	client learns it missed from the bar it is already being sent, which carries `Hits` and moves
-	whether the stop landed or not. Sending a verdict would add a second, differently-timed channel
-	saying the same thing, and two channels that can disagree is how a desync becomes a bug report.
-
-	NOT_A_TIMING_TASK exists because `RequestTimingStop` resolves its task from the player's position
-	exactly as `RequestTaskProgress` does, so a player standing on a HOLD point can reach this handler
-	honestly. It is a refusal, not an accusation.
-]]
-export type TimingVerdict =
-	"OK"
-	| "MISS"
-	| "WRONG_PHASE"
-	| "NOT_ALIVE"
-	| "NO_TASK_IN_RANGE"
-	| "ALREADY_COMPLETE"
-	| "NOT_A_TIMING_TASK"
-
---[[
-	The moving bar (§4.4, C09). SEVEN FIELDS, ALL OF THEM ABOUT A TASK POINT AND NONE ABOUT A PLAYER.
-
-	`Phase` is the bar's position in its sweep at the moment the server sent this, in 0..1, NOT the
-	rendered bar position — the rendered position is a triangle fold of it, and the client computes
-	that with `TimingWindow.positionFromPhase`. Sending the phase rather than the position is what
-	makes a single send sufficient: position alone is ambiguous (the bar passes every value twice per
-	sweep) and would need a direction flag beside it, which is a second field that can disagree with
-	the first.
-
-	THE CLIENT EXTRAPOLATES BETWEEN SENDS AND THE SERVER DOES NOT CARE. The server re-derives the
-	phase from its own `os.clock()` at the instant a stop arrives; nothing the client renders is an
-	input to that. A client that renders the bar frozen, doubled, or backwards gets exactly the same
-	hit decision as one that renders it perfectly. That is the C09 brief's "a client-decided timing
-	minigame is a free task for any exploiter", answered structurally.
-
-	READ THE RoundEndedPayload COMMENT ABOVE BEFORE ADDING A FIELD. An EXTRA field on an annotated
-	table is accepted silently by the typechecker, and `TimingBarChanged` is not on
-	check-secrecy.mjs's REVEAL_ALLOWLIST — so its broadcast rule DOES run over this call, catching a
-	field named `role` or `aswang` and catching nothing else. A field named `LastStopByUserId` would
-	pass every check in this repo and would name who is standing where.
-]]
-export type TimingBarPayload = {
-	TaskId: string,
-	Phase: number, -- 0..1 through one sweep, at send time
-	Period: number,
-	GreenCenter: number,
-	GreenHalfWidth: number,
-	Hits: number,
-	HitsRequired: number,
-}
-
---[[
-	The task list one player is shown (§4.4 + Amendment A2, C12). ONE FIELD, AND THE LIE IS WHICH
-	VALUE IT HOLDS RATHER THAN WHAT SHAPE IT IS.
-
-	Every player receives this, at STARTING, in one loop, with one payload shape. Survivors receive
-	this round's real five; the Aswang receives a decoy five drawn from the same pool. Nothing about
-	the send distinguishes them — same moment, same field, same count — which is the property that
-	survives a compromised client reading its own traffic.
-
-	IT IS NOT A SECRET AND MUST NEVER BE TREATED AS ONE. `ActiveTaskPoint` tags replicate, so a
-	compromised client reads the true five directly off CollectionService and the decoy is defeated in
-	one line. This is a UX affordance for honest clients and a cost in walking distance for an honest
-	Aswang. No balance decision may depend on it.
-]]
-export type TaskListPayload = {
-	TaskIds: { string },
-}
-
---[[
-	What should happen to one fetch item this tick (§4.4, C09) — the verdict from
-	`server/pure/FetchCarry.luau`.
-
-	SAFE TO LOG AND SAFE TO ACT ON IN THE OPEN, unlike every other verdict in this file. It describes
-	an object in the workspace that every client can already see, and the object's own position states
-	the outcome one tick later regardless.
-
-	DROP is the interesting one and it is deliberately not called "death". A carrier stops carrying
-	when they stop being a full contributor, and being killed is only one of the four ways that
-	happens — disconnecting, being reset, and joining as a spectator are the others. Naming the action
-	after the cause would have meant a branch per cause, and three of them would have been missed.
-]]
-export type FetchAction = "NONE" | "PICK_UP" | "DELIVER" | "DROP"
+export type SearchPoolVerdict = "OK" | "EMPTY" | "SHORT" | "DUPLICATE_ID" | "OVERSIZED"
 
 --[[
 	Why the server refused (or failed) a RequestThrowSalt (§4.6, C14). Same shape and same rule as
@@ -446,42 +295,6 @@ export type SaltEffectPayload = {
 	Impact: Vector3,
 	Hit: boolean,
 }
-
---[[
-	Who the other ghosts are (§4.7, C15). Fired ONLY to players whose own state is GHOST.
-
-	IT CARRIES UserIds AND THAT IS SAFE, for one reason that must stay true: being dead is not a
-	role. A ghost is a player the Aswang has already killed, or one who died some other way, and
-	`PlayerKilled` used to broadcast exactly this fact to every client until Amendment A3 stopped it.
-	What makes this payload safe is not its contents but its RECIPIENTS — the server fires it per
-	player and never with FireAllClients, and the one thing a living client must not learn is which
-	of the eight are dead, because that is the death oracle Amendment A3 exists to close.
-
-	So the rule for this remote is the mirror of RoleAssigned's: RoleAssigned is safe because its
-	payload is minimal, this is safe because its audience is. Widening the audience is the leak, and
-	no check in this repo would see it — `check-secrecy.mjs` reads payload fields and call shapes,
-	and `FireClient(player, roster)` inside a loop over the wrong list looks identical to the right
-	one. The state test belongs at the fire site for that reason.
-]]
-export type GhostRosterPayload = {
-	UserIds: { number },
-}
-
---[[
-	Why the server refused a RequestGhostSpook (§4.7, C16). Same shape and same rule as every other
-	verdict here: a union so the server can log WHY, and never echoed.
-
-	NOT_GHOST is a refusal and not an accusation — a living player's client has no spook button, so
-	reaching this value means either a stale button on a player who was just revived by a round
-	ending, or a compromised client. Both look the same from here, which is why C41 reads the log
-	rather than this function.
-]]
-export type SpookVerdict =
-	"OK"
-	| "WRONG_PHASE"
-	| "NOT_GHOST"
-	| "NO_SPOOKS_LEFT"
-	| "NOTHING_IN_RANGE"
 
 --[[
 	§4.5, C25. The eight phrases, as IDS rather than as strings.
@@ -562,10 +375,7 @@ export type RoundState = {
 	PhaseEndsAt: number, -- os.clock() timestamp
 	RoundNumber: number,
 	AswangUserId: number?, -- THE SECRET
-	Tasks: { ActiveTask },
-	TasksCompleted: number,
 	PlayerStates: { [number]: PlayerState }, -- keyed by UserId
-	GateOpen: boolean,
 }
 
 -- What the client is allowed to know. Note the absence of AswangUserId.
@@ -573,9 +383,6 @@ export type ClientRoundSnapshot = {
 	Phase: RoundPhase,
 	SecondsRemaining: number,
 	RoundNumber: number,
-	TasksCompleted: number,
-	TasksRequired: number,
-	GateOpen: boolean,
 	YourRole: Role?, -- only ever the receiving player's OWN role
 	YourState: PlayerState,
 }
@@ -583,7 +390,7 @@ export type ClientRoundSnapshot = {
 --[[
 	THE FIELD THAT USED TO BE HERE, AND WHY ITS ABSENCE IS LOAD BEARING (Amendment A3, §4.7).
 
-	`AlivePlayerCount: number` sat between GateOpen and YourRole and was pushed to every client every
+	`AlivePlayerCount: number` sat between RoundNumber and YourRole and was pushed to every client every
 	`Round.SnapshotInterval` (0.5s), plus an immediate extra push from `MarkKilled` the instant a
 	death landed. That made it a sub-second global death signal, and a death signal is an input to an
 	attack this game cannot survive: record replicated character positions, timestamp each kill from
@@ -667,11 +474,7 @@ export type TrialSnapshot = {
 
 -- C23. The id of a one-liner, resolved to copy by `shared/pure/TeachingLines`. An ID rather than the
 -- string itself so the copy lives in one place and the seen-set is keyed on something stable.
-export type TeachingCueId =
-	"CUE_FIRST_SALT"
-	| "CUE_FIRST_GHOST_DEATH"
-	| "CUE_FIRST_TRANSFORM_SEEN"
-	| "CUE_FIRST_TWO_PERSON"
+export type TeachingCueId = "CUE_FIRST_SALT" | "CUE_FIRST_TRANSFORM_SEEN"
 
 --[[
 	One line of the end screen's XP breakdown (C32). Plain strings and numbers — the copy is already

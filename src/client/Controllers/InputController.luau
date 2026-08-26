@@ -31,7 +31,6 @@ local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local TaskController = require(script.Parent.TaskController)
 local TrialController = require(script.Parent.TrialController)
 local UIController = require(script.Parent.UIController)
 
@@ -44,8 +43,6 @@ local InputController = {}
 
 local TRANSFORM_ACTION = "AswangTransform"
 local KILL_ACTION = "AswangKill"
-local TASK_ACTION = "TaskHold"
-local TIMING_ACTION = "TaskTimingStop"
 local THROW_ACTION = "SaltThrow"
 
 --[[
@@ -188,80 +185,6 @@ local function onKillAction(
 	return if performKill() then Enum.ContextActionResult.Sink else Enum.ContextActionResult.Pass
 end
 
---------------------------------------------------------------------------------
--- The hold (§4.4, C08)
---------------------------------------------------------------------------------
-
---[[
-	THE TWO BINDS ABOVE GATE ON UIController.GetMyRole(). THIS ONE MUST NOT, AND THE ABSENCE IS THE
-	SECURITY PROPERTY.
-
-	A role gate here would be a client that behaves differently depending on who it is, and every one
-	of those is a confession waiting to be recorded. The transform and kill binds can afford it because
-	the actions they guard are the Aswang's alone and visible when used; a task is something all eight
-	players do all round, so an Aswang whose client sent no heartbeat — or sent one at a different rate,
-	or stopped when the bar stopped — would be distinguishable from a survivor's by anyone who could
-	watch the wire, and identical-looking to anyone who could not only by accident.
-
-	SO: THE ASWANG'S CLIENT SENDS EXACTLY WHAT A SURVIVOR'S SENDS, and the server treats what it sends
-	identically — Amendment A2, which reversed §4.4's original "its progress does not count" after an
-	audit showed that rule builds the very oracle §4.4 feared. C12's deception is what the Aswang is
-	SHOWN, never what its hands do. Nothing on either side of the boundary knows the difference, which
-	is the only arrangement that is still true when the client is compromised.
-
-	Cancel is handled alongside End: ContextActionService raises it when a bind is unbound or the input
-	is interrupted, and treating it as Pass would leave `holding` true forever.
-]]
-local function performAct(pressed: boolean)
-	TaskController.SetHolding(pressed)
-end
-
-local function onTaskAction(
-	_actionName: string,
-	inputState: Enum.UserInputState
-): Enum.ContextActionResult
-	if inputState == Enum.UserInputState.Begin then
-		performAct(true)
-
-		return Enum.ContextActionResult.Sink
-	end
-
-	if inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
-		performAct(false)
-
-		return Enum.ContextActionResult.Sink
-	end
-
-	return Enum.ContextActionResult.Pass
-end
-
---[[
-	NO ROLE GATE, for the reason the hold bind above spells out at length: a client that behaves
-	differently depending on who it is, is a confession waiting to be recorded. Under Amendment A2
-	there is not even a server-side difference left to hide — the Aswang's stops count exactly like
-	anyone else's — but the rule stands on its own and this bind obeys it.
-
-	Unconditional `FireServer` on Begin, with no local check of any kind. There is deliberately no
-	client-side "am I at a timing task" test: the client would have to know which of the five points
-	are TIMING to run one, and the honest cost of not running it is a rate-limit token.
-]]
-local function performTimingStop()
-	Remotes.Get("RequestTimingStop"):FireServer()
-end
-
-local function onTimingAction(
-	_actionName: string,
-	inputState: Enum.UserInputState
-): Enum.ContextActionResult
-	if inputState ~= Enum.UserInputState.Begin then
-		return Enum.ContextActionResult.Pass
-	end
-
-	performTimingStop()
-
-	return Enum.ContextActionResult.Sink
-end
-
 --[[
 	THE SALT THROW (§4.6, C14). The client's entire contribution to this mechanic is a direction.
 
@@ -344,35 +267,19 @@ function InputController.Start()
 			performKill()
 		end,
 		--[[
-			C27 REGISTERS THE OTHER THREE, so the touch pad runs this file's verbs rather than its own
+			C27 REGISTERS THE THROW TOO, so the touch pad runs this file's verbs rather than its own
 			copies of them. Mobile is ~60% of the audience per §5, so the drift this prevents would be
 			the majority experience being broken while the desktop path — the one being tested from a
-			desk — stayed green.
+			desk — stayed green. (C27 registered three more; V01 took the hold and the timing stop with
+			the task system, and V03's search takes the hold's slot back.)
 		]]
-		Act = performAct,
 		Throw = function()
 			performThrow()
 		end,
-		TimingStop = performTimingStop,
 	})
 
 	ContextActionService:BindAction(TRANSFORM_ACTION, onTransformAction, false, Enum.KeyCode.T)
 	ContextActionService:BindAction(KILL_ACTION, onKillAction, false, Enum.KeyCode.F)
-	-- `E` because it is ProximityPrompt's default key, so Phase 6 is a swap rather than a retraining.
-	-- `false` for createTouchButton matches the two binds above: mobile is C27's subject, and this is a
-	-- known hole rather than an oversight. It is a WORSE hole here than for the other two — 60% of the
-	-- audience per §5, and tasks are what all eight players do all round.
-	ContextActionService:BindAction(TASK_ACTION, onTaskAction, false, Enum.KeyCode.E)
-	-- `R`, because `E` is the hold and a timing point needs both. `false` for createTouchButton
-	-- matches every other bind in this file: mobile is C27's subject, and this is the fourth known
-	-- hole rather than a new one.
-	--
-	-- `R` REACHES THIS HANDLER — confirmed at C27, not assumed. The warning that stood here came from
-	-- C08, which shipped unreachable because ProximityPrompt's default `E` silently swallowed the
-	-- identical bind, and nothing static could prove `R` was not claimed too. Driven for real in a
-	-- Play session, one press produced exactly one `RequestTimingStop` on the server:
-	-- `.claude/plans/c27-c28-verification/artifacts/desktop-keys-console.txt`.
-	ContextActionService:BindAction(TIMING_ACTION, onTimingAction, false, Enum.KeyCode.R)
 
 	--[[
 		`Q`, and `false` for createTouchButton SINCE C27 — this bind was the one exception in the file

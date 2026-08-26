@@ -1,6 +1,6 @@
 --!strict
 --[[
-	TaskPool — is this map's TaskPoint pool usable, and which names are actually distinct? (C07)
+	SearchPool — is this map's tagged pool usable, and which names are actually distinct? (C07, V01)
 
 		(names, required, expected) -> report
 
@@ -13,17 +13,18 @@
 	verdict a pure function makes "the pool is empty" something a test asserts from a terminal. That is
 	the difference between loud and merely noisy.
 
-	WHY src/server/pure/ AND NOT src/shared/pure/ — deliberately the opposite of TaskSelection next
-	door. TaskSelection sits under shared/ and its header spends twenty lines earning the right to,
-	because a client can require AND CALL anything under ReplicatedStorage. Nothing here needs that
-	argument re-run: the client renders what the server sends and has no use for a pool verdict, and
-	the inputs are the pool contents themselves — the exact thing TaskService's seed warning says to
-	keep off the wire. Lune resolves by file path, so none of this costs testability. RoleDraw is here
-	for the same reason.
+	WHY src/server/pure/ AND NOT src/shared/pure/ — and the argument is about the INPUTS, not the
+	algorithm. Anything under `src/shared/` is replicated, so a client can require AND CALL it; that is
+	fine for logic, which is never secret. It is not fine when a client can supply the inputs. The
+	inputs here are the pool contents themselves — the full list of tagged names in the map — and a
+	verdict on them is a thing the client renders nothing from and an exploiter reads a map index out
+	of. Keeping the pool off the wire is the rule; this placement is that rule applied to the module
+	that holds it. Lune resolves by file path, so none of this costs testability. RoleDraw is here for
+	the same reason.
 
 	NO `script.Parent` REQUIRES and no Roblox datatypes: names are plain strings so Lune can run this.
 	The verdict union is re-declared locally; Luau unions are structural, so this type and
-	Types.TaskPoolVerdict are the same type and pass to each other without a cast.
+	Types.SearchPoolVerdict are the same type and pass to each other without a cast.
 ]]
 
 export type Verdict = "OK" | "EMPTY" | "SHORT" | "DUPLICATE_ID" | "OVERSIZED"
@@ -34,7 +35,7 @@ export type Report = {
 	Duplicates: { string },
 }
 
-local TaskPool = {}
+local SearchPool = {}
 
 --[[
 	PRECEDENCE IS BLOCKING-FIRST, and the order is the whole content of this function.
@@ -53,7 +54,7 @@ local TaskPool = {}
 	parts in its log regardless of whether they blocked anything. `Unique` preserves discovery order,
 	which is `GetTagged`'s order — see Step 2.2 for why the caller sorts it before drawing.
 ]]
-function TaskPool.evaluate(names: { string }, required: number, expected: number): Report
+function SearchPool.evaluate(names: { string }, required: number, expected: number): Report
 	local seen: { [string]: boolean } = {}
 	local unique: { string } = {}
 	local duplicates: { string } = {}
@@ -83,4 +84,4 @@ function TaskPool.evaluate(names: { string }, required: number, expected: number
 	return { Verdict = verdict, Unique = unique, Duplicates = duplicates }
 end
 
-return TaskPool
+return SearchPool

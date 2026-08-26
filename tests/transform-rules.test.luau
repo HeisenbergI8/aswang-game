@@ -78,11 +78,11 @@ end
 -- PlayerState: the allowlist, proven over all four values
 --
 -- This is C04's carried-over warning from C01. `~= "SPECTATOR"` would pass every other assertion in
--- this file and would admit LOBBY and GHOST — and C15 makes GHOST real, at which point a dead player
+-- this file and would admit LOBBY and DEAD — and C15 makes DEAD real, at which point a dead player
 -- transforms. A denylist fails open on exactly the states that do not exist yet.
 --------------------------------------------------------------------------------
 
-for _, state: TransformRules.PlayerState in { "LOBBY", "GHOST", "SPECTATOR" } do
+for _, state: TransformRules.PlayerState in { "LOBBY", "DEAD", "SPECTATOR" } do
 	check(`a {state} player may not transform`, verdictWith(function(r)
 		r.PlayerState = state
 	end) == "NOT_ALIVE", state)
@@ -153,7 +153,7 @@ check(
 	verdictWith(function(r)
 		r.Phase = "INTERMISSION"
 		r.IsAswang = false
-		r.PlayerState = "GHOST"
+		r.PlayerState = "DEAD"
 	end) == "WRONG_PHASE"
 )
 

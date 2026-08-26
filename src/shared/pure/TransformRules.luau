@@ -27,7 +27,7 @@
 ]]
 
 export type RoundPhase = "IDLE" | "INTERMISSION" | "STARTING" | "ACTIVE" | "ENDING"
-export type PlayerState = "LOBBY" | "ALIVE" | "GHOST" | "SPECTATOR"
+export type PlayerState = "LOBBY" | "ALIVE" | "DEAD" | "SPECTATOR"
 
 export type Verdict =
 	"OK"
@@ -64,7 +64,7 @@ function TransformRules.evaluate(request: Request): Verdict
 
 	--[[
 		AN ALLOWLIST, NEVER A DENYLIST. `PlayerState ~= "SPECTATOR"` would read identically today and
-		would admit LOBBY and GHOST — and C15 makes GHOST real, at which point a dead player transforms.
+		would admit LOBBY and DEAD, at which point a dead player transforms.
 		`PlayerState` has four values and exactly one of them may act.
 
 		This is C04's carried-over warning from C01, and Step 7.2 is where the test proves all four.

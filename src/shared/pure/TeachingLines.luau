@@ -23,26 +23,18 @@
 	one sentence at a time, which is the specific way this failure mode actually happens.
 ]]
 
-export type TeachingCueId =
-	"CUE_FIRST_SALT"
-	| "CUE_FIRST_GHOST_DEATH"
-	| "CUE_FIRST_TRANSFORM_SEEN"
-	| "CUE_FIRST_TWO_PERSON"
+export type TeachingCueId = "CUE_FIRST_SALT" | "CUE_FIRST_TRANSFORM_SEEN"
 
 local TeachingLines = {}
 
 local COPY: { [string]: string } = {
 	-- §10, verbatim: "Do not assume players know salt stops an aswang."
 	CUE_FIRST_SALT = "Salt burns the aswang — throw it to reveal and stun.",
-	-- §4.7: a ghost can still contribute. Without this, dying reads as the round being over for you,
-	-- and a player who thinks they are done alt-tabs instead of helping.
-	CUE_FIRST_GHOST_DEATH = "You can still help — haunt the tasks your friends are working on.",
 	-- THE TELL, and the one line here that must not say who. "That" is doing load-bearing work:
 	-- MonsterTransformed is public by design and names the transformed character to every client, but
 	-- this line is shown to a player who is ALREADY WATCHING it happen. It teaches what they are
 	-- seeing; it must never become a sentence that reports a transform they missed.
 	CUE_FIRST_TRANSFORM_SEEN = "That is the tell. Run, or salt it.",
-	CUE_FIRST_TWO_PERSON = "This one needs two. Wait for someone.",
 }
 
 --[[

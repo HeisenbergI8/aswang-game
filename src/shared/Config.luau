@@ -18,19 +18,6 @@ local Config = {
 		MaxPlayers = 8,
 
 		--[[
-			§4.8: "Aswang wins when living survivors ≤ 2". THE NUMBER IS NOT THE WHOLE RULE.
-
-			Read literally against MinPlayers = 3, this fires on tick one of every minimum-size round:
-			three players is one Aswang and two survivors, and two is already ≤ 2. `pure/WinConditions`
-			(Phase 5) clamps the effective threshold by how many survivors were DEALT IN, which is what
-			makes the rule mean "two thirds of them are dead" instead of "the round is small".
-
-			So this knob is the ceiling on the threshold, not the threshold itself. Tune it at M12
-			against 6–8 player rounds, which is the size it actually governs.
-		]]
-		AswangWinSurvivorThreshold = 2,
-
-		--[[
 			The floor between one player-triggered respawn and the next.
 
 			`Humanoid.Died` is a state-machine trigger that ANY client can fire at will — the stock
@@ -107,176 +94,6 @@ local Config = {
 		TransformParticleRate = 12,
 	},
 
-	Tasks = {
-		TotalRequired = 5, -- how many must be completed to open the gate
-		PoolSize = 12, -- how many possible spawn points exist on the map
-		HoldTime = 8,
-
-		--[[
-			THE TIMING TASK (§4.4, C09). Three successful stops in the green zone, and a miss puts you
-			back to zero.
-
-			`TimingHitsRequired` was called `TimingAttempts` until C09 and the rename is the honest
-			half of a decision, not tidying. §4.4 says "3 attempts" against a "~10s" duration; three
-			REQUIRED HITS at a 1.8s sweep is roughly ten seconds, and three ALLOWED MISSES is roughly
-			two. The row's own duration column picks the reading, and a knob named for the wrong one
-			is a knob M12 tunes in the wrong direction.
-
-			A MISS RESETS PROGRESS AND THAT DOES NOT CONTRADICT §4.4's ANTI-FRUSTRATION RULE. That
-			rule ("progress belongs to the world") is about ABSENCE — a survivor who dies at 90% leaves
-			90% behind, and `TaskProgress.tick` freezes rather than decays for exactly that reason. A
-			miss is an ACTION, taken by a present player, and the whole of what makes the bar a skill
-			moment is that it can be failed. The task never becomes unwinnable: the next stop is
-			always available.
-		]]
-		TimingHitsRequired = 3,
-
-		--[[
-			The bar's sweep, its green zone, and the allowance for the trip the keypress makes.
-
-			`TimingGreenCenter` and `TimingGreenHalfWidth` are in BAR UNITS (0..1 across the visible
-			track), not seconds, because that is what a player is aiming at. The centre is deliberately
-			0.5 — a zone anywhere else makes one sweep direction easier than the other, and the bar
-			passes every position twice.
-
-			`TimingGraceSeconds` IS THE LATENCY ALLOWANCE AND IT IS THE ONLY HONEST PLACE TO PUT ONE.
-			The server decides the hit from its own clock at the instant the request lands, so a
-			player on a 90 ms connection is judged ~90 ms after they pressed. The alternatives are both
-			worse: trusting a client-supplied timestamp hands the task away outright, and no allowance
-			at all makes the task a ping test. `tests/config.test.luau` pins the grace SMALLER than the
-			zone it widens, so it stays an allowance rather than becoming the mechanic.
-		]]
-		TimingBarPeriod = 1.8,
-		TimingGreenCenter = 0.5,
-		TimingGreenHalfWidth = 0.1,
-		TimingGraceSeconds = 0.05,
-
-		--[[
-			THE FETCH TASK (§4.4, C09). `FetchTime` is the budget for the WHOLE errand — walk to the
-			source, carry the item back — and no line of code reads it, which is why this comment
-			exists. It is the number M12 tunes when the errand feels long, and what it actually tunes
-			is the distance between a source anchor and its task point in the map. C17 owns that
-			distance.
-
-			`FetchDeliverTime` is the part the server can time: how long a carrier stands at the
-			destination once they have arrived. It is short on purpose — the cost of a fetch is the
-			TRAVEL, which is what §4.4's "forces travel across the map — creates isolation" is buying.
-			A long deliver hold would just be a Hold task with extra steps.
-		]]
-		FetchTime = 25,
-		FetchDeliverTime = 3,
-
-		--[[
-			THE TWO-PERSON TASK (§4.4, C10) — and per Amendment A2, the Aswang is a full participant.
-
-			`TwoPersonParticipants` is a COUNT OF FULL CONTRIBUTORS, and `FullContributionWeight` is
-			what "full" means, measured against what `server/pure/TaskWeight.luau` returns. Deriving
-			the count from the weights is the entire design: an ALIVE survivor and an ALIVE Aswang both
-			weigh 1, so a survivor-plus-Aswang pair satisfies the requirement and the task completes
-			normally — not because a rule says so, but because there is nowhere for a rule to say
-			otherwise. See A2's own words: "C10's participant count must be derived from the same
-			weights, so that it inherits the property instead of restating it."
-
-			It also settles C15 in advance without a second decision: a ghost weighs
-			`Ghost.TaskContributionMult` (0.25), so two ghosts do not open a two-person task. §4.4 says
-			"2 survivors present", and §4.7 says ghosts "still matter", not that they substitute.
-		]]
-		TwoPersonTime = 12,
-		TwoPersonParticipants = 2,
-		FullContributionWeight = 1,
-
-		--[[
-			How close a survivor must get to the open escape gate to win the round (§4.8, C11).
-
-			IT MUST NOT EXCEED `Monster.KillRange`, and `tests/config.test.luau` pins that. The finale
-			§4.8 is describing is a survivor running for a gate with the Aswang between them and it; if
-			the gate could be triggered from further away than the Aswang can reach, camping it would
-			stop working and the last thirty seconds of every round would lose its only tension. The
-			relation is a design constraint, not a safety margin — tune the gate down or the kill range
-			up, never past each other.
-		]]
-		GateRangeStuds = 6,
-
-		--[[
-			The minimum distance between two SELECTED task points (§4.4, "spread"). C07's draw honours it
-			when the pool carries positions and ignores it when it does not.
-
-			It must exceed Monster.KillRange or the spread does nothing that matters: two task points
-			closer together than the Aswang's reach are one ambush spot, and §4.4's whole purpose is to
-			stop players (and the monster) memorising a route. tests/config.test.luau pins that.
-		]]
-		MinSpacingStuds = 20,
-
-		--[[
-			How close a player must be to a selected task point for the server to count them present.
-
-			IT SHOULD STAY UNDER HALF `MinSpacingStuds`, and the reason is worth stating accurately
-			because an earlier version of this comment overstated it.
-
-			`RequestTaskProgress` takes no arguments: the server decides which task point the player is
-			at from their own character's position. Keeping this under half the spacing means two
-			selected points are normally never in range at once, so "which one" has an obvious answer.
-
-			**THE DRAW DOES NOT GUARANTEE THE SPACING** — that claim used to sit here and it was false.
-			`MinSpacingStuds` is a request to `pure/TaskSelection.select`, whose fallback pass drops
-			spacing entirely rather than return a round with too few tasks. An audit measured twelve
-			points in one 30x30 room: 2000 of 2000 draws violated it. So this relation is defence in
-			depth, not an invariant. What actually makes the resolution safe is `taskPointAt` picking
-			the NEAREST INCOMPLETE point in range, and TaskService warning loudly when the draw reports
-			the fallback fired.
-
-			It is also the distance at which a player is safe to stand still, which is the Aswang's
-			whole opportunity (§4.4, "forces you to stand still and vulnerable"). Tuning it up makes
-			tasks safer; that is an M12 conversation, not a correctness one.
-		]]
-		PresenceRangeStuds = 9,
-
-		--[[
-			How long one presence heartbeat stays valid. A player holding continuously must never fall
-			out of the window between two heartbeats, so this has to exceed `HeartbeatInterval` with room
-			to spare — the interval is a client-side timer, on a phone, over the same connection that is
-			already carrying a snapshot twice a second.
-
-			It is short deliberately. It is the window in which a player who has walked away still
-			counts, and Step 3.3 closes most of that hole a second way by re-measuring distance on every
-			server tick rather than trusting the stamp.
-		]]
-		PresenceGraceSeconds = 0.75,
-
-		-- How often a HOLDING client reports presence. Its reciprocal must stay under
-		-- AntiCheat.Budgets.RequestTaskProgress.RefillPerSecond, or an honest client rate-limits itself
-		-- for doing exactly what the game asked of it — the failure that budget's own comment warns
-		-- about. 4/s against a refill of 6/s leaves headroom for a retry after a dropped packet.
-		HeartbeatInterval = 0.25,
-
-		--[[
-			THE TASK MARKER (C08's affordance, rendered client-side).
-
-			A ProximityPrompt used to do this and could not: freeing the `E` key required
-			`KeyboardKeyCode = None`, and Roblox's CoreScript refuses to render a prompt without a
-			keycode. TaskController draws these instead, off the `ActiveTaskPoint` /
-			`CompletedTaskPoint` tags. See the note where `attachPrompt` used to live.
-
-			`MarkerVisibleStuds` IS DELIBERATELY MUCH LARGER THAN `PresenceRangeStuds`, and the two
-			answer different questions. Presence range (9) is how close you must be for the server to
-			count you. Marker range is how far away you can SEE that a task exists — a player who can
-			only find a task by standing on it cannot plan a route, which is the failure a manual
-			playtest hit: three rounds, 68 refusals, two tasks finished.
-
-			Showing the real five to everyone is not a leak and is not new. `server/pure/TaskListView`
-			records that `ActiveTaskPoint` already replicates and that C12 is "an information-channel
-			lie… NOT a secret". The Aswang's FAKE LIST is unaffected: it lies about which points it is
-			told to visit, never about what the world looks like.
-
-			RGB TRIPLES, NEVER Color3 — same reason as Monster's palette. Lune has no Roblox datatypes
-			and `tests/config.test.luau` requires this file.
-		]]
-		MarkerVisibleStuds = 220,
-		MarkerHeightStuds = 5,
-		MarkerActiveRgb = { 255, 214, 92 },
-		MarkerCompleteRgb = { 96, 220, 120 },
-	},
-
 	Salt = {
 		SpawnCount = 4,
 		StunDuration = 4,
@@ -287,15 +104,18 @@ local Config = {
 		--[[
 			How close a player must be to a pouch for the server to hand it over (C13).
 
-			THERE IS NO PICKUP REMOTE, and this number is why. `RequestTaskProgress` established the
-			shape: the server resolves what you are standing at from your own character's position, and
-			the client names nothing. A pickup that took an argument would be a free "give me salt"
+			THERE IS NO PICKUP REMOTE, and this number is why. The shape is the rule: the server
+			resolves what you are standing at from your own character's position, and the client names
+			nothing. A pickup that took an argument would be a free "give me salt"
 			handler needing its own budget, its own validation and its own verdict union; a proximity
 			tick needs none of those and cannot be spammed, because there is nothing to spam.
 
-			Deliberately smaller than `Tasks.PresenceRangeStuds` (9). Presence is a thing you do on
-			purpose and should tolerate standing near; a pickup is a thing that happens TO you as you
-			walk past, and one that fires from nine studs away picks pouches up through walls.
+			DELIBERATELY SMALL, and V01 removed the number it used to be measured against — the task
+			system's nine-stud presence range. Presence was a thing you did on purpose and could
+			tolerate standing near; a pickup is a thing that happens TO you as you walk past, and one
+			that fires from nine studs away picks pouches up through walls. **V03 owes this a new
+			right-hand side**: the container search range is what it must sit under once that lands,
+			and until then nothing in `tests/config.test.luau` pins it at all.
 		]]
 		PickupRangeStuds = 6,
 
@@ -315,8 +135,8 @@ local Config = {
 
 		--[[
 			How many `SaltSpawn` points the map is expected to carry, against which `SpawnCount` pouches
-			are placed. The analogue of `Tasks.PoolSize`, and it feeds the SAME verdict module —
-			`server/pure/TaskPool.evaluate` — rather than a second copy of it.
+			are placed. It feeds `server/pure/SearchPool.evaluate` — the one verdict module every
+			tag-driven pool in this game shares, rather than a second copy of it.
 
 			It must be at least `SpawnCount` or the round cannot place its pouches; the test pins that.
 			C17 owns the actual count in the map.
@@ -324,45 +144,10 @@ local Config = {
 		PouchPoolSize = 6,
 
 		-- The pouch, and the reveal glow. RGB TRIPLES, NEVER Color3 — same reason as Monster's palette
-		-- and Tasks' markers. `RevealGlow*` is a Highlight's two colours.
+		-- as Monster's palette. `RevealGlow*` is a Highlight's two colours.
 		PouchRgb = { 240, 238, 225 },
 		RevealGlowFillRgb = { 255, 250, 235 },
 		RevealGlowOutlineRgb = { 190, 235, 255 },
-	},
-
-	Ghost = {
-		TaskContributionMult = 0.25, -- ghosts progress tasks at 25% speed
-		SpooksPerRound = 1,
-		FlySpeed = 24,
-
-		--[[
-			How often the server tells each ghost who the other ghosts are (C15).
-
-			It must not be FASTER than `Round.SnapshotInterval`. A ghost already receives a snapshot
-			twice a second on the same connection, and §5's mobile budget counts sends per player per
-			tick — a roster arriving faster than the HUD does is a cost with nothing behind it, because
-			the roster only changes when somebody dies. `tests/config.test.luau` pins the relation.
-		]]
-		RosterInterval = 1,
-
-		--[[
-			The spook (§4.7, C16). `SpookRangeStuds` is how far from the ghost the server looks for
-			something to flicker; `SpookDuration` is how long the flicker lasts.
-
-			IT CARRIES NO INFORMATION AND THAT IS A CONSTRAINT ON THESE TWO NUMBERS, not a description
-			of them. A range small enough to pinpoint the ghost's position would tell a living player
-			where a dead one is standing, and a dead player standing beside the Aswang is the leak
-			§4.7's last bullet is about. Thirty studs is comfortably larger than `Monster.KillRange` (8)
-			and than `Tasks.PresenceRangeStuds` (9), so "a light flickered near me" narrows nothing.
-		]]
-		SpookRangeStuds = 30,
-		SpookDuration = 2,
-
-		-- How far behind its own body a ghost's camera sits (C15). Presentation, and client-side only —
-		-- the ghost's body exists on nobody else's machine, so this number is visible to exactly one
-		-- player and can never leak anything. It is here because it is a number somebody will want to
-		-- change after the first time they fly.
-		CameraDistance = 12,
 	},
 
 	--[[
@@ -383,12 +168,15 @@ local Config = {
 			  · It MUST exceed `Monster.KillRange` (8). The moment §4.5 exists for is the one where
 			    something is close enough to kill you and you have no time to type. A range that
 			    cannot name the thing standing on top of you has no reason to exist.
-			  · It MUST stay far below `Tasks.MarkerVisibleStuds` (220). This is the half that
-			    matters for §6.2. The phrase resolves its target from the sender's own position, so a
-			    large range turns it into a map-wide proximity radar the sender can poll — and the
-			    player with the most to gain from "who is near me, through walls" is the Aswang
-			    hunting. Line of sight is the primary defence (see QuickChatService); this is the
-			    second.
+			  · It MUST stay far below map scale. This is the half that matters for §6.2. The phrase
+			    resolves its target from the sender's own position, so a large range turns it into a
+			    map-wide proximity radar the sender can poll — and the player with the most to gain
+			    from "who is near me, through walls" is the Aswang hunting. Line of sight is the
+			    primary defence (see QuickChatService); this is the second.
+
+			    **V01 REMOVED THE UPPER BOUND'S OTHER OPERAND** — it used to be pinned under the task
+			    system's 220-stud marker range, and `tests/config.test.luau` enforced it. Nothing
+			    pins it now. V03 owes this a new right-hand side.
 		]]
 		AccuseRangeStuds = 40,
 
@@ -523,7 +311,7 @@ local Config = {
 		NOT_FOR_SALE until C37 supplies a real product id. C37 depends on C34 and not the reverse, so
 		the alternative was a purchase wired to gamepass id 0, which succeeds silently for everybody.
 
-		`Rgb` is a triple, matching how `Config.Monster` and `Config.Tasks` store every colour, so a
+		`Rgb` is a triple, matching how `Config.Monster` stores every colour, so a
 		value stays data rather than a constructed Color3.
 	]]
 	Cosmetics = {
@@ -667,6 +455,12 @@ local Config = {
 		Enabled = true,
 		Duration = 90,
 		TasksToComplete = 2,
+		-- V01. Was `Config.Tasks.PresenceRangeStuds` / `HoldTime`, which the round's task system owned
+		-- until V01 deleted it. The trial kept the VALUES because its own header's argument is about
+		-- teaching a consistent hold — and from V03 the thing it must stay consistent with is the
+		-- container search, so revisit both when `Config.Search` lands.
+		PresenceRangeStuds = 9,
+		HoldTime = 8,
 		ScriptedChaseAt = 55, -- seconds in: the Aswang reveals itself
 		OfferBelowPlayerCount = 3, -- == Round.MinPlayers
 
@@ -949,7 +743,6 @@ local Config = {
 			CUE_FOOTSTEP = "rbxassetid://132221529613537",
 			CUE_TRANSFORM = "rbxassetid://9125474505",
 			CUE_HEARTBEAT = "rbxassetid://139459003161851",
-			CUE_GATE_OPEN = "rbxassetid://133202590810335",
 			CUE_SUNRISE = "rbxassetid://4501062448",
 		},
 
@@ -1003,8 +796,6 @@ local Config = {
 		HeartbeatVolume = 0.7,
 		HeartbeatRange = 28,
 
-		GateVolume = 0.8,
-
 		-- Fired once per round when `SkyCycle.progressFor` crosses this. Before 1.0 deliberately: the
 		-- sound should land while the sky is still moving, not as a stamp on the reveal.
 		SunriseVolume = 0.6,
@@ -1040,33 +831,11 @@ local Config = {
 		-- The test pins BOTH directions, because a budget for a remote that no longer exists is a
 		-- rename nobody noticed and a remote with no budget is refused outright (see UnknownRemote).
 		Budgets = {
-			-- A presence heartbeat while standing at a task point. Must out-pace the snapshot tick or
-			-- a player holding a task is throttled while doing exactly what the game asked of them.
-			RequestTaskProgress = { Capacity = 12, RefillPerSecond = 6 },
-			--[[
-				A deliberate keypress at a moving bar (C09). Looser than legitimate play, as this
-				table's header requires: an honest player fires once per sweep — about 0.55/s at a
-				1.8s period — against a sustained 1/s, and the burst covers a player mashing at the
-				zone through one sweep plus a reconnect retry.
-
-				It is deliberately far tighter than RequestTaskProgress next door, because the shapes
-				are opposite. A presence heartbeat is CONTINUOUS and idempotent; a stop is DISCRETE and
-				changes state every time it lands. Spamming it is the closest thing C09 has to an
-				exploit — enough stops per sweep and one of them is inside the zone by arithmetic
-				rather than by skill — so the limiter is the second line here and the first is that a
-				miss resets the hit count.
-			]]
-			RequestTimingStop = { Capacity = 5, RefillPerSecond = 1 },
 			-- Deliberate, rare acts. Capacity covers a double-tap and a reconnect retry; nothing more.
 			RequestTransform = { Capacity = 3, RefillPerSecond = 0.2 },
 			RequestKill = { Capacity = 3, RefillPerSecond = 0.25 },
 			RequestThrowSalt = { Capacity = 3, RefillPerSecond = 0.2 },
 			RequestQuickChat = { Capacity = 4, RefillPerSecond = 0.5 },
-			-- A ghost reports its position on a fixed client tick, so the sustained rate is what matters
-			-- and the burst only has to cover a hitch. Generous on purpose: a throttled report degrades
-			-- into a ghost whose contribution silently stops, which reads as a broken feature.
-			ReportGhostPosition = { Capacity = 10, RefillPerSecond = 5 },
-			RequestGhostSpook = { Capacity = 2, RefillPerSecond = 0.05 },
 			RequestEquipCosmetic = { Capacity = 5, RefillPerSecond = 0.5 },
 			--[[
 				C34. Priced like the equip next door rather than tighter, even though it SPENDS: the
@@ -1088,7 +857,7 @@ local Config = {
 			RequestClaimGroupReward = { Capacity = 2, RefillPerSecond = 0.05 },
 			--[[
 				Both trial remotes are BUTTON PRESSES — one per session, at most, from an honest
-				client. Priced like `RequestGhostSpook` next door rather than like a heartbeat.
+				client. Priced like a deliberate, rare act rather than like a heartbeat.
 
 				`RequestStartTrial` is the more interesting of the two: it is the only remote in this
 				game whose handler SPAWNS AN NPC AND TELEPORTS A CHARACTER, so an unbudgeted one is a

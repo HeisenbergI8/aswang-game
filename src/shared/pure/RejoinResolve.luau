@@ -10,16 +10,16 @@
 	and be an invulnerable observer for the rest of the round. Free, repeatable, and a hard counter to
 	the entire monster.
 
-	THE RULE SHIPPED HERE IS "STAY AS YOU WERE", NOT "COME BACK A GHOST".
-	----------------------------------------------------------------------
-	BUILD-PLAN's C15 prescribes resolving a returning player to GHOST. That closes the exploit but
-	still pays the quitter: they land with the full ghost feature set — ghost chat, the spook, 25%
-	contribution — having never been caught. The rule here is stricter and simpler. A disconnect during
+	THE RULE SHIPPED HERE IS "STAY AS YOU WERE", NOT "COME BACK DEAD".
+	--------------------------------------------------------------
+	The alternative was to resolve every returning player to the dead state. That closes the exploit
+	but still pays the quitter: they land in the dead channel, watching, having never been caught. The
+	rule here is stricter and simpler. A disconnect during
 	a live round changes NOTHING about your state. Your body stays in the world as a husk that the
 	Aswang can kill. You come back to whatever is true when you come back:
 
 	  · husk untouched  → you were ALIVE, you are ALIVE, you resume the round
-	  · husk killed     → you were ALIVE, you died while away, you are a GHOST
+	  · husk killed     → you were ALIVE, you died while away, you are DEAD
 	  · never dealt in  → you genuinely just arrived, SPECTATOR until the next draw
 
 	Quitting therefore gains nothing and costs nothing, which is the only version where the DECISION to
@@ -40,7 +40,7 @@
 ]]
 
 export type RoundPhase = "IDLE" | "INTERMISSION" | "STARTING" | "ACTIVE" | "ENDING"
-export type PlayerState = "LOBBY" | "ALIVE" | "GHOST" | "SPECTATOR"
+export type PlayerState = "LOBBY" | "ALIVE" | "DEAD" | "SPECTATOR"
 
 export type Request = {
 	Phase: RoundPhase,

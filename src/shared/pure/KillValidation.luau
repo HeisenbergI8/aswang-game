@@ -36,7 +36,7 @@
 ]]
 
 export type RoundPhase = "IDLE" | "INTERMISSION" | "STARTING" | "ACTIVE" | "ENDING"
-export type PlayerState = "LOBBY" | "ALIVE" | "GHOST" | "SPECTATOR"
+export type PlayerState = "LOBBY" | "ALIVE" | "DEAD" | "SPECTATOR"
 
 -- A position, as plain numbers. See the Vector3 note above.
 export type Vec3 = { X: number, Y: number, Z: number }
@@ -129,7 +129,7 @@ function KillValidation.evaluate(request: Request): Verdict
 
 	-- AN ALLOWLIST, on both sides, never `~= "SPECTATOR"`. See pure/PlayerBody.luau: PlayerState has
 	-- four values, exactly one of them may kill and exactly one of them may be killed, and C15 makes
-	-- GHOST real. A denylist here is the C01 bug wearing a different hat.
+	-- DEAD real. A denylist here is the C01 bug wearing a different hat.
 	if request.KillerState ~= "ALIVE" then
 		return "KILLER_NOT_ALIVE"
 	end

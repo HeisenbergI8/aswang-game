@@ -2,7 +2,7 @@
 --[[
 	UIController — the HUD (C18, milestone M7).
 
-	Sunrise timer, task bar, gate state, salt indicator, contextual prompts, the Aswang's action
+	Sunrise timer, salt indicator, contextual prompts, the Aswang's action
 	buttons, and the end screen with the reveal. It replaces the C13-C16 placeholder wholesale, as that
 	placeholder's own header asked to be replaced.
 
@@ -16,7 +16,9 @@
 
 	═══ THE ALIVE COUNT IS NOT HERE, AND THAT IS THE SPEC, NOT AN OMISSION ═══════
 
-	`BUILD-PLAN.md` §C18 lists "sunrise timer, global task bar, alive count — all from RoundSnapshot".
+	`BUILD-PLAN.md` §C18 listed "sunrise timer, global task bar, alive count — all from RoundSnapshot".
+	V01 removed the task bar with the task system, and Amendment A3 removed the alive count long before
+	that; the sunrise timer is what is left, and V15 rebuilds this HUD around the v2 loop.
 	Three of those exist. The fourth is forbidden by **Amendment A3** (MVP-SPEC v1.3), which outranks
 	the build plan and names this chunk directly:
 
@@ -61,15 +63,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
-
---[[
-	C27 requires `TaskController` for one question — `IsTimingBarLive` — and the arrow points this way
-	on purpose. `TaskController` requires nothing from this file, so it cannot point back; the STOP
-	button needs to know whether there is a bar to stop, and the alternative (TaskController reaching
-	into the HUD to show a button) would put a piece of the pad's layout in a file that owns the
-	heartbeat.
-]]
-local TaskController = require(script.Parent.TaskController)
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
@@ -178,19 +171,11 @@ local LAYOUT = {
 	    it happens "informed by what GATE 1 told you". So the palette below is unchanged from C18, and
 	    what is added is only edge definition and legibility — the parts that help ANY theme read.
 
-	WHY THESE DURATIONS. `TaskBar` matches `Config.Round.SnapshotInterval` exactly: the fill is then
-	always still arriving as the next snapshot lands, so the bar reads as continuous motion rather than
-	as two steps a second. It is read from Config rather than duplicated, because if the snapshot rate
-	ever changes a hardcoded 0.5 here would silently start stuttering or overshooting.
-
-	The rest are shorter than one snapshot so they finish before the value they describe can change
+	WHY THESE DURATIONS. They are shorter than one snapshot so they finish before the value they describe can change
 	again — an animation still running when its own input moves is how a HUD ends up showing a number
 	that was true a second ago.
 ]]
 local MOTION = {
-	-- Matches Config.Round.SnapshotInterval; see above. Not a literal, so not a config-ok case.
-	TaskBar = Config.Round.SnapshotInterval,
-
 	Colour = 0.25, -- config-ok: HUD motion, not balance
 	Pulse = 0.18, -- config-ok: HUD motion
 	PulseScale = 1.35, -- config-ok: how far a changed number overshoots before settling
@@ -206,7 +191,7 @@ local MOTION = {
 
 --[[
 	The palette, and it is RGB TRIPLES for the same reason Config's are: `Config.Monster`,
-	`Config.Tasks` and `Config.Salt` all store colours as `{ r, g, b }` rather than as `Color3`, so
+	`Config.Monster` and `Config.Salt` store colours as `{ r, g, b }` rather than as `Color3`, so
 	that a value is data rather than a constructed object.
 
 	These are not in Config because they are not shared with the server and nothing balances against
@@ -220,16 +205,15 @@ local COLOUR = {
 	Urgent = Color3.fromRGB(255, 96, 96), -- config-ok: HUD palette
 	Aswang = Color3.fromRGB(255, 85, 85), -- config-ok: HUD palette
 	Survivor = Color3.fromRGB(136, 221, 255), -- config-ok: HUD palette
-	Ghost = Color3.fromRGB(170, 170, 255), -- config-ok: HUD palette
+	Dead = Color3.fromRGB(170, 170, 255), -- config-ok: HUD palette
 	Progress = Color3.fromRGB(96, 220, 120), -- config-ok: HUD palette
-	GateOpen = Color3.fromRGB(255, 214, 92), -- config-ok: HUD palette
 	Panel = Color3.fromRGB(0, 0, 0), -- config-ok: HUD palette
 
 	--[[
 		C32/C33/C34's two, and they are two rather than reused because the checklist rule is that a
-		colour carries ONE meaning on a screen. `Progress` green is task progress and `GateOpen` gold
-		is the gate — both appear during a round, and borrowing either for a level bar would mean the
-		same colour saying two things to a player who has just spent seven minutes learning the first.
+		colour carries ONE meaning on a screen. `Progress` green is in-round progress, so borrowing it
+		for a level bar would mean the same colour saying two things to a player who has just spent
+		seven minutes learning the first.
 
 		They only ever appear in the lobby, so they never share a screen with the round palette.
 	]]
@@ -265,31 +249,7 @@ local COLOUR = {
 export type ActionHandlers = {
 	Transform: () -> (),
 	Kill: () -> (),
-	--[[
-		The hold, as a press and a release — the one verb on the pad that is not a tap, and the one
-		this whole chunk exists for. A task is what all eight players do all round, and until C27 a
-		phone could not do one.
-
-		A boolean rather than two handlers because the two edges are one verb: whatever is registered
-		here must be able to see a release that follows its own press, and a pair of independent
-		callbacks is how a hold ends up stuck true on the client that has no key to press to clear it.
-	]]
-	Act: (pressed: boolean) -> (),
 	Throw: () -> (),
-	--[[
-		The timing stop, kept a SEPARATE verb rather than routed through `Act` — and the alternative is
-		worth recording because it looks tidier and does not work.
-
-		Routing "a press at a live bar is a stop" needs the client to know a bar is live, and a bar is
-		only live WHILE THE HOLD HEARTBEAT IS RUNNING (`TaskService.publishBar` sends to a player whose
-		presence is current). A player waiting for the green zone taps roughly once per
-		`Tasks.TimingBarPeriod` — 1.8s — which is well past `Tasks.PresenceGraceSeconds`, so the second
-		tap would arrive at a bar that had already gone stale and be read as a fresh hold. The task
-		would become unwinnable on a phone, silently, and only for the players who cannot report it.
-
-		So the pad mirrors the desktop exactly: hold ACT to keep the bar alive, tap STOP to stop it.
-	]]
-	TimingStop: () -> (),
 }
 
 --[[
@@ -354,16 +314,11 @@ local saltSeen = 0
 	render after a join sets everything without animating — a HUD that plays four transitions the
 	instant it appears looks broken, not alive.
 ]]
-local lastRatio = -1
-local lastCompleted = -1
 local lastUrgent: boolean? = nil
-local lastGateOpen: boolean? = nil
 
 local hud: ScreenGui? = nil
 local timerLabel: TextLabel? = nil
 local phaseLabel: TextLabel? = nil
-local barFill: Frame? = nil
-local barLabel: TextLabel? = nil
 local statusLabel: TextLabel? = nil
 local promptLabel: TextLabel? = nil
 local actionFrame: Frame? = nil
@@ -636,28 +591,13 @@ local function buildTouchPad(gui: ScreenGui)
 
 	local transform = makeTouchButton(aswangColumn, "Transform", "SHIFT", 1, COLOUR.Aswang)
 	local kill = makeTouchButton(aswangColumn, "Kill", "KILL", 2, COLOUR.Aswang)
-	--[[
-		STOP shares the left column with the Aswang's two verbs and that is not a leak, because the
-		column has no identity of its own — it is a place, and `render` decides what is in it. A
-		survivor standing at a timing task sees one button there; an Aswang sees two, or three at a
-		timing task. Nobody else sees any of it: the whole pad is in this client's PlayerGui.
-
-		Bottom of its column, because it is the only button in it that gets tapped repeatedly and
-		under time pressure.
-	]]
-	local stop = makeTouchButton(aswangColumn, "Stop", "STOP", 3, COLOUR.GateOpen) -- config-ok: layout order within a column
-
 	local say = makeTouchButton(mainColumn, "Say", "SAY", 1, COLOUR.Text)
 	local salt = makeTouchButton(mainColumn, "Salt", "SALT", 2, COLOUR.Progress)
-	local act = makeTouchButton(mainColumn, "Act", "ACT", 3, COLOUR.Text) -- config-ok: layout order within a column
-
 	touchButtons = {
 		Transform = transform,
 		Kill = kill,
-		Stop = stop,
 		Say = say,
 		Salt = salt,
-		Act = act,
 	}
 	touchPad = pad
 
@@ -693,69 +633,6 @@ local function buildTouchPad(gui: ScreenGui)
 		end
 	end)
 
-	stop.Activated:Connect(function()
-		local handlers = actionHandlers
-
-		if handlers ~= nil then
-			handlers.TimingStop()
-		end
-	end)
-
-	--[[
-		THE HOLD IS THE ONE VERB WITH TWO EDGES, and the release edge is the one that matters.
-
-		A hold left stuck `true` does not complete a task — the server re-measures distance every tick
-		— it burns `RequestTaskProgress` tokens for as long as it lasts, and a throttled player looks
-		to themselves like a broken game. `InputEnded` fires when the touch ends OR when it slides off
-		the button, so a thumb that drags away releases; `UserInputService.InputEnded` at the bottom
-		of this function is the backstop for the case Roblox does not deliver either.
-	]]
-	--[[
-		THE INPUT THAT STARTED THE HOLD IS REMEMBERED, and that is not bookkeeping — it is the whole
-		correctness of the release.
-
-		A phone player has TWO thumbs on the screen: the left one lives on the movement stick and
-		lifts constantly. The backstop at the bottom of this function listens for touch endings
-		globally, so without this identity check every step a player took while holding a task would
-		end the hold — a bug that cannot happen on a desktop, cannot be reproduced in Studio with a
-		mouse, and would present to a player as "the task bar keeps resetting".
-	]]
-	local actInput: InputObject? = nil
-
-	local function beginAct(input: InputObject)
-		if
-			input.UserInputType ~= Enum.UserInputType.Touch
-			and input.UserInputType ~= Enum.UserInputType.MouseButton1
-		then
-			return
-		end
-
-		actInput = input
-
-		local handlers = actionHandlers
-
-		if handlers ~= nil then
-			handlers.Act(true)
-		end
-	end
-
-	local function endAct(input: InputObject)
-		if input ~= actInput then
-			return
-		end
-
-		actInput = nil
-
-		local handlers = actionHandlers
-
-		if handlers ~= nil then
-			handlers.Act(false)
-		end
-	end
-
-	act.InputBegan:Connect(beginAct)
-	act.InputEnded:Connect(endAct)
-
 	--[[
 		THE WHEEL OPENS WHERE THE THUMB IS, NOT WHERE THE BUTTON IS.
 
@@ -787,20 +664,6 @@ local function buildTouchPad(gui: ScreenGui)
 			handlers.Commit()
 		end
 	end)
-
-	--[[
-		THE BACKSTOP, and it is not defensive programming for its own sake.
-
-		A GuiObject's `InputEnded` is not guaranteed when the input is interrupted rather than ended —
-		a phone call, the Roblox menu opening, the character dying under the thumb. Each of those
-		leaves the hold `true` forever, which is a rate limit spent for the rest of the round on a
-		device that has no key to press to clear it.
-
-		`endAct` ignores anything that is not the input the hold began with, so this fires for the
-		thumb that was on ACT and for nothing else — the left thumb walking is not a release. Both
-		paths converge on the same function precisely so they cannot disagree about that.
-	]]
-	UserInputService.InputEnded:Connect(endAct)
 end
 
 local function buildHud()
@@ -832,43 +695,6 @@ local function buildHud()
 	timerLabel = text(timerPanel, "Clock", LAYOUT.TimerSize, COLOUR.Text);
 	(timerLabel :: TextLabel).Size = UDim2.new(1, 0, 0, LAYOUT.TimerSize);
 	(timerLabel :: TextLabel).Position = UDim2.fromOffset(0, LAYOUT.LabelSize + LAYOUT.Pad / 2)
-
-	--[[
-		The global task bar, and it is a BAR rather than a number because it is the only shared goal on
-		screen. §4.4 assigns progress to the WORLD, not to a player: everyone's bar reads the same, and
-		that is the point — it is the thing survivors coordinate around and the thing the Aswang has to
-		watch climb.
-	]]
-	local barPanel = panel(gui, "TaskBar")
-	barPanel.Size =
-		UDim2.fromOffset(LAYOUT.BarWidth, LAYOUT.BarHeight + LAYOUT.LabelSize + LAYOUT.Pad)
-	barPanel.Position = UDim2.new(
-		0.5,
-		-LAYOUT.BarWidth / 2,
-		0,
-		LAYOUT.TopInset + LAYOUT.TimerSize + LAYOUT.LabelSize + LAYOUT.Pad * 2
-	)
-
-	barLabel = text(barPanel, "Count", LAYOUT.LabelSize, COLOUR.Dim);
-	(barLabel :: TextLabel).Size = UDim2.new(1, 0, 0, LAYOUT.LabelSize);
-	(barLabel :: TextLabel).Position = UDim2.fromOffset(0, LAYOUT.Pad / 2)
-
-	local barBack = Instance.new("Frame")
-	barBack.Name = "Track"
-	barBack.Size = UDim2.new(1, -LAYOUT.Pad, 0, LAYOUT.BarHeight)
-	barBack.Position = UDim2.fromOffset(LAYOUT.Pad / 2, LAYOUT.LabelSize + LAYOUT.Pad / 2)
-	barBack.BackgroundColor3 = COLOUR.Panel
-	barBack.BackgroundTransparency = LAYOUT.BarBackScrim
-	barBack.BorderSizePixel = 0
-	barBack.Parent = barPanel
-
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Size = UDim2.fromScale(0, 1)
-	fill.BackgroundColor3 = COLOUR.Progress
-	fill.BorderSizePixel = 0
-	fill.Parent = barBack
-	barFill = fill
 
 	-- Bottom left: who you are to yourself, what you are carrying, whether the gate is open.
 	local statusPanel = panel(gui, "Status")
@@ -971,7 +797,7 @@ local function showIntro(role: Types.Role)
 	label.Font = Enum.Font.GothamBold
 	label.Text = if role == Enums.Role.Aswang
 		then "YOU ARE THE ASWANG.\nDo not get seen."
-		else "You are a survivor.\nFinish five tasks and escape."
+		else "You are a survivor.\nStay alive until sunrise."
 	label.Parent = screenGui
 
 	screenGui.Parent = playerGui
@@ -992,7 +818,7 @@ local function describeResult(result: Types.RoundResult): (string, Color3)
 	elseif result == Enums.RoundResult.AswangWins then
 		return "THE ASWANG WON", COLOUR.Aswang
 	elseif result == Enums.RoundResult.Timeout then
-		return "SUNRISE — NOBODY FINISHED", COLOUR.GateOpen
+		return "SUNRISE — NOBODY FINISHED", COLOUR.Urgent
 	end
 
 	return "ROUND ABORTED", COLOUR.Dim
@@ -1590,7 +1416,7 @@ local function buildProgress()
 	coins.TextXAlignment = Enum.TextXAlignment.Right
 	coins.Text = "0"
 
-	-- The bar, built the same way the task bar is: a scrim back and a fill whose Size.X.Scale is the
+	-- The bar: a scrim back and a fill whose Size.X.Scale is the
 	-- only thing that ever moves. One instance changed per update, which is what keeps this cheap.
 	local back = Instance.new("Frame")
 	back.Name = "LevelBarBack"
@@ -1726,14 +1552,12 @@ end
 --------------------------------------------------------------------------------
 
 local function promptFor(snapshot: Types.ClientRoundSnapshot): string
-	if snapshot.YourState == Enums.PlayerState.Ghost then
-		return "WASD fly · Space up · LeftCtrl down · your chat reaches ghosts only"
+	if snapshot.YourState == Enums.PlayerState.Dead then
+		return "you are dead — watching · your chat reaches the dead only"
 	elseif snapshot.YourState == Enums.PlayerState.Spectator then
 		return "watching — you join the next round"
 	elseif snapshot.Phase ~= Enums.RoundPhase.Active then
 		return "waiting for the round to start"
-	elseif snapshot.GateOpen then
-		return "THE GATE IS OPEN — get to the plaza"
 	end
 
 	--[[
@@ -1741,16 +1565,16 @@ local function promptFor(snapshot: Types.ClientRoundSnapshot): string
 
 		The keyboard line was the only instruction in the game for three of the five verbs, and on a
 		phone it named three keys that do not exist — which is worse than saying nothing, because a
-		player who cannot find `E` concludes the task is broken rather than that the hint is.
+		player who cannot find a key concludes the game is broken rather than that the hint is.
 
 		Keyed off the pad's existence rather than off `UserInputService` again, so the sentence and
 		the buttons can never disagree about what device this is.
 	]]
 	if touchPad ~= nil then
-		return "hold ACT at a task · STOP on the bar · SALT to throw · walk over a pouch"
+		return "survive until sunrise · SALT to throw · walk over a pouch to take it"
 	end
 
-	return "E hold a task · R time it · Q throw salt · walk over a pouch to take it"
+	return "survive until sunrise · Q throw salt · walk over a pouch to take it"
 end
 
 --[[
@@ -1767,7 +1591,7 @@ end
 ]]
 local TIPS = {
 	"Salt burns the aswang. Throw it to reveal and stun.", -- config-ok: lobby copy, not balance
-	"Tasks go faster with two people standing at them.", -- config-ok: lobby copy
+	"Stay together. Alone is when it takes you.", -- config-ok: lobby copy
 	"The aswang has to transform to kill. That is your warning.", -- config-ok: lobby copy
 	"Watch who is never around when someone dies.", -- config-ok: lobby copy
 }
@@ -1874,19 +1698,10 @@ local function render(snapshot: Types.ClientRoundSnapshot)
 
 	local clock = timerLabel
 	local phase = phaseLabel
-	local fill = barFill
-	local count = barLabel
 	local status = statusLabel
 	local prompt = promptLabel
 
-	if
-		clock == nil
-		or phase == nil
-		or fill == nil
-		or count == nil
-		or status == nil
-		or prompt == nil
-	then
+	if clock == nil or phase == nil or status == nil or prompt == nil then
 		return
 	end
 
@@ -1979,55 +1794,6 @@ local function render(snapshot: Types.ClientRoundSnapshot)
 			else snapshot.Phase
 	end
 
-	-- Guarded because a map with no task points reports zero required, and dividing by it would put
-	-- `nan` on screen — which reads as a broken game rather than as a broken map.
-	local ratio = if snapshot.TasksRequired > 0
-		then snapshot.TasksCompleted / snapshot.TasksRequired
-		else 0
-
-	--[[
-		THE BAR IS THE ONE ELEMENT A PLAYER WATCHES RATHER THAN GLANCES AT, and it was the one that
-		most obviously stepped.
-
-		`SnapshotInterval` is 0.5s, so an assignment moved the fill in two visible jumps a second. A
-		task completing is the survivors' only good news in the whole round and it arrived as a
-		stutter. Tweened over exactly one snapshot interval, the fill is still travelling when the next
-		snapshot arrives and retargets it, which reads as one continuous climb.
-
-		Compared as a clamped ratio rather than by reading `fill.Size`, because a tween in flight means
-		`fill.Size` is a value somewhere in between and never equals the last target — every render
-		would find a difference and start a fresh tween from wherever the last one had reached.
-	]]
-	local clamped = math.clamp(ratio, 0, 1)
-
-	if clamped ~= lastRatio then
-		if lastRatio < 0 then
-			fill.Size = UDim2.fromScale(clamped, 1)
-		else
-			tweenTo(fill, MOTION.TaskBar, { Size = UDim2.fromScale(clamped, 1) })
-		end
-
-		lastRatio = clamped
-	end
-
-	count.Text = `TASKS {snapshot.TasksCompleted}/{snapshot.TasksRequired}`
-
-	--[[
-		AND THE COUNT POPS WHEN IT CHANGES. The bar shows the trend; this shows the event.
-
-		Overshoot-and-settle rather than a two-tween grow-then-shrink: the size is assigned at
-		`PulseScale` instantly and tweened back to rest, so one tween is allocated instead of two and
-		there is no window where a second change mid-pulse leaves the label permanently enlarged.
-	]]
-	if snapshot.TasksCompleted ~= lastCompleted then
-		if lastCompleted >= 0 then
-			count.TextSize = LAYOUT.LabelSize * MOTION.PulseScale
-			tweenTo(count, MOTION.Pulse, { TextSize = LAYOUT.LabelSize })
-		end
-
-		lastCompleted = snapshot.TasksCompleted
-	end
-
 	--[[
 		THE ROLE LINE IS THE ONE THING ON SCREEN THAT DIFFERS BETWEEN CLIENTS, and it is drawn from
 		`myRole` — this client's own, from RoleAssigned. It is deliberately NOT read from the snapshot's
@@ -2036,48 +1802,20 @@ local function render(snapshot: Types.ClientRoundSnapshot)
 	local roleColour = if myRole == Enums.Role.Aswang then COLOUR.Aswang else COLOUR.Survivor
 	local roleWord = if myRole == Enums.Role.Aswang then "ASWANG" else "SURVIVOR"
 
-	local stateColour = if snapshot.YourState == Enums.PlayerState.Ghost
-		then COLOUR.Ghost
+	local stateColour = if snapshot.YourState == Enums.PlayerState.Dead
+		then COLOUR.Dead
 		else COLOUR.Text
 
 	status.Text = string.format(
-		'<font color="#%s">%s</font>\n'
-			.. '<font color="#%s">%s</font>   salt ~%d\n'
-			.. 'gate <font color="#%s">%s</font>',
+		'<font color="#%s">%s</font>\n' .. '<font color="#%s">%s</font>   salt ~%d',
 		roleColour:ToHex(),
 		roleWord,
 		stateColour:ToHex(),
 		snapshot.YourState,
-		saltSeen,
-		if snapshot.GateOpen then COLOUR.GateOpen:ToHex() else COLOUR.Dim:ToHex(),
-		if snapshot.GateOpen then "OPEN" else "shut"
+		saltSeen
 	)
 
 	prompt.Text = promptFor(snapshot)
-
-	--[[
-		THE GATE OPENING IS THE ROUND'S TURN, and until now it announced itself by quietly swapping one
-		sentence for another between two frames — at the exact moment every survivor is looking at the
-		world rather than at the bottom of their screen.
-
-		So the prompt line flashes to the gate colour and settles back to white. Deliberately on the
-		PROMPT rather than on the status panel's `gate OPEN` word: the prompt is centre-screen and is
-		already saying the actionable thing ("get to the plaza"), whereas the status line is a reference
-		readout in the corner. The flash is there to make someone READ the sentence, so it belongs on
-		the sentence worth reading.
-
-		The closing edge is animated too. A gate that shuts is not a thing this round does — but an
-		ABORTED round resets `GateOpen`, and a flash back to white there costs nothing and is more
-		honest than a prompt stuck gate-coloured.
-	]]
-	if snapshot.GateOpen ~= lastGateOpen then
-		if lastGateOpen ~= nil then
-			prompt.TextColor3 = if snapshot.GateOpen then COLOUR.GateOpen else COLOUR.Text
-			tweenTo(prompt, MOTION.Fade, { TextColor3 = COLOUR.Text })
-		end
-
-		lastGateOpen = snapshot.GateOpen
-	end
 
 	--[[
 		The buttons follow the phase as well as the role: a transform button during INTERMISSION is an
@@ -2112,8 +1850,7 @@ local function render(snapshot: Types.ClientRoundSnapshot)
 
 		  SAY   — alive, any phase. §4.5 is how a phone player talks, and the lobby is where the
 		          accusations from the last round get made.
-		  ACT   — a live round only. A task hold outside ACTIVE is a heartbeat the server discards.
-		  SALT  — a live round only, for the same reason.
+		  SALT  — a live round only: a throw outside ACTIVE is a request the server discards.
 		  the Aswang's two — exactly as the desktop pair, including the role gate.
 
 		A hidden button collapses out of its column, so a survivor sees three and an Aswang five with
@@ -2139,18 +1876,9 @@ local function render(snapshot: Types.ClientRoundSnapshot)
 		pad.Visible = true
 
 		touchButtons.Say.Visible = true
-		touchButtons.Act.Visible = inRound
 		touchButtons.Salt.Visible = inRound
 		touchButtons.Transform.Visible = aswangVerbs
 		touchButtons.Kill.Visible = aswangVerbs
-		--[[
-			STOP EXISTS ONLY WHILE THERE IS SOMETHING TO STOP, which is while this player is holding
-			at a timing point — see `TaskController.IsTimingBarLive`. Re-evaluated on the snapshot
-			tick rather than on a timer of its own: the bar arrives four times a second while a thumb
-			is down, so a half-second of latency on the button appearing sits inside a task that
-			takes several seconds, and it costs no clock.
-		]]
-		touchButtons.Stop.Visible = inRound and TaskController.IsTimingBarLive()
 	end
 end
 
@@ -2216,9 +1944,6 @@ function UIController.Start()
 				animating over the new one's lobby. Back at their seed values, the new round's first
 				render assigns silently and only animates what actually happens next.
 			]]
-			lastRatio = -1
-			lastCompleted = -1
-			lastGateOpen = nil
 		end
 
 		if phase == Enums.RoundPhase.Intermission or phase == Enums.RoundPhase.Idle then

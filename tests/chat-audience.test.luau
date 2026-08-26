@@ -1,20 +1,20 @@
 --!strict
 --[[
-	The ghost chat wall (§4.7, C15) — all sixteen sender x recipient cells.
+	The dead-chat wall (§4.7, C15, V01) — all sixteen sender x recipient cells.
 
-	ONE CELL IS THE GAME: GHOST -> ALIVE must be false. A ghost watched their own death and usually
+	ONE CELL IS THE GAME: DEAD -> ALIVE must be false. A dead player watched their own death and usually
 	knows who did it; one sentence reaching a survivor ends the round and every round after it, because
 	"wait for someone to die" becomes the optimal survivor strategy.
 
 	The rest of the grid exists so that the one cell cannot be fixed into place while a neighbour
 	quietly opens. SPECTATOR -> ALIVE is the neighbour: a mid-round arrival who is not playing can still
-	watch a transform and say a name, and a denylist written as `~= "GHOST"` admits them while keeping
+	watch a transform and say a name, and a denylist written as `~= "DEAD"` admits them while keeping
 	the headline cell passing.
 ]]
 
-local GhostChat = require("../src/shared/pure/GhostChat")
+local ChatAudience = require("../src/shared/pure/ChatAudience")
 
-type PlayerState = GhostChat.PlayerState
+type PlayerState = ChatAudience.PlayerState
 
 local failures = 0
 local checked = 0
@@ -30,21 +30,21 @@ local function check(label: string, ok: boolean, detail: string?)
 	print(`  FAIL  {label}{if detail then ` — {detail}` else ""}`)
 end
 
-local STATES: { PlayerState } = { "LOBBY", "ALIVE", "GHOST", "SPECTATOR" }
+local STATES: { PlayerState } = { "LOBBY", "ALIVE", "DEAD", "SPECTATOR" }
 
 --------------------------------------------------------------------------------
 -- THE CELL THAT ENDS ROUNDS.
 --------------------------------------------------------------------------------
 
 check(
-	"a GHOST is never heard by an ALIVE player",
-	GhostChat.shouldDeliver("GHOST", "ALIVE") == false,
+	"a DEAD player is never heard by an ALIVE player",
+	ChatAudience.shouldDeliver("DEAD", "ALIVE") == false,
 	"this is the whole of §4.7's server-side enforcement"
 )
 
 check(
 	"a SPECTATOR is never heard by an ALIVE player",
-	GhostChat.shouldDeliver("SPECTATOR", "ALIVE") == false,
+	ChatAudience.shouldDeliver("SPECTATOR", "ALIVE") == false,
 	"a mid-round arrival can watch a transform too"
 )
 
@@ -59,10 +59,10 @@ end
 for _, sender in STATES do
 	for _, recipient in STATES do
 		-- Mirrors the module: living-side reaches everyone, everyone else reaches only their own kind.
-		-- The equality term is what keeps GHOST and SPECTATOR from forming one bloc — see the module
-		-- header for why an alt-account spectator inside the ghost channel is the exploit.
+		-- The equality term is what keeps DEAD and SPECTATOR from forming one bloc — see the module
+		-- header for why an alt-account spectator inside the dead channel is the exploit.
 		local expected = livingSide(sender) or sender == recipient
-		local got = GhostChat.shouldDeliver(sender, recipient)
+		local got = ChatAudience.shouldDeliver(sender, recipient)
 
 		check(`{sender} -> {recipient} is {expected}`, got == expected, `got {got}`)
 	end
@@ -83,7 +83,7 @@ do
 	for _, sender in STATES do
 		for _, recipient in STATES do
 			if not livingSide(sender) and livingSide(recipient) then
-				if GhostChat.shouldDeliver(sender, recipient) then
+				if ChatAudience.shouldDeliver(sender, recipient) then
 					leaks += 1
 				end
 			end
@@ -103,7 +103,7 @@ do
 
 	for _, sender in STATES do
 		for _, recipient in STATES do
-			if livingSide(sender) and not GhostChat.shouldDeliver(sender, recipient) then
+			if livingSide(sender) and not ChatAudience.shouldDeliver(sender, recipient) then
 				blocked += 1
 			end
 		end
@@ -112,25 +112,31 @@ do
 	check("a living-side sender always reaches everybody", blocked == 0, `{blocked} blocked`)
 end
 
--- Ghosts talk among themselves, or the ghost channel is not a channel.
-check("a ghost hears another ghost", GhostChat.shouldDeliver("GHOST", "GHOST") == true)
+-- The dead talk among themselves, or the dead channel is not a channel.
+check("a dead player hears another dead player", ChatAudience.shouldDeliver("DEAD", "DEAD") == true)
 
 --[[
-	AND A SPECTATOR DOES NOT HEAR A GHOST. This pair is the cell the plan refused by name and an
+	AND A SPECTATOR DOES NOT HEAR THE DEAD. This pair is the cell the plan refused by name and an
 	earlier single-wall rule delivered: a SPECTATOR is a mid-round arrival with no stake in the round,
-	so a live feed from the ghost channel is an alt account watching from inside it. `RejoinResolve`
+	so a live feed from the dead channel is an alt account watching from inside it. `RejoinResolve`
 	closes that exploit from the joining side; this closes it from the listening side.
 ]]
-check("a spectator does NOT hear a ghost", GhostChat.shouldDeliver("GHOST", "SPECTATOR") == false)
-check("a ghost does NOT hear a spectator", GhostChat.shouldDeliver("SPECTATOR", "GHOST") == false)
+check(
+	"a spectator does NOT hear the dead",
+	ChatAudience.shouldDeliver("DEAD", "SPECTATOR") == false
+)
+check(
+	"a dead player does NOT hear a spectator",
+	ChatAudience.shouldDeliver("SPECTATOR", "DEAD") == false
+)
 check(
 	"a spectator hears another spectator",
-	GhostChat.shouldDeliver("SPECTATOR", "SPECTATOR") == true
+	ChatAudience.shouldDeliver("SPECTATOR", "SPECTATOR") == true
 )
 
 -- And the living hear the living, or the general channel is broken.
-check("the living hear the living", GhostChat.shouldDeliver("ALIVE", "ALIVE") == true)
-check("a ghost hears the living", GhostChat.shouldDeliver("ALIVE", "GHOST") == true)
+check("the living hear the living", ChatAudience.shouldDeliver("ALIVE", "ALIVE") == true)
+check("a dead player hears the living", ChatAudience.shouldDeliver("ALIVE", "DEAD") == true)
 
 --------------------------------------------------------------------------------
 -- isLivingSide is an allowlist, not a denylist.
@@ -140,7 +146,7 @@ do
 	local permitted = 0
 
 	for _, state in STATES do
-		if GhostChat.isLivingSide(state) then
+		if ChatAudience.isLivingSide(state) then
 			permitted += 1
 		end
 	end
@@ -152,8 +158,8 @@ do
 	)
 end
 
-check("GHOST is not living-side", GhostChat.isLivingSide("GHOST") == false)
-check("SPECTATOR is not living-side", GhostChat.isLivingSide("SPECTATOR") == false)
+check("DEAD is not living-side", ChatAudience.isLivingSide("DEAD") == false)
+check("SPECTATOR is not living-side", ChatAudience.isLivingSide("SPECTATOR") == false)
 
 --------------------------------------------------------------------------------
 -- C25. The quick-chat wheel reuses this predicate rather than growing its own.
@@ -170,44 +176,44 @@ check("SPECTATOR is not living-side", GhostChat.isLivingSide("SPECTATOR") == fal
 	four lines fail in this file and name quick chat as the other caller, in the same run. A separate
 	quick-chat suite would fail too, but a chunk later and without saying why.
 
-	C15's ghost-chat rule and C25's are the same rule because they answer the same question — can this
+	C15's dead-chat rule and C25's are the same rule because they answer the same question — can this
 	dead player be heard by that living one — and the answer must not depend on which button was
-	pressed. A ghost whose typed message is walled but whose wheel is not has no wall at all.
+	pressed. A dead player whose typed message is walled but whose wheel is not has no wall at all.
 ]]
 
 check(
 	"C25: a living player's quick chat reaches the living",
-	GhostChat.shouldDeliver("ALIVE", "ALIVE") == true
+	ChatAudience.shouldDeliver("ALIVE", "ALIVE") == true
 )
 
 check(
-	"C25: a living player's quick chat also reaches ghosts",
-	GhostChat.shouldDeliver("ALIVE", "GHOST") == true
+	"C25: a living player's quick chat also reaches the dead",
+	ChatAudience.shouldDeliver("ALIVE", "DEAD") == true
 )
 
 check(
-	"C25: a ghost's quick chat reaches other ghosts",
-	GhostChat.shouldDeliver("GHOST", "GHOST") == true
+	"C25: a dead player's quick chat reaches other dead players",
+	ChatAudience.shouldDeliver("DEAD", "DEAD") == true
 )
 
 --[[
-	THE ONE THAT ENDS ROUNDS IF IT INVERTS. A ghost watched their own death and usually knows who did
+	THE ONE THAT ENDS ROUNDS IF IT INVERTS. A dead player watched their own death and usually knows who did
 	it; one phrase reaching a living player makes "wait for someone to die" the optimal strategy.
 	Quick chat makes that cheaper than typing, so this cell matters MORE here than it did at C15.
 ]]
 check(
-	"C25: a ghost's quick chat NEVER reaches the living",
-	GhostChat.shouldDeliver("GHOST", "ALIVE") == false
+	"C25: a dead player's quick chat NEVER reaches the living",
+	ChatAudience.shouldDeliver("DEAD", "ALIVE") == false
 )
 
 -- SPECTATOR is dead-side, so a mid-round arrival cannot relay a transform they watched.
 check(
 	"C25: a spectator's quick chat never reaches the living",
-	GhostChat.shouldDeliver("SPECTATOR", "ALIVE") == false
+	ChatAudience.shouldDeliver("SPECTATOR", "ALIVE") == false
 )
 
 if failures > 0 then
-	error(`{failures} ghost-chat assertion(s) failed`, 0)
+	error(`{failures} chat-audience assertion(s) failed`, 0)
 end
 
-print(`  PASS  ghost-chat: {checked} assertions over the full sender x recipient grid`)
+print(`  PASS  chat-audience: {checked} assertions over the full sender x recipient grid`)

@@ -31,7 +31,7 @@ local function check(label: string, ok: boolean, detail: string?)
 end
 
 local PHASES = { "IDLE", "INTERMISSION", "STARTING", "ACTIVE", "ENDING" }
-local STATES = { "LOBBY", "ALIVE", "GHOST", "SPECTATOR" }
+local STATES = { "LOBBY", "ALIVE", "DEAD", "SPECTATOR" }
 
 print("AudioCues")
 
@@ -77,9 +77,9 @@ for _, state in STATES do
 	)
 end
 
--- A ghost is in the world and can SEE the monster. Refusing them the audio would make the dead
+-- A dead player is in the world and can SEE the monster. Refusing them the audio would make the dead
 -- audibly different from the living, which is the leak `absence-is-observable` describes.
-check("ghosts hear the monster", AudioCues.isCuePermitted("CUE_HEARTBEAT", "ACTIVE", "GHOST"))
+check("dead players hear the monster", AudioCues.isCuePermitted("CUE_HEARTBEAT", "ACTIVE", "DEAD"))
 
 -- FAILS CLOSED. An id nobody assigned phases to plays nowhere, rather than everywhere.
 check("unknown cue is refused", not AudioCues.isCuePermitted("CUE_NOPE", "ACTIVE", "ALIVE"))

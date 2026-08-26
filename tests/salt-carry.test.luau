@@ -2,9 +2,9 @@
 --[[
 	The salt carry rule (§4.6, C13), over every player state and both sides of the limit.
 
-	The cell this file exists for is GHOST. `SaltCarry.evaluate` uses an allowlist of ALIVE, and the
+	The cell this file exists for is DEAD. `SaltCarry.evaluate` uses an allowlist of ALIVE, and the
 	denylist form (`~= "SPECTATOR"`) is identical in behaviour TODAY and wrong the moment C15 gives a
-	ghost a body to walk over a pouch with. That is `pure/PlayerBody`'s warning arriving in a second
+	dead player a body to walk over a pouch with. That is `pure/PlayerBody`'s warning arriving in a second
 	file, and this grid is what makes it fail here rather than in a playtest six chunks later.
 
 	It also converts C13's acceptance criterion — "picks up two in a row and is refused the second" —
@@ -31,7 +31,7 @@ local function check(label: string, ok: boolean, detail: string?)
 	print(`  FAIL  {label}{if detail then ` — {detail}` else ""}`)
 end
 
-local STATES: { PlayerState } = { "LOBBY", "ALIVE", "GHOST", "SPECTATOR" }
+local STATES: { PlayerState } = { "LOBBY", "ALIVE", "DEAD", "SPECTATOR" }
 local PHASES: { RoundPhase } = { "IDLE", "INTERMISSION", "STARTING", "ACTIVE", "ENDING" }
 
 local function request(overrides: {
@@ -67,7 +67,7 @@ end
 
 --[[
 	The allowlist, asserted as a PROPERTY rather than as four cells: exactly one state may ever carry.
-	A denylist rewrite that admitted GHOST would keep every cell above passing if someone "fixed" the
+	A denylist rewrite that admitted DEAD would keep every cell above passing if someone "fixed" the
 	expectation table to match, and would fail here.
 ]]
 do
@@ -157,12 +157,12 @@ check(
 
 check(
 	"phase outranks state",
-	SaltCarry.evaluate(request({ Phase = "IDLE", PlayerState = "GHOST" })) == "WRONG_PHASE"
+	SaltCarry.evaluate(request({ Phase = "IDLE", PlayerState = "DEAD" })) == "WRONG_PHASE"
 )
 
 check(
 	"state outranks the limit",
-	SaltCarry.evaluate(request({ PlayerState = "GHOST", Carried = 9, Limit = 1 })) == "NOT_ALIVE"
+	SaltCarry.evaluate(request({ PlayerState = "DEAD", Carried = 9, Limit = 1 })) == "NOT_ALIVE"
 )
 
 check(
