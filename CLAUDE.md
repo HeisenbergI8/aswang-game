@@ -5,7 +5,14 @@ Guidance for Claude Code when working in this repository.
 ## What This Is
 
 **ASWANG: Survive the Night** — a co-op horror game for Roblox. Filipino folklore, hidden-monster
-gameplay. 6–8 players, one is secretly the Aswang.
+gameplay. 3–5 players, one is secretly the Aswang. Survivors search the barrio for salt, bawang and a
+buntot pagi, and win by living until sunrise or by killing it.
+
+**The spec is at v2.0 — a mechanics rewrite.** Tasks, the escape gate and ghosts are gone; searching,
+feeding, camouflage and three items replace them. `docs/MVP-SPEC.md`'s opening section lists what
+changed and why. Forty chunks shipped under v1.3 and are in git history as `C01`–`C40`; v2.0 work is
+numbered `V01`+ in `docs/BUILD-PLAN.md`. **If something in the code contradicts the spec, the code is
+the stale one** — the rewrite lands chunk by chunk, and V01 is the demolition.
 
 Stack: Luau (`--!strict`), Rojo 7 syncing `src/` into Studio, StyLua + selene + luau-lsp, Lune for unit
 tests. Node is present only because the harness hooks are node scripts; there is no JavaScript in the
@@ -120,8 +127,8 @@ tests/                 Lune unit tests over PURE modules only
 ### The rules that matter
 
 **Server authority.** The client is an untrusted renderer and input device. It *requests*
-(`RequestKill`, `RequestTaskProgress`, `RequestThrowSalt`); the server validates distance, line of sight,
-cooldown and phase, then decides. A design where the client computes an outcome is rejected, not fixed.
+(`RequestKill`, `RequestSearch`, `RequestThrowSalt`, `RequestStrike`); the server validates distance,
+line of sight, cooldown and phase, then decides. A design where the client computes an outcome is rejected, not fixed.
 
 **The secret.** The Aswang's identity never leaves the server in any form. Not a tag, not an attribute,
 not a name colour, not a "hidden" value. Two remotes may legitimately carry it and they are listed in
@@ -135,10 +142,17 @@ played to one player. None of them contains the word "role" and every one is rea
 **`RoundService` owns the phase.** Nothing else calls `setPhase`. Every service subscribes to phase
 changes. Spec §6.4 says so because the state machine is where this genre's bugs live.
 
-**Every tunable is in `Config.luau`.** Balance is data. `tests/config.test.luau` pins thirteen
-*relationships* between those numbers — salt must reach further than the Aswang kills, the reveal must
-outlast the stun, the kill cooldown must outlast a full transform cycle. Those are silent invariants: no
-symptom tells you when two numbers that must agree have stopped agreeing.
+**Every tunable is in `Config.luau`.** Balance is data. `tests/config.test.luau` pins *relationships*
+between those numbers, not the numbers themselves — salt must reach further than the Aswang kills, the
+reveal must outlast the stun, the feed must last longer than it takes to cross fifteen studs and swing.
+Those are silent invariants: no symptom tells you when two numbers that must agree have stopped
+agreeing.
+
+**v2.0 makes this load-bearing rather than tidy.** Spec §6.5 names six invariants, and two of them
+guard win conditions that fail *silently* — tighten `SaltDamage` or `SaltSpawnCount` without checking
+invariant 1 and survivors can no longer weaken the Aswang enough to kill it, with nothing in the game
+to tell you. The new mechanics interact multiplicatively (health × salt count × feed heal × a
+two-condition strike gate), which is a space you cannot check by playing.
 
 **Strict Luau, and it bites.** `Enums.RoundPhase.Idle` infers as plain `string` without its `:: Types.X`
 cast, and then fails to satisfy a parameter typed as the literal union. Six of the scaffold's seven
@@ -150,7 +164,8 @@ Lune is not Roblox — no `game`, no `Instance`, no `script.Parent`. So `tests/`
 only**.
 
 That is a constraint worth designing around rather than accepting. When a piece of gameplay logic is
-worth proving — role weighting for the anti-repeat draw, the 5-of-12 task selection, an XP curve — write
+worth proving — role weighting for the anti-repeat draw, the container layout draw, the health floor,
+the camouflage gate, an XP curve — write
 it as a **pure function over plain tables** in `src/shared/pure/`, and have the service call it. The
 Roblox-shaped wrapper stays thin and untestable; the decision becomes the best-verified thing in the
 repo, and a plan step can be gated on `lune run tests/<x>.test.luau` instead of on a grep.
@@ -392,10 +407,16 @@ because a commit that only moves numbers in `Config.luau` is a distinct kind of 
 
 ## Where to start
 
-**Milestone M1 — the round skeleton.** `RoundService.luau` has the state machine wired and broadcasting
-phase changes. Press Play in Studio with `Config.Debug.SoloTesting = true` and watch the phases cycle,
-then build M2 on top.
+**Chunk V01 — the demolition.** The v1.3 game is built and committed; v2.0 replaces its middle. V01
+deletes the task system, the escape gate and ghosts so the tree stops describing a game that is no
+longer the design. Read `docs/BUILD-PLAN.md` §0 first — it says exactly what dies, what is reworked,
+and what survives untouched.
 
-The gate that matters is **M5: play it with 6 real humans before building any art or UI.** If they do not
-want a 6th round, change the design then — that is the cheapest moment in the whole project to be wrong,
-and no amount of harness will tell you the answer. See `.claude/skills/playtest/SKILL.md`.
+**Every V-chunk is Large tier**, by the author's decision, so the supervised loop can own all of them:
+`/build V01`. That is a deliberate override of the routing table above, argued in the build plan's
+deviation note. The routing table still governs anything that is *not* a numbered chunk.
+
+The gate that matters is **V16: play it with real humans before polishing anything.** v2.0 asks three
+specific questions there — does hiding win, does anyone ever kill the Aswang, and does searching feel
+like survival or like a chore. The third one is whether this rewrite was worth doing, and the honest
+place to find out is V16 rather than launch. See `.claude/skills/playtest/SKILL.md`.

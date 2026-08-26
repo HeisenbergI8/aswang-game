@@ -45,8 +45,22 @@ export const OUT_OF_SCOPE = [
   { word: /^eject(ed|ion|s)?$/i, why: 'ejection', cite: '§3 OUT — no voting means nothing to eject' },
   { word: /^campaigns?$/i, why: 'a campaign', cite: 'Appendix C.5 — the trap that killed the competitor' },
   { word: /^zones?$/i, why: 'zone-based progression', cite: 'Appendix C.5 — 7 zones took them 16 months' },
-  { word: /^weapons?$/i, why: 'weapons', cite: '§3 OUT — no combat beyond salt' },
-  { word: /^(machete|bolo)$/i, why: 'a weapon', cite: '§3 OUT — no combat beyond salt' },
+  // v2.0 ships ONE thing that damages the Aswang — the buntot pagi, one per round, breaks on use.
+  // Appendix C.5's exception depends on that being true, so a GENERIC weapon noun is still the event
+  // worth catching: an armoury forms by someone writing `local weapon` before it forms by someone
+  // adding a second named item. `BuntotPagi` splits to Buntot + Pagi and matches neither.
+  { word: /^weapons?$/i, why: 'a generic weapon system', cite: '§3 OUT — no weapon beyond the buntot pagi' },
+  { word: /^(machete|bolo)$/i, why: 'a weapon', cite: '§3 OUT — no weapon beyond the buntot pagi' },
+  { word: /^microphones?$/i, why: 'a mic-driven mechanic', cite: '§4.5 — rejected on three independent grounds' },
+  // DEFERRED TO V01 — `{ word: /^ghosts?$/i, why: 'the ghost system', cite: '§4.7 — cut in v2.0' }`
+  //
+  // §4.7 cuts ghosts, so this belongs here. It is commented out because the ghost code v2.0 deletes is
+  // still standing: enabling it now produces 154 findings across nine live modules, a red tree, and a
+  // commit guard that refuses every commit until the demolition lands. A guard that blocks work it is
+  // meant to protect gets disabled rather than obeyed.
+  //
+  // V01 deletes the ghost system AND uncomments this line, in the same diff. The self-test case below
+  // is already written and will start passing then.
   { word: /^sabotage[ds]?$/i, why: 'sabotage systems', cite: '§3 OUT' },
   { word: /^trades?$|^trading$/i, why: 'trading', cite: '§3 OUT' },
   { word: /^guilds?$/i, why: 'guilds', cite: '§3 OUT' },
@@ -133,10 +147,15 @@ const selfTest = () => {
   check('a weapon', 'local weapon = Instance.new("Tool")', true)
   check('a campaign flag', 'if profile.CampaignChapter > 3 then end', true)
   check('a UI label offering to vote', 'button.Text = "Vote to eject"', true)
+  check('a mic-driven mechanic', 'local microphoneLevel = 0', true)
 
   // ALLOW
   check('the one monster in scope', 'local MonsterService = require(script.Parent.MonsterService)', false)
-  check('salt, the only counterplay', 'ItemService.ThrowSalt(player, target)', false)
+  check('salt, the first of three items', 'ItemService.ThrowSalt(player, target)', false)
+  check('bawang, the second', 'ItemService.PlaceGarlic(player, doorway)', false)
+  check('the buntot pagi, which is not a "weapon"', 'local buntotPagi = ItemService.Take("BuntotPagi")', false)
+  check('a corpse, which is not a ghost', 'BodyService.SpawnCorpse(player)', false)
+  check('a husk, which is also not a ghost', 'local husk = BodyService.SpawnHusk(player)', false)
   check('a comment explaining the cut', '-- voting was cut deliberately; see spec §4.5\nlocal x = 1', false)
   check('a docstring naming rejected monsters', '--[[ Manananggal and Tiktik are v2 — see ROADMAP.md ]]\nlocal y = 2', false)
   check('a word that merely contains a token', 'local devotion = 1', false)

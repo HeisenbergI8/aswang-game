@@ -1,28 +1,52 @@
-# ASWANG — Build Plan (chunked)
+# ASWANG — Build Plan v2 (chunked)
 
-**What this is:** `docs/MVP-SPEC.md` broken into **45 sequenced chunks**, each sized to *one background
-agent run*. The spec says WHAT to build; this says **what to build next, in what order, and how you know
-it's done**.
+**What this is:** `docs/MVP-SPEC.md` **v2.0** broken into **22 sequenced chunks**, each sized to *one
+background agent run*. The spec says WHAT to build; this says **what to build next, in what order, and
+how you know it's done**.
 
 **Precedence is unchanged:** `MVP-SPEC.md` → `CLAUDE.md` → this file → the code. If a chunk here
 contradicts the spec, the spec wins and the chunk is wrong.
 
+**Numbering restarts at `V01`.** The v1.3 plan ran `C01`–`C45` and forty of those chunks are in git
+history under those names. Reusing the numbers would make `git log --grep` lie. `V##` chunks are v2.0
+work; `C##` references in commit messages, plans and lessons still mean what they meant.
+
 ---
 
-## 0. How to use this
+## 0. Where you actually are — read this first
+
+**Forty chunks of v1.3 shipped.** `C01`–`C40` are committed: the round state machine, the secret role
+draw, transform and kill, salt, ghosts, the greybox barrio, the HUD, the Solo Trial, quick chat,
+mobile, lighting, audio, map dressing, profiles, XP, cosmetics, badges, the group reward. The game
+works. `C41`–`C45` (anti-cheat sweep, playtest #2, launch) never ran.
+
+**v2.0 does not throw that away — but it is honest about which half it invalidates.**
+
+| | Status under v2.0 |
+|---|---|
+| **Dies** | Tasks, the escape gate, ghosts, the old win conditions. `TaskService`, `GateService`, `GhostService`, `TaskSelection`, `TaskWeight`, `WinConditions`, `GhostChat`, `SpookBudget` and their suites |
+| **Reworked** | `MonsterService` (health, feed, camouflage, smoke), `ItemService` (three items, not one), `TransformRules`, `KillValidation`, `SaltThrow`, `SaltCarry`, `BodyTransitions`, `TrialTimeline`, `BadgeRules`, `ProfileMigration`, the HUD |
+| **Survives untouched** | The entire round state machine, `RoleService` and the secrecy layer, quick-chat plumbing, the greybox map, lighting, audio, `AntiCheatService`, progression, monetization, community, analytics transport. **Roughly M0–M2 and the whole business layer** |
+
+**What that means for sequencing:** v2.0 is not a fresh build. It is a **transplant** — Track V0 removes
+the old organ, Tracks V1–V2 fit the new one, and Track V4 reconnects the business layer that never
+stopped working. The launch track at the end is v1.3's `C41`–`C45`, unchanged in substance.
+
+---
+
+## 1. How to use this
 
 ### One chunk = one run
 
 A chunk is scoped so you can hand it to the pipeline, walk away, and come back to something either
-finished or halted with a written reason. Not a "day" — a *unit of delegable work*. On a good day you
-might land three; on a debugging day, none.
+finished or halted with a written reason. Not a "day" — a *unit of delegable work*.
 
 Each chunk carries five fields:
 
 | Field | Meaning |
 | --- | --- |
-| **Tier** | Trivial / Small / Medium / Large, per `CLAUDE.md`'s routing table. Decides which agents run. |
-| **Runner** | 🤖 agent · 🧍 you · 🤝 both (agent writes code, you do the Studio/dashboard half) |
+| **Tier** | **Large, for every chunk in this plan.** See the deviation note below — this is a deliberate override of `CLAUDE.md`'s routing table, not a sizing judgement. |
+| **Runner** | 🤖 agent · 🧍 you · 🤝 both (agent writes code, you do the Studio/asset half) |
 | **Deps** | Chunks that must be green first. Nothing else is ordered. |
 | **Done** | The definition of done, stated so it can be checked rather than felt. |
 | **Verify** | The actual command or evidence. `verify` always means `npm run verify`. |
@@ -34,65 +58,76 @@ rojo serve                         # always, first
 npm run preflight -- --studio      # entry conditions
 ```
 
-- **Large** → `/build` (the supervised loop). It only drives Large-tier plan-backed work — that is why
-  chunks are sized up to Large wherever the loop should own them.
-- **Medium** → say the tier out loud, then `implement-plan`, then run `playtester` + `change-auditor`
-  concurrently in one message with `run_in_background: true`.
-- **Small** → do it, then `playtester` + `change-auditor`.
-- **Trivial** → do it, then `npm run verify`. No agents.
+**Every chunk here runs the same way:** `/build`, the supervised task loop.
 
-`exploit-auditor` runs **in addition, at any tier**, on every chunk marked 🔒. That marker means the diff
-touches `src/server/**`, `Remotes.luau`, `RoleService`, `MonsterService`, or `AntiCheatService`.
+```bash
+/build V03                         # the loop owns it from here
+```
+
+That means `architect` → plan directory → `implement-plan` → `playtester` + `auditor`, and
+`exploit-auditor` **in addition** on every chunk marked 🔒. The loop halts on `done` only when four
+proxies are satisfied: plan steps passed, `verify` green, `implementation-log.md` present, and
+`verification.md` citing a file that exists in `artifacts/`.
+
+**V16 is the exception and it has no tier.** It is a playtest with real humans. No agent runs it, the
+loop cannot drive it, and its output is notes in `docs/playtests/` rather than a diff.
 
 ### The rule that makes chunks agent-shaped
 
 > **Every gameplay decision that can be a pure function must be one.**
 
-Lune can't see `game`. So each chunk that contains a real decision — the role draw, the 5-of-12
-selection, the rate-limit bucket, the XP curve, the win check — puts that decision in
-`src/shared/pure/` as a pure function over plain tables, and leaves a thin Roblox wrapper around it.
+Lune can't see `game`. So each chunk containing a real decision — the container draw, the health floor,
+the feed verdict, the camouflage gate, the win check — puts that decision in `src/shared/pure/` as a
+pure function over plain tables, and leaves a thin Roblox wrapper around it.
 
-That is what turns "an agent says it works" into "a test says it works". Chunks below name the pure
-module explicitly where one is required. It is not optional — it is the difference between a chunk you
-can verify from a terminal and one you have to take on faith.
+That is what turns "an agent says it works" into "a test says it works." **v2.0 leans on this harder
+than v1.3 did**, because the new mechanics interact multiplicatively: health × salt count × feed heal ×
+the buntot pagi's two-condition gate is a space you cannot check by playing, and §6.5's six invariants
+are the only thing standing between you and a win condition that is quietly unreachable.
 
----
+### Two deviations, flagged rather than quietly resolved
 
-## 1. Three deviations from spec §12 — read before starting
+**1. Every chunk is Large tier, by author's decision.**
 
-I am flagging these rather than quietly resolving them, per `CLAUDE.md`.
+`CLAUDE.md`'s routing table says size the task first and warns that planning a precisely-specified
+change costs more than doing it. By that rule V02 (enum values and a Config block) and V17 (one
+seeding rule) are Small, and this plan overrides it.
 
-**1. M5 needs a map, but §12 puts the map at M8.**
-You cannot playtest with 6 humans on a baseplate — they can't hide, can't get isolated, can't loop a
-chase, and every note they give you will be about the empty map instead of the game. So the map is
-**split**: a **greybox** (C25, parts only, correct layout and scale) lands *before* M5, and M8 becomes
-the **art and atmosphere pass** on top of geometry that has already been proven to play well.
-This is strictly cheaper — you dress a layout you know works, instead of dressing one you then rebuild.
+**The reason is mechanical, and it is sound.** `/build` — the supervised loop — only drives Large-tier
+work, because its cursor walks `#### Step N.M` headings and only Large gets an `architect`, so only
+Large has a plan directory to walk. `/build --tier small|medium` is refused with an explanation rather
+than started. **If the loop is to own the whole rewrite, every chunk must be Large.** A uniform tier
+also means a uniform artifact trail — one plan directory, one `implementation-log.md`, one
+`verification.md` per chunk — which is what makes 22 chunks trackable instead of 22 differently-shaped
+piles of evidence.
 
-**2. M5 needs a HUD, but §12 puts UI at M7.**
-Same logic. Testers need to see the task bar, the sunrise timer, and a transform button, or they cannot
-play at all. So UI is **split**: a **minimum playable HUD** (C26 — ugly, functional, keyboard-first)
-before M5, and M7 stays what it is — the polish pass, quick chat, and the mobile pass.
+**The cost, recorded once so nobody rediscovers it as a surprise:** a full Large pass is an architect
+plan plus three reviewers, and `CLAUDE.md` prices a three-reviewer pass at 150–250k tokens. Subagents
+share no cache, so each one re-reads its material cold. On the small chunks this buys a plan directory
+for work that fits in one diff. That is the trade, it was made deliberately, and the counterweight is
+real: consistent process, a mechanical `done`, and nothing routed by judgement mid-rewrite.
 
-**3. Marketing is not a milestone, it is a parallel track from today.**
-§14.1 says start posting during the build; §13 lists marketing under launch prep. §14.1 is right and §13
-is just where the checklist lives. **Track M** below runs alongside everything from C01 onward. It is the
-only track that does not wait for a dependency, and it is the one with the longest lead time.
+**2. The feel pass moves before the playtest.**
+
+§12 puts it at M6, before the playtest. This plan agrees and goes further: **V14 is a *hard gate* on
+V16.** The reason is in the spec — horror is 80% lighting and sound, and a greybox under default
+lighting tests a different, less frightening game. The counter-argument (Appendix C: don't dress what
+you haven't proved) is answered by scope: V14 is fog, darkness, four warm lights, ambience and two
+VFX. It is not props, textures or dressing, which stay at V21.
 
 ---
 
 ## 2. The tracks
 
 ```
-Track A — gameplay   C01 ─▶ C16     M1–M4. The loop. Agent-heavy. This is the game.
-Track B — world      C17, C18       greybox map + minimum HUD. Yours, in Studio.
-       ══ GATE 1 ══  C19            M5 playtest — 6 humans. Everything can change here.
-Track C — FTUE       C20 ─▶ C24     M6. The 80% hole. The competitor died here.
-Track D — polish     C25 ─▶ C30     M7–M8. Quick chat, UI, mobile, art, audio.
-Track E — business   C31 ─▶ C41     M9–M11. Data, money, community, analytics, anti-cheat.
-       ══ GATE 2 ══  C42            M12 playtest — 8 humans, balance to <60% either side.
-Track F — launch     C43 ─▶ C45     M13.
-Track M — marketing  from today, in parallel, never blocked by anything.
+Track V0 — demolition   V01              remove what v2.0 killed. One chunk, one big diff.
+Track V1 — the loop     V02 ─▶ V13       searching, noise, health, feed, camouflage, items, win.
+Track V2 — feel + read  V14, V15         atmosphere and a HUD that shows the new state.
+       ══ GATE 1 ══     V16              playtest. Everything can change here.
+Track V3 — FTUE         V17, V18         the guaranteed first find, the Solo Trial rewrite.
+Track V4 — reconnect    V19, V20         badges, analytics and profiles, remapped to v2 vocabulary.
+Track V5 — art          V21              sprites and the animation pipeline. 🧍 you supply input.
+Track V6 — launch       V22 + C41–C45    anti-cheat sweep, balance playtest, store, launch.
 ```
 
 Chunks are numbered in **execution order**. Where two adjacent chunks have no dependency between them,
@@ -100,932 +135,566 @@ order is a suggestion; where `Deps` names a chunk, it is not.
 
 ---
 
-## 3. Track A — the gameplay loop
+## 3. Track V0 — demolition
 
-> **Where you actually are:** M0 is done. M1 is ~80% done — `RoundService.luau` has the state machine,
-> the tick loop, `setPhase`, the phase broadcast, and the Aswang-leaves case. The other 12 services and
-> all 5 controllers are ~20-line stubs. C01 finishes M1; C02 is the first genuinely new system.
+### V01 — Remove the task game
+**Tier** Large · **Runner** 🤖 · **Deps** — · 🔒
 
----
+One chunk, one large diff, and the tree stops lying about what the game is. Doing this incrementally
+was considered and rejected: 38 test files currently include suites for mechanics that no longer exist,
+and every agent that reads the repo would be misled for as long as they sit there.
 
-### C01 — Finish the round state machine
-**Tier** Medium · **Runner** 🤖 · **Deps** — · 🔒
+**Delete outright:**
+- `src/server/Services/TaskService.luau`, `GateService.luau`, `GhostService.luau`
+- `src/client/Controllers/TaskController.luau`, `GhostController.luau`
+- `src/shared/pure/TaskSelection.luau`, `TaskWeight.luau`, `GhostChat.luau`, `SpookBudget.luau`
+- Their suites in `tests/`, and the task/ghost remotes in `Remotes.luau`
+- `Config.Tasks`, `Config.Ghost`, and every task/ghost field in `Types.luau`
 
-The remaining §6.4 edge cases, and the snapshot the whole client will read.
+**Leave standing:** `WinConditions.luau` is deleted but its **test file is kept and emptied to a
+skeleton** — V11 rewrites both, and the grid-first discipline that file encodes is the reason the
+attrition rule eventually came out right. Do not lose the habit with the code.
 
-- Mid-round join → `SPECTATOR` (the enum already exists, nothing sets it).
-- Player count drops below `MinPlayers` mid-round → finish the round, *then* `IDLE`. Today `step()` only
-  checks player count in `INTERMISSION` and `ENDING`; `ACTIVE` ignores it, which is correct behaviour and
-  currently accidental — make it deliberate and comment it.
-- `game:BindToClose()` hook, empty for now, with the flush point marked for C31 (**not** C40 — C40 is
-  analytics; C31 is the chunk that says "save on `BindToClose` (the hook from C01)" and owns profiles).
-- Broadcast `RoundSnapshot` (`Types.ClientRoundSnapshot`) on a timer — phase, seconds left, task count,
-  gate state, alive count. **No role field, ever.**
-- Extract the transition table to `src/shared/pure/RoundTransitions.luau` — `(phase, expired,
-  enoughPlayers) → nextPhase?`. This is the single most bug-prone function in the game and it is pure.
+**Also in this diff — re-arm the scope guard.** `check-scope.mjs` carries a commented-out `ghosts?`
+entry marked `DEFERRED TO V01`, with its self-test case already written. Uncomment both. It is
+deferred because enabling it before the deletion produces 154 findings across nine live modules and a
+commit guard that refuses every commit — a guard that blocks the work it protects gets disabled rather
+than obeyed. **Uncommenting it is what stops ghosts coming back**, so it is part of the demolition,
+not a follow-up.
 
-**Done** every §6.4 bullet handled; snapshot broadcasting; pure transition module extracted.
-**Verify** `lune run tests/round-transitions.test.luau` covers all 5 phases × expired × player-count;
-`verify` green; playtester watches two full cycles in Studio with `Debug.SoloTesting = true`.
+**Watch for:** `check:remotes` will fail loudly if a client still waits on a deleted remote — that is
+the check doing its job, not a problem to work around. On the client, `WaitForChild` on a name the
+server never creates **hangs forever** with no error.
 
----
-
-### C02 — AntiCheatService: the rate-limit core
-**Tier** Medium · **Runner** 🤖 · **Deps** C01 · 🔒
-
-**Do this before any other remote handler exists.** `check:ratelimit` fails any `OnServerEvent` that
-doesn't consult `AntiCheatService`, so building it now means every later chunk is born compliant instead
-of retrofitted. It is also the cheapest chunk in the plan that stays load-bearing to launch.
-
-- `src/shared/pure/TokenBucket.luau` — pure `(bucket, now, cost) → (allowed, newBucket)`.
-- `AntiCheatService.Consume(player, remoteName)` over per-player, per-remote buckets.
-- Per-remote budgets in `Config.AntiCheat` (new section — every number, `check:config` enforces it).
-- Log-only on rejection for now. Kicking comes at C47 with real data behind it.
-
-**Done** every `Remotes.Up` name has a declared budget; a burst is refused; the refusal is logged.
-**Verify** `lune run tests/token-bucket.test.luau` — steady state, burst, refill, clock jump backwards.
+**Done** every file above gone; `verify` green; no dangling references; `git grep -i task src/` returns
+only Roblox's `task` library.
+**Verify** `verify` green from a clean tree; `npm run check:remotes` passes; playtester confirms a
+round still cycles IDLE→ACTIVE→ENDING in Studio with nothing to do in it.
 
 ---
 
-### C03 — RoleService: the secret
-**Tier** Large · **Runner** 🤖 · **Deps** C02 · 🔒
+## 4. Track V1 — the new loop
 
-The one piece of state the whole game rests on. Plan-backed — use `/build`.
+### V02 — The v2 vocabulary: Enums, Types, Config
+**Tier** Large · **Runner** 🤖 · **Deps** V01
 
-- `src/shared/pure/RoleDraw.luau` — `(players, historyLast2Rounds, aswangCount) → assignments`, with
-  §4.2's anti-repeat weighting. Pure, deterministic given a seed.
-- `RoleService` calls it during `STARTING`, stores server-side, fires `RoleAssigned` to **exactly one
-  player**, carrying only their own role.
-- Round history persists across rounds in-memory (survives to disk at C40, not before).
-- The 3-second private Aswang intro.
+Nothing works until the words exist. This chunk adds no behaviour.
 
-> ⚠️ **`src/shared/pure/` SHIPS ITS SOURCE TO EVERY CLIENT.** `default.project.json` maps `src/shared`
-> wholesale into `ReplicatedStorage`, so `RoleDraw.luau` is readable by any exploiter. That is fine —
-> a published algorithm is not a leak. **A reproducible one is.** Two rules follow, and they are the
-> whole security of this chunk:
->
-> - Seed the draw from **server-only entropy**. If the seed is derivable from anything a client can
->   observe — round number, player list, a timestamp — an exploiter replays the draw locally and knows
->   the Aswang *before the round starts*, with no remote to intercept and nothing for `check:secrecy`
->   to see.
-> - The **anti-repeat history must never replicate** — not because it is secret (every past round's
->   Aswang was already revealed to everyone by `RoundEnded`, per §4.8) but because it is a **draw
->   input**. Algorithm + inputs + seed = this round's assignment, and every input the client already
->   holds shrinks the search space for the seed it doesn't.
->
-> Concretely: `Random.new()` with no argument is fine. `Random.new(state.RoundNumber)` and
-> `Random.new(os.time())` are fatal — both are client-observable.
->
-> If either is awkward, put the module in `src/server/pure/` and point the test at that path instead.
-> Testability is the reason `pure/` exists; `Shared` is not.
+- `Enums`: `ItemType` (Salt/Bawang/BuntotPagi), `MonsterState` (Normal/Transformed/Exposed/Feeding/
+  Camouflaged), `BodyKind` (Corpse/Husk), `CamouflageForm` (Cat/Dog/Pig/Villager). **Keep the
+  `:: Types.X` casts** — a literal union infers as plain `string` without them.
+- `Types`: `ClientRoundSnapshot` gains a carry slot and loses nothing. **It still has no alive count
+  and no role field** — Amendment A3's list of forbidden names is carried into v2 verbatim, in place.
+- `Config`: the full v2 block from spec §6.5.
 
-**Done** roles assigned; a player who was Aswang last round is measurably less likely to draw it again;
-nothing about the assignment is readable from another client.
-**Verify** `lune run tests/role-draw.test.luau` — over 10,000 seeded draws, back-to-back Aswang rate is
-below the unweighted baseline, and every player is eventually eligible (no starvation).
-`npm run check:secrecy` clean. **`exploit-auditor` is mandatory on this chunk** — if it finds one leak
-here, the chunk is not done regardless of what the tests say.
+**Done** spec §6.5's Config block present with the comment for every number; enums cast; analyze clean.
+**Verify** `verify` green; `lune run tests/config.test.luau` — which will FAIL until V11 writes the six
+invariants, so this chunk's gate is analyze + lint only, stated explicitly so the red is expected.
 
 ---
 
-### C04 — MonsterService: transform
-**Tier** Medium · **Runner** 🤖 · **Deps** C03 · 🔒
+### V03 — SearchService: containers and the layout seed
+**Tier** Large · **Runner** 🤖 · **Deps** V02 · 🔒
 
-§4.3 steps 1–3. The transform is **public by design** — replicating it is correct, and it is the only
-thing in this game that legitimately reveals the Aswang.
+The heart of §4.4. ~15 containers, a randomized subset seeded each round with 4 salt, 2 bawang, 1
+buntot pagi.
 
-- `RequestTransform` → validate: is Aswang, `ACTIVE`, not already transformed, cooldown elapsed.
-- 1.2s windup → `MonsterTransformed` to all clients. Avatar scale, colour/material shift, glowing eyes,
-  particle emitter. **No custom mesh** (§4.3 — this is why the mechanic is cheap).
-- `+25%` walkspeed while transformed, server-set.
-- Forced revert at `MaxTransformTime`, 1.0s revert animation.
+- Pure module **`src/server/pure/ContainerLayout.luau`** — `(containerCount, itemCounts, rng) →
+  layout`. **In `server/pure/`, not `shared/pure/`.** `src/shared` maps wholesale into
+  `ReplicatedStorage`, so a LocalScript can `require()` and *run* a shared module. A layout draw whose
+  inputs a client can supply is a client that knows where the buntot pagi is before the round starts —
+  no remote to intercept, nothing for `check:secrecy` to see. Lune resolves by file path and cares
+  nothing for Rojo.
+- **Seed from server-only entropy.** `Random.new()` with no argument is fine. `Random.new(roundNumber)`
+  and `Random.new(os.time())` are fatal — `os.time()` is client-observable to the second.
+- 6-second hold to search, server-validated: distance, phase, one searcher per container at a time.
+- The layout never crosses the wire. A client learns a container's contents by opening it.
 
-> ⚠️ **Carried over from C01 — `SPECTATOR` is bookkeeping with nothing behind it.** C01 marks a
-> mid-round joiner `SPECTATOR` and excludes them from the alive count. It does **not** give them a
-> spectator's *body*: they spawn normally, walk the Barrio, and collide with everything. Harmless
-> until this chunk, at which point an alt account joins mid-round and watches the transform from ten
-> studs away while being uncounted and — once C05 validates "both alive" — unkillable.
->
-> Add the containment half here, before the kill exists: no character for `SPECTATOR`, or an observer
-> camera and no collision. Gate on `RoundService.GetPlayerState(player) == Enums.PlayerState.Alive` —
-> an **allowlist**, never `~= SPECTATOR`. `PlayerState` has four values, so a denylist also admits
-> `LOBBY` and `GHOST`; C15 makes `GHOST` real and a ghost must not be killable. (Secondary reason:
-> `GetPlayerState` defaults unknown UserIds to `LOBBY`. After C01's `Start()` ordering no *connected*
-> player should be unknown, so this one is belt-and-braces rather than the reachable case.)
->
-> **Verify the premise in Studio before building the fix.** What is established is that nothing in
-> `src/` prevents a spectator spawning — no `CharacterAutoLoads`, `LoadCharacter` or teleport logic
-> exists anywhere in the tree. The place file is gitignored, so a `SpawnLocation` or a property set in
-> Studio could already handle this and no check in the repo would see it.
-
-**Done** any player with line of sight sees the transform; the Aswang cannot stay transformed past 8s.
-**Verify** playtester: two clients in Studio, one transforms, screenshot from the *other* client's
-camera showing the silhouette. That screenshot is the artifact.
+**Done** layout seeded at `STARTING`; searching yields items; nothing about the layout is client-readable.
+**Verify** `lune run tests/container-layout.test.luau` — 10,000 draws asserting every item placed
+exactly once, no container double-seeded, and distribution across the pool is not degenerate.
+`exploit-auditor` answers: can a client derive the layout from anything it receives?
 
 ---
 
-### C05 — MonsterService: the kill
-**Tier** Medium · **Runner** 🤖 · **Deps** C04 · 🔒
+### V04 — Noise: the risk economy
+**Tier** Large · **Runner** 🤖 · **Deps** V03
 
-§4.3 steps 3–5, and the five server-side rules in §4.3 verbatim.
+Searching is loud, and loud is how you die. This is §4.4's entire point and it is a *system*, not a
+sound effect.
 
-- `RequestKill(targetUserId)` → distance ≤ 8, **raycast line of sight**, cooldown elapsed, both alive,
-  phase `ACTIVE`, killer is Aswang, target is not.
-- `src/shared/pure/KillValidation.luau` — `(killerPos, targetPos, config, now, lastKillAt) → verdict`.
-  Everything except the raycast, which needs the DataModel.
-- Corpse persists `CorpseDuration`, then fades. `PlayerKilled` broadcast (position and victim — **never**
-  the killer).
-- Kill cooldown starts from *revert*, not from the kill.
+- Pure module **`src/shared/pure/NoiseModel.luau`** — `(action, state) → {loudness, radius}`. Sprint,
+  search, door, item use. Publishing this is harmless: it is a table, and `Config` is replicated anyway.
+- The server records noise events with position and timestamp. **They are the tracker's only input**
+  (V13) and they do not go to clients.
+- **The survivor who made the noise is told they made it.** A sound you cannot perceive is not tension,
+  it is a dice roll. A brief "that was loud" cue — audio first, UI second.
 
-**Done** all six conditions enforced server-side; a client firing `RequestKill` at a target 40 studs
-away through a wall is refused.
-**Verify** `lune run tests/kill-validation.test.luau` — at range, past range, on cooldown, wrong phase.
-Playtester attempts an out-of-range kill via `execute_luau` and captures the refusal. 🔒 mandatory.
-
----
-
-### C06 — Win condition: the Aswang's
-**Tier** Small · **Runner** 🤖 · **Deps** C05 · 🔒
-
-Living survivors ≤ 2 → `RoundService.EndRound(AswangWin)`. The timeout half already works.
-Add to `pure/RoundTransitions.luau` or a sibling; do not scatter the check.
-
-**Done** both Aswang win paths fire and reach the reveal.
-**Verify** unit test on the win predicate; playtester drives a solo round to the ≤2 condition.
+**Done** every noisy action emits; the actor gets feedback; noise history is server-only and bounded.
+**Verify** `lune run tests/noise-model.test.luau` over the action × state grid; playtester confirms
+the cue fires on a search and not on a walk.
 
 ---
 
-### C07 — TaskService: pick 5 of 12
-**Tier** Medium · **Runner** 🤖 · **Deps** C01
+### V05 — MonsterService: health, Exposed, Weakened
+**Tier** Large · **Runner** 🤖 · **Deps** V02 · 🔒
 
-§4.4's one load-bearing decision — the reason a single map stays fresh (Appendix C.4 cause #2).
+The tug-of-war from §4.6. This chunk is small in code and dense in consequence.
 
-- `src/shared/pure/TaskSelection.luau` — `(pool, count, seed) → chosen`, no duplicates, uniform over
-  the pool, spatially spread if the pool carries positions.
-- Task points discovered in the map by CollectionService tag (`TaskPoint`), not hardcoded — the greybox
-  at C25 places them and this reads them.
-- Selection happens in `STARTING`; the set is server state.
+- Pure module **`src/shared/pure/MonsterHealth.luau`** — `(health, event) → health'` plus the
+  `isWeakened` predicate. **Enumerate the domain rather than writing a case per bug**: health ∈
+  {full, mid, at-floor, below-floor, 0, ±inf, NaN} × event ∈ {salt, feed, none}. A pure predicate over
+  a bounded domain earns a grid, and this repo has already paid four review rounds for learning that
+  the reactive way.
+- **The floor is the mechanic:** salt can never reduce below `WeakenedThreshold`. Salt alone must not
+  kill, or the buntot pagi is decoration.
+- **Health is server-only, readable by others only while `Exposed`** (§6.2). No health bar on a player
+  — a health value attached to someone IS the reveal. Presentation is the glow brightening as it weakens.
 
-**Done** every round draws a different 5; the same point never appears twice in one round.
-**Verify** `lune run tests/task-selection.test.luau` — no duplicates over 10,000 seeded draws,
-distribution across the 12 is within tolerance, graceful when the pool is smaller than 5.
-
----
-
-### C08 — Task type: Hold
-**Tier** Medium · **Runner** 🤖 · **Deps** C07, C02 · 🔒
-
-The first of four, and the one that establishes the shape the other three copy.
-
-- ProximityPrompt, `HoldTime` seconds, server-timed. **The client cannot report completion** — it
-  reports *presence*, and the server accumulates.
-- `RequestTaskProgress` rate-limited via C02.
-- Progress is per-task-point on the *world*, not per-player (§4.4 anti-frustration).
-- `TaskProgressChanged` broadcast — the global bar only. Never who did what.
-
-**Done** a hold completes in `HoldTime`; walking away mid-hold stops accumulation; a client spamming
-`RequestTaskProgress` gains nothing.
-**Verify** playtester holds a task to completion, then attempts to complete one by firing the remote in a
-loop from `execute_luau` and shows it refused. 🔒 mandatory.
+**Done** health tracked; floor enforced; `Exposed` set by salt and cleared on expiry; nothing leaks.
+**Verify** `lune run tests/monster-health.test.luau` over the full grid; `exploit-auditor` answers:
+can any client read the Aswang's health outside `Exposed`, by any path including a derived hint?
 
 ---
 
-### C09 — Task types: Timing and Fetch
-**Tier** Medium · **Runner** 🤖 · **Deps** C08
+### V06 — Feeding
+**Tier** Large · **Runner** 🤖 · **Deps** V05 · 🔒
 
-Both reuse C08's server-authority shape.
+What replaced the kill cooldown (§4.3). 5 seconds, locked to the corpse, interruptible.
 
-- **Timing** — moving bar, 3 attempts, green zone. The client renders the bar; the **server** owns the
-  bar's position and decides the hit. A client-decided timing minigame is a free task for any exploiter.
-- **Fetch** — pick up an item elsewhere, carry it back. Server tracks the carry; dropping on death is
-  correct and creates good moments.
+- Pure module **`src/shared/pure/FeedRules.luau`** — `(monsterState, bodyKind, distance, phase) →
+  verdict`. A husk is not feedable until it has been killed, at which point it is a corpse.
+- Server-validated: proximity to the corpse, `Transformed`, round `ACTIVE`. Movement locked for the
+  duration.
+- **Salt interrupts it**, and the interruption costs the heal *and* the camouflage refresh.
+- On completion: `+FeedHeal` health, and camouflage restored **only if already revealed** (V07).
 
-**Done** both playable, both server-decided.
-**Verify** playtester completes one of each; the timing hit is refused when fired outside the window.
-
----
-
-### C10 — Task type: Two-person
-**Tier** Medium · **Runner** 🤖 · **Deps** C09
-
-Requires 2 survivors present for `TwoPersonTime`. The best task in the game — the Aswang can "help" you
-and then be alone with you. Server validates both are alive, present, and distinct.
-
-**Done** one player alone makes no progress; two do; progress stops when one leaves.
-**Verify** playtester with two clients, screenshot of the bar moving only with both present.
+**Done** feed starts, locks, heals, and is interruptible; a husk cannot be fed on until killed.
+**Verify** `lune run tests/feed-rules.test.luau` over the state × body × distance × phase grid;
+playtester records a feed and a salt-interrupted feed in Studio.
 
 ---
 
-### C11 — The escape gate and the survivors' win
-**Tier** Medium · **Runner** 🤖 · **Deps** C10, C06 · 🔒
+### V07 — Camouflage and smoke
+**Tier** Large · **Runner** 🤖 · **Deps** V06 · 🔒
 
-§4.8. At 5/5 the gate opens; a survivor reaching it wins the round. This is the finale and the best clip
-in the game — treat the gate opening as an event worth seeing and hearing, not a boolean.
+§4.3's most dangerous chunk. Read the spec section before writing a line — the gate is not a balance
+dial and getting it wrong is a total secrecy failure, not a bug.
 
-**Done** both win conditions in §4.8 fire correctly and land on the reveal.
-**Verify** playtester drives a full survivor win end-to-end; console log of the transition chain.
+- Pure module **`src/shared/pure/CamouflageRules.luau`** — `(hasBeenRevealed, hasCamouflageCharge,
+  monsterState, phase) → verdict`. **`hasBeenRevealed` is the gate and it is set by the first salt
+  hit, never by anything else.** "Someone saw it transform" is not knowable server-side; a salt hit is
+  a fact the server already owns.
+- Forms: cat, dog, pig, villager. **The Aswang swaps with an existing ambient entity** — the real one
+  wanders off, the monster takes its slot. It must never *spawn* a new one: two pigs where there was
+  one is a head count with extra steps.
+- Charge is spent on use and restored only by a feed (V06). Once revealed, **the monster must kill to
+  hide**.
+- Smoke: one burst, breaks line of sight, covers a disengage. It belongs to the Aswang, never to salt.
 
----
+> **The failure this chunk exists to prevent:** an unrevealed Aswang that camouflages removes a player
+> avatar from the world. Four players visible, one missing, in a five-player lobby. Anyone who counts
+> knows — permanently, for free, with nothing to argue about. If a future change lets camouflage fire
+> before a reveal, the deduction layer is gone and no test will report it.
 
-### C12 — The Aswang's fake task list
-**Tier** Small · **Runner** 🤖 · **Deps** C11 · 🔒
-
-§4.4. The Aswang sees a task list and can play the animation; its progress does not count. **Essential** —
-without it, "who is standing at tasks" identifies the monster in thirty seconds and the game is over.
-
-The trap: the fake progress must look identical *to the Aswang's own client*, while contributing nothing
-to the global bar. If the Aswang's bar and everyone else's ever disagree visibly, that is the tell.
-
-**Done** the Aswang can fake-perform every task type; the global bar does not move.
-**Verify** playtester as the Aswang completes a hold; the global count is unchanged. 🔒 mandatory.
-
----
-
-### C13 — ItemService: salt spawn and pickup
-**Tier** Medium · **Runner** 🤖 · **Deps** C07
-
-4 pouches at random fixed points (tagged `SaltSpawn`, same discovery pattern as C07). One carried per
-player. No recharge — §4.6, scarcity is the point.
-
-**Done** 4 spawn per round at different points; carry limit enforced server-side.
-**Verify** playtester picks up two in a row and is refused the second.
+**Done** camouflage impossible before a salt hit; spent on use; restored only by feeding; swap-not-spawn;
+smoke works.
+**Verify** `lune run tests/camouflage-rules.test.luau` — exhaustive over the four-input grid, with the
+pre-reveal row asserted as universally denied. `exploit-auditor` answers: (1) can camouflage fire
+before a reveal by any path, (2) does the ambient population count change when it fires, (3) is the
+charge state readable by a non-Aswang client.
 
 ---
 
-### C14 — ItemService: throw, stun, reveal
-**Tier** Medium · **Runner** 🤖 · **Deps** C13, C04 · 🔒
+### V08 — ItemService: the three items
+**Tier** Large · **Runner** 🤖 · **Deps** V03, V05 · 🔒
 
-The counterplay. Without it the game is just losing (§4.6).
+Salt is a rework of shipped code; the other two are new. One carry slot, no recharge.
 
-- `RequestThrowSalt(direction)` → server simulates. **The client never decides a hit.**
-- Hit → 4s stun, forced revert, `RevealDuration` glow visible to everyone.
-- `ThrowRange` 25 > `KillRange` 8 — `tests/config.test.luau` already pins this relationship. Don't break it.
+- **`SaltCarry`/`SaltThrow` generalise to `ItemCarry`/`ItemThrow`** — the cone, the range and the four
+  MISS worlds already have 70 assertions behind them and that work carries over.
+- Salt on hit: force revert, `Exposed` for 10s, −25 health, interrupt any feed, **and set
+  `hasBeenRevealed`** (the V07 gate).
+- Items come from containers (V03), never from a spawn point. One carried at a time; picking up a
+  second requires dropping the first.
 
-**Done** a hit stuns, reverts, and reveals; a miss consumes the pouch anyway.
-**Verify** playtester lands a throw, screenshot of the glow from a third client. 🔒 mandatory.
-
----
-
-### C15 — GhostService: death to ghost
-**Tier** Large · **Runner** 🤖 · **Deps** C05 · 🔒
-
-§4.7 — the retention leak that is silently fatal. Plan-backed.
-
-- Dead survivor → ghost. Slow flight at `Ghost.FlySpeed`, sees other ghosts.
-- **Ghost-only chat, a genuinely separate channel.** A ghost naming the Aswang in a channel the living
-  can read ends every round instantly. Enforce server-side — a client-side filter is not a filter.
-- Ghosts cannot be seen or heard by the living.
-
-> ⚠️ **Two things C01 left for this chunk to answer.**
->
-> **1. `AlivePlayerCount` becomes a death oracle the moment a kill sets `GHOST`.** The snapshot carries
-> it to every client every 500ms. An executor recording replicated character positions timestamps each
-> kill from the decrement, then asks who was within `KillRange` (8 studs) of the victim's last position
-> at that instant. In the open that is often a single candidate — the Aswang, without ever witnessing a
-> transform; in a group it **narrows the field**, which is damaging enough on its own. Don't test it in
-> a crowded room, see three candidates and conclude the warning was hype.
-> **Decide whether death is public.** If it is (a corpse everyone can see, a broadcast), this field is
-> redundant and should be dropped rather than kept as a second, lower-latency channel. If it is not,
-> the count must not fall until the body is discoverable.
->
-> **2. Rejoin currently launders a survivor into an unkillable body.** C01's `onPlayerAdded` marks any
-> mid-round arrival `SPECTATOR`, including someone who was `ALIVE` sixty seconds ago and disconnected.
-> They never return to `ALIVE`, so post-C05 they cannot be killed — alt-F4 on hearing the transform is
-> a hard counter to the entire monster. Resolve a returning dealt-in player to `GHOST` here: correct
-> fiction and the fix. Three things that prescription needs to be complete:
->
-> - **Populate the dealt-in set in `enterStarting`**, beside `setAllPlayerStates(Alive)`, and clear it
->   in `enterIntermission`/`enterIdle` and in `Init()`. It must be its **own table** — it cannot live
->   inside `PlayerStates`, because `setAllPlayerStates` opens with `table.clear`.
-> - **`GHOST`-on-rejoin makes quitting less profitable, not unprofitable.** A ghost still gets ghost
->   chat, `RequestGhostSpook` and 0.25× task contribution, so the quitter lands with the full ghost
->   feature set having never been caught. Ship it anyway — it is strictly better than today — but
->   record a disconnect during `ACTIVE` as a **death for scoring and XP**, or it resurfaces at C32 as
->   XP numbers nobody can explain.
-> - **C11 must not double-handle the count.** A disconnect already deletes the `PlayerStates` entry, so
->   `AlivePlayerCount` drops immediately and "survivors ≤ 2" already treats a quitter as dead whether
->   or not they return. `GHOST`-on-rejoin makes the returning body consistent with that; it does not
->   change it. (The Aswang has no rejoin case — `onPlayerRemoving` aborts the round on a match.)
-
-**Done** death transitions cleanly; ghosts see ghosts; no ghost message reaches a living player.
-**Verify** playtester: three clients, one dies, ghost sends a message, screenshot of the two living
-clients' chats **not** containing it. 🔒 mandatory — this is a secrecy surface, not just a chat feature.
+**Done** three item types carried and used; salt does all five of its jobs; carry slot enforced server-side.
+**Verify** `lune run tests/item-throw.test.luau` (the migrated salt suite, extended); playtester lands
+a salt hit and confirms the glow, the revert and the health change in console output.
 
 ---
 
-### C16 — GhostService: contribution and the spook
-**Tier** Small · **Runner** 🤖 · **Deps** C15
+### V09 — Bawang: the silent doorway
+**Tier** Large · **Runner** 🤖 · **Deps** V08 · 🔒
 
-Ghosts hold task points at `TaskContributionMult` (25%). One spook per round — flicker a light, rustle a
-bush. **Carries no information**, by design; it is flavour that keeps dead players in the room.
+Small system, one rule that carries all its weight.
 
-**Done** ghost contribution counts at 25%; the spook fires once and only once per round.
-**Verify** playtester as a ghost adds progress; second spook attempt refused.
+- Placed on a doorway; the Aswang cannot pass for 15s; then it burns out.
+- **The block is silent and invisible in its effect.** No knockback, no VFX, no sound, no camera hitch.
+  Its movement simply does not carry it through.
 
----
+> **This is a mechanic, not a rendering note.** Garlic invites a loyalty test — place it, ask everyone
+> to walk in, whoever cannot enter is the Aswang. That test *should* exist; it is the best emergent
+> social moment in the design. It only stays a game if **refusing is indistinguishable from being
+> unable**. A survivor can decline for any reason, including to be funny, and the best outcome is the
+> Aswang declining too. The moment the barrier plays *any* effect on the monster, bluffing dies and
+> the test becomes a perfect oracle.
 
-## 4. Track B — enough world to test
-
-> Two chunks, both mostly yours, both deliberately ugly. Their only job is to make GATE 1 possible.
-
----
-
-### C17 — Greybox the Barrio
-**Tier** Large · **Runner** 🧍 (agent assists with tagging scripts) · **Deps** C07, C13
-
-**Parts only. Grey. No textures, no art, no lighting pass.** You are proving a *layout*, and every hour
-spent on looks here is an hour you may throw away after GATE 1.
-
-Build to §5:
-- ~35 seconds to cross end to end. **Measure it — walk it with a stopwatch.** New devs build maps 3×
-  too big and the whole game dies of players never meeting each other.
-- Central plaza (spawn + escape gate), 6–8 bahay kubo with ≥3 enterable, chapel interior, rice field
-  edge, well/pump area.
-- 2–3 alleys forming **loops, never dead ends**. Walk every alley and confirm you can run a circle.
-- 12 `TaskPoint`-tagged anchors, spread. 4 `SaltSpawn` anchors. 1 `EscapeGate`.
-- `StreamingEnabled` on from the start — retrofitting it later is miserable.
-
-**Done** the tags exist and C07/C13 discover them; the crossing time is 30–40s; every alley loops.
-**Verify** press Play, walk the map, `search_game_tree` confirms 12 + 4 + 1 tagged instances.
-**Then publish** — the place file is gitignored and Roblox's cloud version history is its only backup.
+**Done** placement, block, burn-out; a survivor may walk through freely; no observable difference
+between a monster blocked and a player standing still.
+**Verify** playtester records the doorway from a *third player's* camera with the Aswang blocked, and
+the artifact shows nothing distinguishable. `exploit-auditor` answers: is there any client-observable
+signal — property, sound, animation state, network event — that separates blocked from voluntarily idle?
 
 ---
 
-### C18 — Minimum playable HUD
-**Tier** Medium · **Runner** 🤖 · **Deps** C17, C11
+### V10 — Buntot pagi: the only kill
+**Tier** Large · **Runner** 🤖 · **Deps** V05, V08 · 🔒
 
-Ugly and functional. Default fonts, flat rectangles, no theme. Polish is C34 and it happens *after* six
-humans have told you what the HUD is missing.
+One per round. Breaks on use. Two conditions, both required.
 
-- Sunrise timer, global task bar, alive count — all from `RoundSnapshot`.
-- Transform button (Aswang only — **gate it on the client's own `RoleAssigned`, never on a broadcast**).
-- Salt indicator, interaction prompts.
-- Basic end screen with the reveal.
+- Pure module **`src/shared/pure/StrikeValidation.luau`** — `(monsterState, monsterHealth, distance,
+  phase) → verdict`. Kills **only** if `Exposed` **and** `Weakened`. Against anything else: nothing.
+- Droppable, passable, and it **drops where the carrier falls**. A corpse in the open with the win
+  condition next to it is the design's best clip and it is free if the drop is implemented.
+- It is not purchasable and never will be (§8.3). §C.5's exception depends on all four of its
+  properties holding.
 
-**Done** a human can play a full round without being told anything about the codebase.
-**Verify** playtester plays a full round using only the HUD; screenshot at each phase.
-
----
-
-## 5. ══ GATE 1 ══
-
-### C19 — M5: first playtest, 6 real humans
-**Tier** — · **Runner** 🧍 · **Deps** C18 · Load the `playtest` skill first.
-
-**Five rounds, six people, and one question: do they want a sixth round?**
-
-No agent can run this and no verification substitutes for it. Write down what they *said*, not what you
-concluded — you will re-read these notes at C49 and your conclusions will have drifted.
-
-Watch for, specifically:
-- Does anyone actually get isolated, or does the group never split? (map too small / too safe)
-- Does the Aswang ever get caught transforming? (if never, the tell is too weak; if always, too strong)
-- Does salt feel like a decision or a lottery?
-- Do dead players stay?
-
-**Done** notes written to `docs/playtests/2026-XX-XX-m5.md`.
-**If they do not want a sixth round, stop and change the design here.** §12 is unambiguous about this
-being the cheapest moment in the entire project to be wrong. Chunks C20+ assume the loop is fun; if it
-isn't, they are all built on sand.
+**Done** strike validated server-side; both conditions required; breaks on use; drops on death.
+**Verify** `lune run tests/strike-validation.test.luau` over state × health × distance × phase,
+asserting every non-`Exposed`-or-non-`Weakened` cell is a refusal; playtester records one successful
+kill end to end.
 
 ---
 
-## 6. Track C — FTUE, the 80% hole
+### V11 — Win conditions, rewritten
+**Tier** Large · **Runner** 🤖 · **Deps** V10, V12 · 🔒
 
-> Appendix C.2: 79.9% of the competitor's 1.4M players never completed one objective. This track is
-> aimed at that single number, and §10's 50% gate is a launch blocker.
+Both conditions, and the six Config invariants that keep them reachable.
 
----
+- Pure module **`src/shared/pure/WinConditions.luau`**, rewritten: survivors win at sunrise with ≥1
+  alive **or** on the Aswang's death; the Aswang wins at `kills == RequiredKills`.
+- **`RequiredKills` is frozen at `STARTING` and never decrements.** Husks (V12) keep every departed
+  player on the board, so nothing needs subtracting and no combination of disconnects advances either
+  side.
+- **The timeout is inverted from v1.3.** This is the single most likely place for stale logic to
+  survive the rewrite — v1.3 scored a timeout as an *Aswang* win and that line may exist in more than
+  one place.
+- Write the **six invariants from spec §6.5** into `tests/config.test.luau`. Invariant 1 is the one
+  that silently kills the second win condition.
 
-### C20 — Guaranteed first objective
-**Tier** Medium · **Runner** 🤖 · **Deps** C19
-
-§10. A brand-new player's first round spawns a task **near them** with a clear waypoint. This is the
-highest-leverage chunk in the plan and it is not a big one.
-
-- Track "has ever completed a task" server-side (in-memory now, in the profile at C40).
-- First-round players get one selected task biased to spawn proximity, plus a beam or arrow.
-- One contextual line at the moment it's needed: *"Hold to complete the task."* No wall of text.
-
-**Done** a fresh player has a waypointed task within 15 seconds of `ACTIVE`.
-**Verify** playtester with a simulated fresh profile; screenshot showing the waypoint.
-
----
-
-### C21 — Solo Trial: the shell and two tasks
-**Tier** Large · **Runner** 🤖 · **Deps** C20 · 🔒 · Plan-backed.
-
-§9.1. Runs in a corner of the map, single-player, 90 seconds, offered below `MinPlayers`.
-
-- Isolated trial state — must not touch or corrupt real round state. This is the actual risk in the
-  chunk: `TrialService` and `RoundService` sharing state is how you get a trial that ends a live round.
-- Two tasks, teaching the interaction by doing.
-
-**Done** a solo player in an empty server gets a real thing to do within 60s of joining.
-**Verify** playtester, one client, empty server, completes both trial tasks. Console shows round state
-untouched throughout.
+**Done** both conditions fire; roster frozen; timeout favours survivors; six invariants pinned.
+**Verify** `lune run tests/win-conditions.test.luau` — exhaustive grid over roster × kills × timer ×
+aswang-alive, plus departure properties; `lune run tests/config.test.luau` green.
 
 ---
 
-### C22 — Solo Trial: the chase and the handoff
-**Tier** Medium · **Runner** 🤖 · **Deps** C21
+### V12 — BodyService: corpses and husks
+**Tier** Large · **Runner** 🤖 · **Deps** V01 · 🔒
 
-- At `ScriptedChaseAt` (55s) a scripted Aswang transforms and chases. **They learn the tell.**
-- Salt is given and taught: *"Salt burns the aswang — throw it to reveal and stun."* (§10 — do not assume
-  players know the folklore. Many won't.)
-- Ends on *"Now do it when the monster is one of your friends."* → drops into the lobby queue.
+§4.7's two body types, and the Amendment A3 rules that removing ghosts must not take with them.
 
-**Done** full 90s trial runs end to end and hands off cleanly.
-**Verify** playtester runs it start to finish; screenshots at task, chase, salt, handoff.
+- Pure module **`src/shared/pure/BodyRules.luau`** — `(cause, idleSeconds, reachable) → bodyKind` and
+  the relocation predicate.
+- **Corpse:** made by a kill, feedable, 45s then fades. **Husk:** made by a disconnect or 120s idle,
+  killable, counts as a kill, becomes a corpse when killed.
+- Husks cannot benefit from bawang; one unreachable for 60s relocates to the nearest walkable point.
+- **The corpse stays attached as the dead player's `Character`.** `dead[p] = (p.Character == nil)` is a
+  one-line roster of the dead, and `GetPropertyChangedSignal("Character")` turns it into a timestamped
+  death alert. A hidden body is no better — `Transparency = 1` hides pixels, not existence.
+- **Husk state must be plainly visible to everyone.** A husk that differs from a live body in any
+  replicated way lets a client enumerate husks — and since the Aswang can never be one, every husk is
+  provably innocent. In a 5-player lobby that is a fifth of the field, for free. Public information
+  cannot be exploited asymmetrically; hidden asymmetry can.
 
-> ⚠️ **The trap, named in §9.1:** do not let this grow. No second trial, no trial levels, no trial
-> rewards beyond the handoff. A PvE campaign is exactly what killed the competitor (C.5).
-
----
-
-### C23 — Contextual teaching pass
-**Tier** Small · **Runner** 🤖 · **Deps** C22
-
-One-liners at the moment of need, everywhere else in the game: first pickup, first ghost death, first
-transform witnessed, first two-person task. Each fires once ever, per player.
-
-**Done** every first-time interaction has exactly one line; none repeat.
-**Verify** playtester fresh profile through a full round, screenshot each line.
+**Done** both body kinds; AFK detection; relocation; no enumerable difference beyond the public one.
+**Verify** `lune run tests/body-rules.test.luau` over cause × idle × reachable; `exploit-auditor`
+answers the A3 question directly: *what is true of the living and false of the dead, for every
+server-owned replicated property?*
 
 ---
 
-### C24 — Lobby is not dead
-**Tier** Small · **Runner** 🤖 · **Deps** C23
+### V13 — TrackerService: the sharpening pulse
+**Tier** Large · **Runner** 🤖 · **Deps** V04 · 🔒
 
-§9.3. Visible countdown, cosmetic preview stand, tips, and the Solo Trial entrance. A player waiting must
-never see a static screen — that reads as *broken*, not as *waiting*, and they leave.
+The pressure that replaces the escape gate (§4.6). **This is the balance-critical chunk of the whole
+rewrite** — it is the only thing preventing hiding from being the winning strategy, and the symptom of
+getting it wrong is a round where nothing happens.
 
-**Done** the lobby has three things to look at and a countdown that is always visible.
-**Verify** playtester screenshot of the lobby at `IDLE` and at `INTERMISSION`.
+- Pure module **`src/shared/pure/TrackerCurve.luau`** — `(secondsElapsed, duration) → {interval,
+  radius}`, interpolating 90s/40 studs → 30s/15 studs.
+- Input is **only** V04's noise history. No position feed, no live tracking.
+- **Vague and slow, never live.** The Aswang is a player. Give a player reliable tracking and it stops
+  needing to blend in — it walks to the pings and the social layer drains out of the game.
 
----
-
-## 7. Track D — polish
-
-### C25 — Quick chat wheel
-**Tier** Large · **Runner** 🤖 · **Deps** C24 · 🔒 · Plan-backed.
-
-§4.5, and the spec says plainly: **do not cut it.** Accusation gameplay with no way to accuse is not
-gameplay. Voice needs 13+ verification most of your audience lacks, and typing mid-chase on a phone is
-impossible.
-
-- One button → radial menu, 8 phrases from §4.5, thumb-reachable on a phone.
-- `RequestQuickChat` → rate-limited, server-broadcast, **`TextService`-filtered**.
-- `"It's [nearest player]!"` resolves the name **server-side**. A client-supplied name is a free
-  impersonation exploit.
-- Optional world ping.
-
-**Done** all 8 phrases send, filter, and display; the wheel is usable one-handed.
-**Verify** playtester on a touch-emulated viewport; screenshot of the wheel and a received message. 🔒.
+**Done** pulse fires on the curve; reads noise only; nothing continuous.
+**Verify** `lune run tests/tracker-curve.test.luau` asserting monotonic sharpening across the round and
+the endpoint values; `exploit-auditor` answers: does the pulse payload let the Aswang infer more than
+an area — a player identity, an exact position, a count?
 
 ---
 
-### C26 — Full HUD and the end screen
-**Tier** Medium · **Runner** 🤖 · **Deps** C25
+## 5. Track V2 — feel, and a HUD that reads
 
-Now polish C18, informed by what GATE 1 told you. The end screen is where the reveal lands — §4.8 calls
-it the screenshot people share, and §8.4 says the cosmetic shop belongs here and nowhere else.
+### V14 — The feel pass
+**Tier** Large · **Runner** 🤝 · **Deps** V13
 
-**Load `.claude/skills/ui-polish/SKILL.md` before starting.** It carries the motion vocabulary (which
-easing, which duration, for which moment), the mobile thumb-zone and scaling rules, the polish checklist,
-and the secrecy rules that apply to UI specifically. It exists so this chunk is not re-derived from
-general Roblox advice, which is written for menus rather than for a HUD read at a glance in fog.
+**The gate on V16, and a deliberate reordering of spec §12.** A greybox under default lighting does not
+test the game you are building.
 
-The three constraints that outrank taste, in short:
+Scope is atmosphere, not art: Future lighting, heavy `Atmosphere` fog, very low ambient, four warm
+point lights, the night ambience loop, and the **two VFX the mechanics depend on** — the transform
+tell and the feed. Props, textures and dressing wait for V21.
 
-- **Role-conditional UI lives in `PlayerGui` and nowhere else.** Anything drawn in the world — a
-  `BillboardGui`, a `Highlight`, a `ParticleEmitter` — is visible to every client.
-- **The Aswang's HUD differs in CONTENT, never in SHAPE.** Same panels, same positions, same animations.
-  §4.4's fake task list only works if the screen it sits in is indistinguishable.
-- **Numbers go in `UIController`'s `LAYOUT` / `MOTION` / `COLOUR` tables** with a `config-ok` reason.
-  `check:config` enforces this; a duration that must agree with a balance value is not `config-ok` at all
-  — `MOTION.TaskBar = Config.Round.SnapshotInterval` is the pattern.
+**Audio is mechanically load-bearing in v2.0**, not decoration: §4.4's noise must be *heard* for the
+risk economy to read at all, and V04's "that was loud" cue is an audio problem before it is a UI one.
 
-#### Animated art, if a still image is not enough
+**The feed VFX is the rating-sensitive one** (§4.9). Suggestion, not depiction: hunched silhouette, an
+audio cue, a particle effect, camera turned away. No blood.
 
-Most of "animated on change" is code — a `TweenService` pulse on a value, a slide on a panel, a fade on a
-takeover. Nothing needs an art asset. Where a genuine moving image IS wanted (a title flourish, a loading
-screen, an end-screen accent), the route is a **sprite sheet**, not a video:
+**Done** the barrio is frightening at 30fps on a phone; noise is audible and directional; both VFX read
+at distance.
+**Verify** playtester screenshots each phase plus a transform and a feed; `LightBudget` still passes;
+frame rate measured on a real device.
 
-| Route | Verdict |
+---
+
+### V15 — HUD v2
+**Tier** Large · **Runner** 🤖 · **Deps** V14
+
+The HUD shipped at `C18`/`C26` draws a task bar and an escape gate. Neither exists.
+
+- Remove the task bar and gate elements. Add the **carry slot** (which of the three you hold), the
+  sunrise timer, and the search progress ring.
+- **No alive count, under any name.** Amendment A3's forbidden-name list applies unchanged:
+  `SurvivorsRemaining`, `DeadCount`, a roster the client can count. It has no data source and must not
+  be given one.
+- **The Aswang's HUD differs in CONTENT, never in SHAPE.** Same panels, same positions, same
+  animations. Role-conditional UI lives in `PlayerGui` and nowhere else — a `BillboardGui`, a
+  `Highlight` or a `ParticleEmitter` in the world is visible to every client.
+- Load the `ui-polish` skill before touching this.
+
+**Done** every v2 state legible on a phone; no task/gate remnants; shapes identical across roles.
+**Verify** playtester screenshots both roles at the same moment and the artifact shows no shape
+difference; `check:config` green on the `LAYOUT`/`MOTION` tables.
+
+---
+
+## 6. ══ GATE 1 ══
+
+### V16 — The playtest
+**Tier** — · **Runner** 🧍 · **Deps** V15
+
+**Real humans, 5 rounds, 3–5 players.** Load the `playtest` skill. This is spec §12's M7 and it is the
+cheapest moment in the project to be wrong.
+
+**The three questions v2.0 exists to answer, and they are not "is it fun":**
+
+1. **Does hiding win?** If a round passes where survivors camped and won, the tracker curve (V13) is
+   too gentle. This is the redesign's single biggest risk.
+2. **Does anyone ever kill the Aswang?** Target is 10–20% of survivor wins. At 0% the buntot pagi is
+   decoration — check §6.5's invariants 1 and 2 before touching anything else.
+3. **Does searching feel like survival, or like a chore?** This is the whole reason v2.0 exists. If
+   players describe searching as a task list, the rewrite did not land and the honest move is to say
+   so here rather than at launch.
+
+**Done** 5 rounds played, notes written to `docs/playtests/`, all three questions answered with
+evidence rather than impression.
+**Verify** the recording sheet is filled in. **Nothing downstream starts until this chunk has a
+written answer to question 1.**
+
+---
+
+## 7. Track V3 — FTUE
+
+### V17 — The guaranteed first find
+**Tier** Large · **Runner** 🤖 · **Deps** V16
+
+§10's hard rule, remapped. A brand-new player's first round seeds a **guaranteed-full container near
+their spawn**, with a waypoint.
+
+An empty search is correct design for a returning player and **actively hostile as a first
+impression** — it is precisely the "wandering a dark map with no idea what to do" that 1.1M people quit
+over. `C20` did this for tasks; the shape carries over, the target changes.
+
+**Done** a first-time profile always finds an item within 60s; a returning profile does not get the
+guarantee.
+**Verify** `lune run tests/first-find.test.luau` over first-round × returning × layout; playtester
+joins with a wiped profile and finds an item.
+
+---
+
+### V18 — Solo Trial v2
+**Tier** Large · **Runner** 🤖 · **Deps** V17
+
+The shipped Trial (`C21`/`C22`) teaches tasks. Rewrite the 90-second timeline to teach the v2 loop:
+**search two containers → hear how loud it is → the scripted Aswang is drawn by the noise → learn the
+tell → throw salt.**
+
+`TrialTimeline.luau` and `TrialAdmission.luau` survive as shapes; the beats change.
+
+**Do not let it grow into a PvE campaign.** v2.0's items and searching make that temptation stronger
+than v1.3's did, not weaker — this is the exact trap that killed the competitor, and 90 seconds is the
+cap, not a target.
+
+**Done** 90 seconds, one player, teaches all four beats, hands off to the queue.
+**Verify** `lune run tests/trial-timeline.test.luau` over the full 90s walk; playtester completes it
+solo with `MinPlayers` unmet.
+
+---
+
+## 8. Track V4 — reconnect the business layer
+
+### V19 — Badges and analytics, remapped
+**Tier** Large · **Runner** 🤖 · **Deps** V18
+
+The business layer never stopped working; it is measuring a game that no longer exists.
+
+- `First Task` → **`First Find`**. Same funnel position, same 50% gate, same diagnostic value.
+- `task_completed` → `container_searched` / `item_found`. Add `feed_completed`, `feed_interrupted`,
+  `garlic_blocked` (the loyalty test, and how often it happens), `camouflage_used`, `aswang_killed`,
+  `husk_created`, and `round_ended.winCondition`.
+- **No sixth badge for killing the Aswang.** It measures a rare event, not a funnel stage, and five
+  badges mapping to five funnel steps is worth more than six that don't.
+
+**Done** every event in Appendix B fires; badges award on the v2 triggers; `BadgeRules` grid updated.
+**Verify** `lune run tests/badge-rules.test.luau`; events visible in the Creator Hub dashboard.
+
+---
+
+### V20 — Profile migration v1 → v2
+**Tier** Large · **Runner** 🤖 · **Deps** V19
+
+`SchemaVersion` 1 → 2. `Stats.TasksDone` becomes `Stats.ItemsFound`; `Stats.AswangKilled` is new.
+
+Anyone who played the v1.3 build has a profile on disk. Migration is the difference between a returning
+player and a support message.
+
+**Done** a v1 profile loads, migrates, and round-trips without loss.
+**Verify** `lune run tests/profile-migration.test.luau` — v1 fixture in, v2 out, every field accounted
+for, idempotent on a second read.
+
+---
+
+## 9. Track V5 — art and the sprite pipeline
+
+### V21 — Sprites, dressing, and the animation tool
+**Tier** Large · **Runner** 🤝 · **Deps** V16
+
+Two halves: the map dressing v1.3 already did once, and a **new sprite pipeline** — the first chunk in
+either plan where the agent generates a moving image rather than wiring one you made.
+
+#### What the tool does
+
+A Python script (`tools/spritegen.py`, Pillow — 3.9.6 and Pillow 11.3.0 are present) that accepts
+either input:
+
+| You supply | The tool does |
 | --- | --- |
-| Tween a still `ImageLabel` in code | ✅ first choice — free, instant, no upload, no moderation wait |
-| **Sprite sheet** — one image of N frames, cycled by `ImageRectOffset` | ✅ the only real "animated asset" worth doing here. One free upload, one download, mobile-safe |
-| `VideoFrame` | ❌ **2,000 Robux per upload**, needs ID verification, max 2 playing at once, capped at 1280×720, and **no transparency** — a solid rectangle on a HUD |
+| **One still PNG** | Generates the frame strip procedurally — pulse, glow, flicker, drift, shake, rotate, scale, colour-cycle, dissolve, layered parallax |
+| **A frame strip you drew** | Slices, reorders, normalises frame sizes, re-packs |
 
-Sprite-sheet rules, so this does not become a performance bug later:
+Both paths then: resize under the 1024px cap, emit the sheet, and print the `ImageRectOffset` math and
+the Luau `LAYOUT` table ready to paste.
 
-- **Keep the sheet ≤ 1024px on its longest side.** §5's mobile budget is non-negotiable and a 4096px sheet
-  is a real memory cost on a mid-range Android.
+**What it cannot do: draw new content.** A still of a standing aswang cannot be made to walk. That
+needs frames drawn by hand — and §3's OUT list bans character animation anyway. The line from `C26`
+still holds: *if a sprite sheet ever starts describing a creature performing an action, it has been
+crossed.*
+
+#### 🧍 The step that needs you
+
+**This chunk halts until you supply source images.** The shortlist, in value order:
+
+1. **Salt burst** — the reveal moment, the most-seen effect in the game
+2. **Smoke** — the Aswang's escape (§4.3)
+3. **Feed** — must read as suggestion, not depiction (§4.9)
+4. **Lantern glow** — ambient, and it sells the fog
+5. **Title flourish** for the end screen — where the shareable screenshot happens
+
+A still PNG each is enough for all five; every one is a procedural-motion case. Say which you want
+hand-drawn instead and the tool takes that path for those.
+
+#### Rules, so this does not become a performance bug
+
+- **Sheet ≤ 1024px on its longest side.** §5's mobile budget is non-negotiable; a 4096px sheet is a
+  real memory cost on a mid-range Android.
 - **12–15 fps is plenty.** 30 costs battery for motion nobody sees through fog.
-- **The animator stops itself when the UI is hidden.** A loop still ticking during a chase is a frame cost
+- **The animator stops itself when the UI is hidden.** A loop ticking during a chase is a frame cost
   with nothing on screen to justify it.
-- Frame size, count and fps live in `LAYOUT` with `config-ok` reasons, like every other HUD number.
+- Frame size, count and fps live in `LAYOUT` with `config-ok` reasons.
+- **Upload early.** Assets sit in Roblox's moderation queue for minutes to hours, and publish day is
+  not when to discover that.
 
-**Who does which step:** you supply or generate the picture and turn it into a frame strip (external AI
-tooling — nothing in this project generates images; see `asset-pipeline`). The agent uploads it with
-`upload_image` and writes the cycling code. **Upload early** — assets sit in Roblox's moderation queue for
-minutes to hours before they resolve, and that is not a thing to discover on publish day.
-
-> **Scope note.** §3's OUT list says "Custom animations". That means **character** animation — the
-> Animation Editor, a custom monster rig, the thing §4.3 deliberately replaced with a scale-and-colour
-> tween. A cycling `ImageLabel` in the HUD is UI, and "Mobile-first UI" is on the ✅ IN list. If a sprite
-> sheet ever starts describing a *creature performing an action*, that is the line and it has been crossed.
-
-**Done** every HUD element themed, readable, and animated on change; the reveal has weight; the polish
-checklist in `ui-polish` passes against a screenshot.
-**Verify** playtester screenshots each phase, plus both win reveals.
+**Done** the tool handles both input paths; five sheets uploaded and cycling; the barrio dressed;
+mobile budget still met.
+**Verify** `python3 tools/spritegen.py --self-test`; playtester screenshots each effect in-game;
+frame rate measured on a real device after the dressing pass.
 
 ---
 
-### C27 — Mobile input and performance
-**Tier** Medium · **Runner** 🤝 · **Deps** C26
+## 10. Track V6 — launch
 
-§5's budget is non-negotiable — 60% of your players are on a phone.
+### V22 — Anti-cheat sweep for the v2 surface
+**Tier** Large · **Runner** 🤖 · **Deps** V21 · 🔒
 
-`.claude/skills/ui-polish/SKILL.md` carries the scaling rule (design at one reference size, one `UIScale`
-per ScreenGui, and clamp the floor — a pure viewport ratio puts a phone at 0.22× and makes the HUD
-unreadable), the thumb-zone and safe-inset numbers, and the UI performance traps. Read it first.
+v1.3's `C41` never ran, and v2.0 added seven remotes and three secrets it did not have.
 
-- Touch buttons for transform, interact, throw, quick chat. Thumb zones, not desktop positions scaled down.
-- `StreamingEnabled` tuned; dynamic lights capped at `MaxVisibleLights` (8).
-- **Test on an actual mid-range Android**, not Studio's emulator. 30fps target.
+- Every new remote in a `Config.AntiCheat` budget: `RequestSearch`, `RequestPlaceGarlic`,
+  `RequestStrike`, `RequestCamouflage`, `RequestSmoke`, `RequestFeed`, `RequestDropItem`.
+- **`check:ratelimit` is a text tripwire on obvious shapes and cannot follow data flow.** It will pass
+  over a handler that consults `AntiCheatService` and then ignores the answer. That is what
+  `exploit-auditor` is for and neither replaces the other.
+- **The three v2 secrets, audited explicitly:** the container layout seed, the Aswang's health outside
+  `Exposed`, and the camouflage charge state.
 
-**Done** 30fps sustained on a real phone during a chase — the worst case, not the lobby.
-**Verify** 🧍 you, with a phone in your hand and the stats overlay on. Nothing else counts here.
-
----
-
-### C28 — Lighting, atmosphere, and the diegetic sunrise
-**Tier** Medium · **Runner** 🧍 · **Deps** C19
-
-Future lighting, heavy `Atmosphere` fog, very low ambient, few warm point lights. §5's sightline rule:
-you should almost always see *something*. Total darkness is confusing, not scary — fear is *partial*
-information.
-
-**The one to actually build:** Appendix C.3 — the competitor's "dynamic sunset-to-night" as **your round
-timer**. The sky visibly progressing toward sunrise *is* the countdown. Diegetic, no UI, free tension.
-Drive `Lighting.ClockTime` from `RoundSnapshot`'s remaining seconds.
-
-**Done** the sky tracks the round; the map is atmospheric and still readable.
-**Verify** screenshots at 0%, 50%, 90% of round duration. Publish after.
+**Done** every remote budgeted; the three secrets confirmed server-only by an adversarial read.
+**Verify** `verify` green; `exploit-auditor` on the full v2 server surface, briefed with those three
+questions by name.
 
 ---
 
-### C29 — Audio pass
-**Tier** Medium · **Runner** 🧍 · **Deps** C28 · Load the `asset-pipeline` skill first.
-
-§5 and §14.3: **audio is half of horror and it's free.** Highest fear-per-hour in the project — budget
-real time, not leftovers.
-
-Creator Store audio: ambient night loop, distant dogs, wind, footsteps, heartbeat when the Aswang is
-near, transform stinger carrying `TransformAudioRange` (40 studs), the gate opening, the sunrise.
-
-**Done** every listed cue plays at the right moment and range.
-**Verify** playtester captures console confirmation of each cue; you listen to a full round with
-headphones. There is no automated check for "does this sound scary."
-
----
-
-### C30 — Map art dressing
-**Tier** Medium · **Runner** 🧍 · **Deps** C29
-
-Now dress the greybox — free Creator Store assets and parts. **Do not change the layout**; it passed
-GATE 1 and the layout is the thing that was validated. Horror is the most forgiving genre for cheap art:
-darkness, fog and lighting hide low-poly geometry. That is a real advantage of the genre you picked.
-
-**Done** the Barrio reads as a Filipino village at night; crossing time unchanged; FPS unchanged.
-**Verify** re-measure crossing time and phone FPS — both must match C17 and C27. Publish after.
-
----
-
-## 8. Track E — the business layer
-
-### C31 — ProfileStore and the data model
-**Tier** Large · **Runner** 🤖 · **Deps** C19 · 🔒 · Plan-backed.
-
-§6.6. **Do not hand-roll DataStore access** (§6.1) — session locking and duplication bugs are a solved
-problem and solving them again costs you a week.
-
-- ProfileStore (or equivalent session-locked wrapper).
-- `SchemaVersion = 1` **and the migration path written on day one**, before you need it. You will change
-  the schema; the question is only whether the migration exists when you do.
-- Save on meaningful change, on leave, and on `BindToClose` (the hook from C01).
-- **Never** trust a client value into the profile.
-
-**Done** data survives rejoin and a server shutdown; a v0 profile migrates to v1 cleanly.
-**Verify** `lune run tests/profile-migration.test.luau` on the pure migration function. Playtester:
-earn XP, leave, rejoin, XP present. 🔒 mandatory.
-
----
-
-### C32 — XP, levels, coins
-**Tier** Medium · **Runner** 🤖 · **Deps** C31
-
-§7. `src/shared/pure/XPCurve.luau` — `(xp) → (level, progressToNext)`. Awards per §4.8's end screen.
-
-**Done** XP and coins award per round; the level bar fills; both persist.
-**Verify** `lune run tests/xp-curve.test.luau` — monotonic, no division by zero at level 1, sane at
-level 100.
-
----
-
-### C33 — Daily login streak
-**Tier** Medium · **Runner** 🤖 · **Deps** C32
-
-§7 calls this the single highest-ROI retention feature you can build. Escalating rewards, meaningful
-day-7 payoff. UTC day boundaries in a pure function — **timezone bugs here are silent and permanent**,
-and a streak that resets wrongly is worse than no streak at all.
-
-**Done** claiming advances the streak; a missed day resets it; day 7 pays out properly.
-**Verify** `lune run tests/daily-streak.test.luau` — same day, next day, skipped day, DST, year boundary.
-
----
-
-### C34 — Six cosmetics
-**Tier** Medium · **Runner** 🤝 · **Deps** C33
-
-§7: enough to show progress, not enough to burn your content. §8.2: sell what appears in clips — death
-effects, transform auras, lantern colours. Some unlock by level, some by coins, some are gamepass-only
-(C37).
-
-**Done** 6 exist, own/equip persists, they render on the avatar.
-**Verify** playtester equips each and screenshots it.
-
----
-
-### C35 — The five funnel badges
-**Tier** Medium · **Runner** 🤝 · **Deps** C31
-
-Appendix B. 🧍 create the 5 badges in the Creator Hub, put the IDs in `Config.Badges`. 🤖 wire
-`BadgeService` to award them.
-
-`Welcome` · `First Task` · `First Round` · `First Blood` · `Balik-Balik`.
-
-This is your **free, tamper-proof, permanent retention dashboard** — publicly readable via the Roblox API,
-which is exactly how Appendix C diagnosed the competitor. `First Task ÷ Welcome` is the number that
-killed them (20.1%) and §10's gate says yours must clear **50%**.
-
-**Done** all 5 award correctly; `Config.Badges` has real IDs, not zeros.
-**Verify** playtester triggers each condition; confirm the award in the Creator Hub.
-
----
-
-### C36 — Group, social links, private servers
-**Tier** Small · **Runner** 🧍 · **Deps** —
-
-§9.2 — can be done any time, so do it early; it has real-world lead time and it is three launch blockers
-in one sitting.
-
-- Create the Roblox group, link it on the store page, set `Config.Community.GroupId`.
-- Social links: TikTok, Discord, YouTube.
-- **Private servers ENABLED and priced (~100 R$/mo).** §8.2 calls this your #1 earner; the competitor had
-  it switched off across 2.5M visits.
-
-**Done** the group exists, links are live, private servers are purchasable.
-**Verify** open the store page in a browser and see all four.
-
----
-
-### C37 — Gamepasses and dev products
-**Tier** Small · **Runner** 🧍 · **Deps** C34
-
-§8.2, created in the Creator Hub: Starter Pack (79), Survivor Pack (249), VIP (799), Coin Packs (99/399).
-
-VIP's 2× XP is **cosmetic progression, not round advantage** — that distinction is what keeps an
-asymmetric game fair, and §8.3 lists what you must never sell. No extra salt, no revives, no longer
-transform, and **no increased Aswang chance**.
-
-**Done** 3 passes + 2 products live and purchasable, IDs in `Config`.
-**Verify** buy one yourself from an alt account.
-
----
-
-### C38 — MonetizationService
-**Tier** Large · **Runner** 🤖 · **Deps** C37 · 🔒 · Plan-backed.
-
-- `ProcessReceipt` — **idempotent**, granting before returning `PurchaseGranted`. Getting this wrong
-  either double-grants or eats a real purchase; both are unrecoverable and one is a refund request.
-- Gamepass ownership cache per `Profile.Purchases.GamepassCacheUTC`.
-- Shop **on the end screen only** (§8.4) — never mid-round.
-
-**Done** a purchase grants exactly once and survives a rejoin mid-transaction.
-**Verify** playtester buys a dev product in Studio's test mode; confirm single grant and persistence. 🔒.
-
----
-
-### C39 — Group join reward
-**Tier** Small · **Runner** 🤖 · **Deps** C36, C31
-
-§9.2. In-lobby panel, `GroupJoinRewardCoins` (250), claimable once, verified server-side via
-`Player:IsInGroup`. Every group member is someone you can re-activate on every update, free, forever.
-
-**Done** reward grants once; re-claim refused; the panel is visible in the lobby.
-**Verify** playtester claims, rejoins, is refused the second claim.
-
----
-
-### C40 — Analytics: every event in Appendix B
-**Tier** Medium · **Runner** 🤖 · **Deps** C38
-
-All 15 events, exact names from Appendix B. The funnel that matters:
-`joined → reached an ACTIVE round → completed a round → returned on day 2`.
-
-Also track **win rate per side** from day one — Appendix A's tuning target is <60% either way and you
-cannot tune what you don't measure. And §9.5's "% of joins that reached an ACTIVE round": if it's low,
-players are bouncing off an empty lobby and **every other retention number you have is lying to you**.
-
-**Done** all 15 fire with correct payloads; the funnel is visible in the Creator Hub.
-**Verify** playtester plays a round; every expected event appears in the dashboard.
-
----
-
-### C41 — Anti-cheat sweep
-**Tier** Large · **Runner** 🤖 · **Deps** C40 · 🔒 · Plan-backed. **`exploit-auditor` mandatory.**
-
-C02 built the mechanism; this chunk applies it everywhere and turns logging into enforcement.
-
-- Every `OnServerEvent` handler consults `AntiCheatService`. No exceptions, no waivers without a reason.
-- Speed and teleport sanity checks.
-- Escalation: log → throttle → kick, with thresholds in `Config`.
-- **A full re-read of every path the role could leak through** — attributes, tags, sounds played to one
-  player, Highlights, backpack contents, speed multipliers. §6.2's *derived hint* problem: none of these
-  contain the word "role" and every one is readable by any client.
-- **Give `check:secrecy` a field allowlist for the two reveal remotes.** Measured at C01: `RoundEnded`
-  and `RoleAssigned` are on `REVEAL_ALLOWLIST`, so the scanner skips those calls entirely rather than
-  inspecting what is *in* the payload — and Luau accepts an **extra** field on an annotated table
-  without complaint (it catches wrong types and missing fields only). So `KillerName = killer.Name`
-  added to the reveal passes both the typechecker and the check. Pin the permitted field names.
-
-**Done** `check:ratelimit` and `check:secrecy` clean with no new waivers; `exploit-auditor` finds no
-role-leak path.
-**Verify** 🔒 mandatory, and its verdict gates the chunk. This is the last structured look at the secret
-before real players — some of whom will be actively trying to break it, because knowing the imposter is
-worth more here than in almost any other game.
-
----
-
-## 9. ══ GATE 2 ══
-
-### C42 — M12: playtest #2 and the balance pass
-**Tier** — · **Runner** 🧍 · **Deps** C41 · Load the `playtest` skill.
-
-8 players. Tune `Config.luau` until **neither side wins more than ~60%** (Appendix A).
-
-Use Appendix A's table — it already tells you which knob to turn in which direction. Change **one knob at
-a time**, commit each with a `balance(...)` prefix so `git log --grep balance` reconstructs what each
-session was testing.
-
-`tests/config.test.luau` pins 13 relationships between these numbers (salt reaches further than the
-Aswang kills, the reveal outlasts the stun, the kill cooldown outlasts a full transform cycle). If a
-tuning change breaks one, that is the test doing its job — **the relationship is the invariant, not the
-number.**
-
-**Done** win rate 40–60% either side across ≥10 rounds; notes written.
-**Verify** `npm run test:unit` green after every change; win-rate data from C40.
-
----
-
-## 10. Track F — launch
-
-### C43 — Store page
-**Tier** Small · **Runner** 🧍 · **Deps** C42
-
-§13 — 80% of whether anyone clicks.
-
-- **Icon** readable at thumbnail size, one focal image, high contrast.
-- **Thumbnails** — the transform moment and a group of survivors. Faces and reactions outperform scenery.
-- **Title** stuffed the way theirs was: Tagalog verb + bracket tags. It earned 2.5M visits; that part of
-  their execution worked and is free to copy.
-- **Description leads with the folklore.** Name the creatures up front, emoji bullets, update promise.
-
-**Done** every §13 store-page box ticked.
-**Verify** view the page logged out, on a phone.
-
----
-
-### C44 — Technical launch checklist
-**Tier** Medium · **Runner** 🤝 · **Deps** C43
-
-§13's technical list, every box:
-Android + iPhone + PC · exactly 3 players · a full 8 · data across rejoin and shutdown · all remotes
-rate-limited · rating questionnaire answered honestly (§4.9 — gore pushes you to 13+ and cuts off the
-audience that plays and spends most) · private servers priced · passes purchasable · analytics verified.
-
-**Done** every box ticked with evidence, not memory.
-**Verify** `npm run verify` green, plus a written pass over the list.
-
----
-
-### C45 — Launch
-**Tier** — · **Runner** 🧍 · **Deps** C44
-
-§9.4: **a scheduled time announced to a concentrated audience.** A steady 20 players at one hour beats
-200 spread across a day — with `MinPlayers = 3` and 8-player servers, concentration is the difference
-between full servers and a game that looks dead to everyone who arrives.
-
-3–5 clips ready to post *that day*.
-
-**Then watch one number:** `First Task ÷ Welcome`. If it is under 50%, §10 is unambiguous — stop
-everything and fix the FTUE. Not the art, not the shop, not marketing. You will know within a day,
-because the badge tells you.
+### V23–V26 — Balance, store, launch
+
+These are v1.3's `C42`–`C45` and their substance is unchanged. Read them from git history
+(`git show 6edc967:docs/BUILD-PLAN.md`) — they were correct and the rewrite does not touch them.
+
+| | |
+|---|---|
+| **V23** | Playtest #2 and the balance pass. Tune until neither side wins >60%. **Plus v2's own target: "Aswang killed" lands in 10–20% of survivor wins** |
+| **V24** | Store page. §13's list, with the description leading on **salt, bawang and buntot pagi** — no competitor is using them and every Filipino player recognises them |
+| **V25** | Technical launch checklist. Two rows are new: a round where someone disconnects mid-round (husks gate the Aswang's win), and a round where the Aswang is killed (the rarer condition is the easier one to ship broken) |
+| **V26** | Launch |
 
 ---
 
 ## 11. Track M — marketing, from today
 
-> **Not blocked by anything. Do not wait for the game.** §14.1: the game is 20% of the work,
-> distribution is 80%. Your reference creator succeeded because he had 308K followers *before* the game
-> existed. This track has the longest lead time in the whole plan and it is the one nobody starts on time.
+Unchanged from v1.3 and still the longest-lead item in the project. §14.1 is right: **start posting
+during the build, not at launch.** The devlog is the marketing.
 
-| | Chunk | Cadence |
-| --- | --- | --- |
-| **M1** | Start the TikTok/Shorts devlog — *"Day N of making my Roblox aswang game"* | Start now, post through the whole build |
-| **M2** | Post in Tagalog, target `#robloxphilippines` — underserved, loyal, proven | Every post |
-| **M3** | End every post with an engagement question (*"Anong aswang ang idadagdag ko?"*) | Every post |
-| **M4** | Recruit your playtest group from the audience (§14.2) | Before C19 — **this gates GATE 1** |
-| **M5** | Bank 3–5 launch-day clips | Before C45 |
-
-**M4 is a real dependency.** GATE 1 needs six humans who will show up at an agreed time. If you have not
-started building that audience by the time you reach C17, C19 blocks on recruitment, and every chunk
-after it blocks on C19.
+v2.0 gives you better material than v1.3 did. "I rebuilt my game's entire objective system because the
+missions didn't make sense" is a devlog episode. So is the loyalty-test doorway, and so is the moment
+someone kills the aswang with a stingray tail.
 
 ---
 
 ## 12. Quick reference
 
-### Dependency spine
+| Want to… | Chunk |
+| --- | --- |
+| Remove the task game | V01 |
+| Make searching work | V03, V04 |
+| Make the monster feed | V06 |
+| Stop camouflage leaking the role | V07 |
+| Make salt matter | V05, V08 |
+| Let survivors kill it | V10 |
+| Stop hiding from winning | V13 |
+| Know whether any of it worked | **V16** |
+| Give me sprites to animate | **V21** |
 
-```
-C01 ▶ C02 ▶ C03 ▶ C04 ▶ C05 ▶ C06 ─┐
-C01 ▶ C07 ▶ C08 ▶ C09 ▶ C10 ▶ C11 ─┼▶ C12
-C07 ▶ C13 ▶ C14                    │
-C05 ▶ C15 ▶ C16                    │
-                                   ▼
-              C17 (greybox) ▶ C18 (HUD) ▶ ══ C19 GATE 1 ══
-                                   │
-        ┌──────────────────────────┼──────────────────────────┐
-        ▼                          ▼                          ▼
-   C20 ▶ C21 ▶ C22 ▶ C23 ▶ C24   C28 ▶ C29 ▶ C30        C31 ▶ C32 ▶ C33 ▶ C34
-        │                                                     │
-        ▼                                                     ▼
-   C25 ▶ C26 ▶ C27                              C35, C36 ▶ C37 ▶ C38 ▶ C39
-                                                              │
-                                                    C40 ▶ C41 ▶ ══ C42 GATE 2 ══
-                                                              │
-                                                    C43 ▶ C44 ▶ C45
-```
+**The three chunks that can silently break the game**, in order of how hard they are to notice:
 
-After GATE 1 the three branches are genuinely independent — FTUE, atmosphere, and the business layer
-touch different files. If you ever want to run two agents at once, that is where it is safe.
-
-### Pure modules this plan creates
-
-Each is a decision worth proving, and each makes its chunk verifiable from a terminal instead of by eye.
-
-| Module | Chunk | Test |
-| --- | --- | --- |
-| `pure/RoundTransitions.luau` | C01 | `tests/round-transitions.test.luau` |
-| `pure/TokenBucket.luau` | C02 | `tests/token-bucket.test.luau` |
-| `pure/RoleDraw.luau` | C03 | `tests/role-draw.test.luau` |
-| `pure/KillValidation.luau` | C05 | `tests/kill-validation.test.luau` |
-| `pure/TaskSelection.luau` | C07 | `tests/task-selection.test.luau` |
-| `pure/ProfileMigration.luau` | C31 | `tests/profile-migration.test.luau` |
-| `pure/XPCurve.luau` | C32 | `tests/xp-curve.test.luau` |
-| `pure/DailyStreak.luau` | C33 | `tests/daily-streak.test.luau` |
-
-⚠️ Everything in `src/shared/pure/` is **requirable and callable by any client** — `src/shared` maps
-wholesale into `ReplicatedStorage`, so a LocalScript can `require()` the module and run it. (Callable,
-not merely readable: reading `.Source` needs plugin security, and assuming that protects you is the
-mistake.) Harmless for six of these eight, and harmless for a reason worth knowing — `Config.luau` is
-itself replicated, so `KillValidation` and `TokenBucket` publish nothing that `Config.Monster.KillRange`
-already hands over. Logic is not secret. **Inputs and seeds are.** For `RoleDraw` that is the security of
-the whole game (see C03); for `TaskSelection` a client-derivable seed is a pacing advantage — an
-exploiter who knows which 5 of 12 spawn can pre-position.
-
-### Chunks where `exploit-auditor` is mandatory
-
-C01 · C02 · C03 · C04 · C05 · C06 · C08 · C11 · C12 · C14 · C15 · C21 · C25 · C31 · C38 · C41
-
-`review-gate.mjs` names it automatically for those paths — but C03, C12, C15 and C41 are the four where
-its verdict should **gate the chunk**, because each is a place the secret can escape.
-
-### Chunks you cannot delegate
-
-**Entirely yours (🧍) — 10:**
-C17 greybox · C19 **GATE 1** · C28 lighting · C29 audio · C30 art · C36 group/links/private servers ·
-C37 Creator Hub products · C42 **GATE 2** · C43 store page · C45 launch.
-
-**Half yours (🤝) — 4:** C27 (agent writes touch input, you test on a real phone) · C34 (you make the
-cosmetics, agent wires them) · C35 (you create the badges, agent awards them) · C44 (agent runs the
-gates, you tick the boxes).
-
-Plus all of Track M, which starts before any of them.
-
-**14 of 45 chunks need you at the keyboard.** Two are the gates — and the gates are what decide whether
-the other 43 were worth building.
+1. **V13** — a gentle tracker curve makes hiding optimal and the symptom is a boring round, not an error
+2. **V11 invariant 1** — a tightened number makes the second win condition unreachable, with nothing to tell you
+3. **V07** — camouflage firing before a reveal deletes the deduction layer, and no test will report it
