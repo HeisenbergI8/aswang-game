@@ -70,6 +70,42 @@ const isAllowed = command => ALLOWED.some(pattern => pattern.test(command))
 export const UNSATISFIABLE = [
   // Example of the shape, kept as documentation rather than an active rule:
   // { pattern: /^npm run test:flaky$/, why: 'known-red suite — gate on `npm run test:unit` instead' }
+
+  // ── `grep -L` IS AN INVERTED CHECK, AND IT READS LIKE THE OBVIOUS ONE ────────
+  //
+  // ADDED AT V01, WHERE IT COST FIVE PHASES. That plan wrote 14 of its 32 verifies as
+  // `grep -rL "<deletedToken>" <file>` — the natural way to express "this token is gone", and the
+  // natural check for a DEMOLITION chunk, which is what a rewrite starts with.
+  //
+  // It is backwards. `-L` prints the files that do NOT match, but grep's exit status still reports
+  // whether any LINE was selected — and under `-L` none ever is. So on a real grep:
+  //
+  //   token ABSENT  (the step SUCCEEDED)  -> prints the filename, exits 1  -> reported FAIL
+  //   token PRESENT (the step DID NOTHING) -> prints nothing,     exits 0  -> reported PASS
+  //
+  // Both directions measured against /usr/bin/grep on 2026-08-26. A plan checked this way reports red
+  // for correct work and green for work never done, which is the worse half.
+  //
+  // WHY IT SURVIVED A LINT PASS BEFORE THIS ENTRY EXISTED: the command is on the ALLOWLIST, it is not
+  // shared, it is not absent, and it RUNS. Every existing lint category said yes. Only running it
+  // reveals the inversion, and by then the plan is hash-bound and cannot be edited without halting
+  // the run — so the checks stay wrong for the life of the chunk and the loop can never report done.
+  //
+  // BEWARE VERIFYING THIS BY HAND IN A SHELL. Claude Code's shell wraps `grep` in a function that
+  // dispatches to `ugrep`, which exits 0 in the absent case — the opposite of the binary this file
+  // runs through execFileSync. A by-hand check therefore CONFIRMS the broken check. That near miss is
+  // the reason this is a guard rather than a lesson.
+  {
+    pattern: /^\s*grep\s+(?:-[A-Za-z]*L[A-Za-z]*|--files-without-match)\b/,
+    why:
+      '`grep -L` inverts: it exits 1 when the token is ABSENT (the step succeeded) and 0 when it is ' +
+      'still PRESENT. There is no bare-grep spelling of "assert absent" here, because the runner ' +
+      'executes argv with no shell — `!`, `test`, pipes and `||` are unavailable. Prove a removal ' +
+      'with something that breaks if the reference survived: `npm run analyze` when the token is ' +
+      'type-visible, the `check:*` script that owns it (remotes, config, scope, ratelimit), or a Lune ' +
+      'suite. If nothing can prove it, leave the step with NO check — lint reports that honestly and ' +
+      'does not fail.'
+  }
 ]
 
 const unsatisfiableReason = command => UNSATISFIABLE.find(entry => entry.pattern.test(command))?.why ?? null
@@ -499,6 +535,31 @@ if (process.argv[1]?.endsWith('verify-plan.mjs')) {
     check('a file check proves a deliverable', shape('test -f src/x.luau'), 'exists')
     check('a run proves behaviour', shape('npm run test:unit'), 'real')
     check('an absent check is none', shape(null), 'none')
+
+    // ── THE INVERTED-GREP GUARD, BOTH DIRECTIONS ────────────────────────────────
+    //
+    // BLOCK: every spelling of "files without a match". These exit 1 on success, so a step checked
+    // this way reports FAIL for correct work — see the UNSATISFIABLE entry for the measured table.
+    check('grep -L is refused', unsatisfiableReason('grep -L "Ghost" src/x.luau') !== null, true)
+    check('grep -rL is refused', unsatisfiableReason('grep -rL "Ghost" src/x.luau') !== null, true)
+    check('grep -Lr is refused', unsatisfiableReason('grep -Lr "Ghost" src/x.luau') !== null, true)
+    check(
+      'the long form is refused too',
+      unsatisfiableReason('grep --files-without-match "Ghost" src/x.luau') !== null,
+      true
+    )
+
+    // ALLOW — the half that matters. `-L` is a distinct flag from `-l`, and CASE IS THE WHOLE
+    // DIFFERENCE: `-l` lists files that DO match and exits 0 when it finds one, which is a normal
+    // presence check and must keep working. A guard that swallowed `-l`, or any flag cluster merely
+    // containing the letter l, would refuse honest checks and get worked around.
+    check('lowercase -l still allowed', unsatisfiableReason('grep -l "Ghost" src/x.luau'), null)
+    check('a plain quiet grep still allowed', unsatisfiableReason('grep -q "Ghost" src/x.luau'), null)
+    check('-rn still allowed', unsatisfiableReason('grep -rn "Ghost" src/x.luau'), null)
+    check('a count check still allowed', unsatisfiableReason('grep -c "Ghost" src/x.luau'), null)
+    check('a non-grep command is untouched', unsatisfiableReason('npm run analyze'), null)
+    // The letter L inside the PATTERN is not a flag. Anchoring is what keeps these apart.
+    check('an L in the pattern is not a flag', unsatisfiableReason('grep -q "LOBBY" src/x.luau'), null)
 
     // The safety property, asserted rather than assumed: quoting cannot produce a second command.
     check('shell metacharacters become inert arguments', toArgv('grep -q "a;b" src/x.luau'), ['grep', '-q', 'a;b', 'src/x.luau'])
