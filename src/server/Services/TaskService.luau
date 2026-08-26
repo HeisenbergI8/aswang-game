@@ -49,6 +49,10 @@ local AntiCheatService = require(script.Parent.AntiCheatService)
 -- `player.Character`. One direction only — GhostService requires RoundService and AntiCheatService and
 -- must never require this file back, for the same load-order reason the comment above gives.
 local GhostService = require(script.Parent.GhostService)
+-- C35. One direction only, like the three above: ProgressionService requires RoundService and nothing
+-- in this file, so the edge cannot close a cycle. Needed for `Stats.TasksDone`, which is what the
+-- `First Task` badge — §10's launch gate, and the number that killed the competitor — is read from.
+local ProgressionService = require(script.Parent.ProgressionService)
 local RoundService = require(script.Parent.RoundService)
 local TeachingService = require(script.Parent.TeachingService)
 local FetchCarry = require(script.Parent.Parent.pure.FetchCarry)
@@ -1039,7 +1043,58 @@ local function tick()
 			written only by `notePresence` from a player's own `RequestTaskProgress`, so a client can
 			still only ever mark ITSELF.
 		]]
-		everCompleted[userId] = true
+		--[[
+			C35. `Stats.TasksDone` IS A 0-OR-1 FLAG, NOT A COUNT, and the two guards below are what
+			make that true rather than approximately true.
+
+			WHY IT IS NOT A COUNT. This block runs once per contributing player PER TICK, so an
+			unguarded `BumpStat` would read a single eight-second hold as a dozen tasks. Counting
+			accurately needs a per-round set of (player, task) contribution pairs that survives a
+			player stepping off the point — the very case the comment above exists to handle — and
+			that state does not exist. BUILD-PLAN puts `everCompleted` into the profile at C40, and
+			the real counter belongs in that same change.
+
+			WHY THE SECOND GUARD READS THE PROFILE. `everCompleted` alone is not enough, and this is
+			measured rather than assumed: it is module state that `Init` does not clear and no
+			`PlayerRemoving` touches, so it is per-SERVER, not per-session. Gated on it alone, a
+			player who hops servers and does one task on each would increment on every hop. Gating on
+			the stored value instead makes the write idempotent across rejoins, server hops and
+			restarts alike — it can only ever move 0 -> 1, for anyone, ever.
+
+			So `>= 1` is true if and only if the player has ever advanced a task, which is exactly and
+			only what the `First Task` badge asks. §10 gates the launch on that number and it is not
+			an approximation. Anything wanting "how many tasks" must add a real counter; this field
+			cannot become one by being read differently.
+
+			`everCompleted` stays as the cheap short-circuit so the profile read happens at most once
+			per player per server rather than every tick.
+		]]
+		if not everCompleted[userId] then
+			everCompleted[userId] = true
+
+			local profile = ProgressionService.GetProfile(player)
+
+			if profile ~= nil and profile.Stats.TasksDone == 0 then
+				--[[
+					A MID-ROUND, PUBLICLY-ATTRIBUTABLE AWARD, AND IT IS SAFE FOR ONE REASON ONLY.
+
+					This bump awards `First Task` during ACTIVE, and a Roblox badge award is timestamped
+					and readable through the public badge API — so it is a signal about a named player,
+					mid-round, that no remote carries and `check:secrecy` cannot see.
+
+					It narrows nothing because the ASWANG IS A FULL TASK PARTICIPANT: `weightFor` passes
+					SURVIVOR for everybody and `TaskWeight.forPlayer` ignores the role (Amendment A2,
+					see `weightFor` above), and `presence` is written from the player's own
+					`RequestTaskProgress` with no role gate. Any player can be the one advancing a task.
+
+					THAT IS A LIVE CONSTRAINT, not a happy accident. The moment the Aswang's task
+					contribution is made zero — a plausible balance change — this award becomes a
+					public "this player is a survivor" beacon, mid-round, with nothing in this repo
+					able to detect it. Move the bump to ENDING if that day ever comes.
+				]]
+				ProgressionService.BumpStat(player, "TasksDone", 1)
+			end
+		end
 	end
 
 	local anyCompleted = false
@@ -1381,7 +1436,18 @@ local function noteTimingStop(player: Player)
 			crediting every stopper on every hit would mark players who merely stood nearby and tapped
 			once. Landing the final hit is unambiguously having done the task.
 		]]
-		everCompleted[player.UserId] = true
+		-- Both guards, for the reasons the contribution site gives: `Stats.TasksDone` is a 0-or-1
+		-- flag, a TIMING player landing the final hit may already have been credited through the hold
+		-- path, and the stored-value check is what makes the write idempotent across a server hop.
+		if not everCompleted[player.UserId] then
+			everCompleted[player.UserId] = true
+
+			local profile = ProgressionService.GetProfile(player)
+
+			if profile ~= nil and profile.Stats.TasksDone == 0 then
+				ProgressionService.BumpStat(player, "TasksDone", 1)
+			end
+		end
 
 		RoundService.SetTasksCompleted(completedCount())
 

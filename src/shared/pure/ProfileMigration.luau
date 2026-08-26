@@ -55,6 +55,32 @@ export type Profile = {
 	Purchases: {
 		GamepassCacheUTC: number,
 	},
+	--[[
+		WHEN THIS PLAYER WAS FIRST SEEN BY THIS GAME (v2, C35). Stamped once, never rewritten, and read
+		by exactly one thing: the `Balik-Balik` badge, which IS Appendix B's day-2 retention number.
+
+		It cannot be derived from anything already stored. `Daily.LastClaimUTC` records a CLAIM, so a
+		player who returns every day and never presses the daily button would never be counted as
+		having returned at all — and `Stats.Rounds` counts rounds, which says nothing about days.
+
+		0 means never stamped: a v1 profile that predates the field, or a first-ever join before the
+		stamp is written. `BadgeRules` treats 0 as "no return is provable" rather than as day zero,
+		because comparing 0 against today's ~20,000 would award day-2 retention to everyone alive.
+	]]
+	FirstSeenUTC: number,
+	--[[
+		WHETHER §9.2's ONE-TIME GROUP JOIN REWARD HAS BEEN PAID (v2, C39).
+
+		A BOOLEAN IN THE PROFILE RATHER THAN A GROUP-MEMBERSHIP CHECK, because the two answer different
+		questions. `Player:IsInGroup` says whether they are in the group NOW — so a player who joins,
+		claims, leaves the group and rejoins it passes that check again, every time, forever. This
+		field is the only thing that makes "claimable once" mean once.
+
+		It lands in v2 alongside `FirstSeenUTC` rather than in a v3 of its own: neither field has ever
+		reached a live DataStore, so there is no stored profile in the world that would tell them
+		apart. Once this build ships, adding a field means a new version.
+	]]
+	GroupRewardClaimed: boolean,
 }
 
 --[[
@@ -74,7 +100,7 @@ export type Result = {
 
 local ProfileMigration = {}
 
-ProfileMigration.CURRENT_VERSION = 1
+ProfileMigration.CURRENT_VERSION = 2
 
 -- A cosmetic id longer than this is not a cosmetic id. Bounds on a stored string keep a corrupt save
 -- from becoming a 4MB key in the next write.
@@ -183,6 +209,10 @@ function ProfileMigration.template(): Profile
 		Purchases = {
 			GamepassCacheUTC = 0,
 		},
+		-- Stamped by `ProgressionService` at session start, not here: a template has no clock, and a
+		-- pure module must not acquire one.
+		FirstSeenUTC = 0,
+		GroupRewardClaimed = false,
 	}
 end
 
@@ -227,6 +257,26 @@ local function reconcile(stored: { [string]: any }): Profile
 		Purchases = {
 			GamepassCacheUTC = num(purchases.GamepassCacheUTC, 0),
 		},
+		--[[
+			CARRIED FORWARD WHEN PRESENT, and that is what makes the v1->v2 step non-destructive: a
+			v2 profile passing through here keeps the day it was actually first seen, so a returning
+			player's `Balik-Balik` is not re-armed by every subsequent session.
+
+			A v1 profile has no such field and defaults to 0 — never stamped — so the next session
+			stamps today and the badge becomes available from the day AFTER this build shipped. That
+			undercounts day-2 retention for anyone who played before v2, which is nobody: the field
+			ships before launch. Recorded here because after launch the same step would be a silent
+			retention dip with no cause in any diff.
+		]]
+		FirstSeenUTC = num(stored.FirstSeenUTC, 0),
+		--[[
+			ONLY A REAL `true` COUNTS AS CLAIMED, and the asymmetry is deliberate. A corrupt value
+			degrades to `false`, which means an unrecoverable save could pay one reward twice — 250
+			coins. The other direction degrades to "already claimed" and silently withholds a reward a
+			player is owed, which is a support message with no evidence behind it and no way to
+			distinguish it from a bug. The cheaper mistake is the one that costs coins.
+		]]
+		GroupRewardClaimed = stored.GroupRewardClaimed == true,
 	}
 end
 
@@ -268,6 +318,17 @@ function ProfileMigration.migrate(stored: any): Result
 
 	if version < 1 then
 		table.insert(applied, "v0->v1 defaults filled, SchemaVersion stamped")
+	end
+
+	--[[
+		v1->v2 IS ADDITIVE AND HAS NO STEP TO RUN. `reconcile` defaults both new fields like every other
+		absent field, and both defaults are the correct answer — this server has no idea when a v1
+		player was first seen or whether they claimed a reward that did not exist yet, and inventing
+		either would be worse than admitting it. The line is recorded anyway so `Applied` reads as a
+		migration in the log rather than as a version bump nothing did.
+	]]
+	if version < 2 then
+		table.insert(applied, "v1->v2 FirstSeenUTC and GroupRewardClaimed added")
 	end
 
 	-- Annotated local with literal branches. The analyzer narrows a literal checked against a declared

@@ -45,6 +45,9 @@ local UP_REMOTES = {
 	-- cycler can spend coins.
 	"RequestBuyCosmetic",
 	"RequestClaimDaily",
+	-- C39. The only remote in the game whose handler makes a Roblox WEB CALL (`Player:IsInGroup`), so
+	-- its budget protects a shared quota rather than just this server's CPU.
+	"RequestClaimGroupReward",
 	-- C21. Both argument-free button presses. `RequestStartTrial` is the only remote in the game whose
 	-- handler spawns an NPC and teleports a character, which is why it is budgeted rather than left to
 	-- `AllowUnbudgetedRemote = false` to refuse silently.

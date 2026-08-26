@@ -730,6 +730,22 @@ local Config = {
 		GroupId = 0, -- TODO(M10): set once the Roblox group exists
 		GroupJoinRewardCoins = 250,
 
+		--[[
+			HOW LONG A "NOT IN THE GROUP" ANSWER IS TRUSTED BEFORE ASKING ROBLOX AGAIN (C39).
+
+			`IsInGroupAsync` is a web call against a quota this server shares across every player on
+			it, and the claim button is pressable by someone who is not a member — so without this,
+			eight clients auto-firing the remote sustain a steady drip of group-API calls forever, and
+			the failure that produces is the bad one: the API throttles, the check throws, and honest
+			members get refused.
+
+			ONLY NEGATIVE ANSWERS ARE CACHED, never positive ones — a positive is consumed
+			immediately and the claim is over. Thirty seconds is the trade: long enough that a held
+			button costs one call rather than dozens, short enough that a player who alt-tabs to join
+			the group and comes straight back does not sit at a stale refusal long enough to give up.
+		]]
+		GroupCheckNegativeCacheSeconds = 30,
+
 		-- C24, §9 item 3. A waiting player must never see a static screen.
 		LobbyTipSeconds = 7, -- how long each tip holds before the next
 	},
@@ -1059,6 +1075,17 @@ local Config = {
 			]]
 			RequestBuyCosmetic = { Capacity = 5, RefillPerSecond = 0.5 },
 			RequestClaimDaily = { Capacity = 2, RefillPerSecond = 0.1 },
+			--[[
+				C39. Tighter than the daily claim next door, and it is the tightest budget in this
+				table for a reason: the handler makes a WEB CALL. `Player:IsInGroup` hits Roblox's
+				membership API, so an unbudgeted firehose here is not just server CPU — it is this
+				server's group-API quota, and exhausting it makes the check fail for every honest
+				player at once.
+
+				One claim per player, ever. A capacity of 2 covers a double-click and a reconnect
+				retry; the refill is slow enough that a rejected claim cannot be retried in a loop.
+			]]
+			RequestClaimGroupReward = { Capacity = 2, RefillPerSecond = 0.05 },
 			--[[
 				Both trial remotes are BUTTON PRESSES — one per session, at most, from an honest
 				client. Priced like `RequestGhostSpook` next door rather than like a heartbeat.

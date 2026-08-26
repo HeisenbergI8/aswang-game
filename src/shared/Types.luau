@@ -52,6 +52,32 @@ export type PlayerProfile = {
 	Purchases: {
 		GamepassCacheUTC: number,
 	},
+	--[[
+		WHEN THIS GAME FIRST SAW THIS PLAYER (v2, C35). Stamped once at session start and never
+		rewritten, because the one thing that reads it — Appendix B's `Balik-Balik` badge — is asking
+		whether TODAY is a different UTC day from the first one, and a field that moved would answer
+		"no" forever.
+
+		SERVER-ONLY LIKE THE REST OF THIS TYPE, and not in `ProfileSnapshot`. It is not secret, it is
+		simply not the client's business: nothing on the HUD renders it, and the rule for that payload
+		is an explicit field list rather than whatever happens to be harmless.
+	]]
+	FirstSeenUTC: number,
+	--[[
+		§9.2's one-time group join reward, paid once and never again (C39). A profile boolean rather
+		than a live `Player:IsInGroup` check, because membership can be left and rejoined and the
+		reward cannot.
+
+		THE CLIENT DOES SEE THIS ONE — `ProfileSnapshot.GroupRewardClaimed` mirrors it, unlike
+		`FirstSeenUTC` above, and the difference is what the field is FOR. A first-seen timestamp
+		decides a badge the server awards; a claim flag decides what a lobby button says, and a button
+		that cannot tell "claim" from "claimed" offers a reward it will silently refuse.
+
+		Sending it changes nothing about who decides. `CommunityService` re-reads THIS field on every
+		claim and re-asks Roblox about membership — the snapshot is what the button renders, never
+		what the server trusts.
+	]]
+	GroupRewardClaimed: boolean,
 }
 
 -- A task instance selected for the current round.
@@ -712,6 +738,15 @@ export type ProfileSnapshot = {
 	-- The receiver's OWN inventory, as an id -> true set. Never anyone else's.
 	Owned: { [string]: boolean },
 	Daily: DailyPreview,
+	--[[
+		C39, §9.2. Whether this player has already taken the one-time group join reward, so the lobby
+		panel can render "claimed" instead of offering a claim the server will refuse.
+
+		A BOOLEAN ABOUT THE RECEIVER, like every other field here. It says nothing about anyone else,
+		and group membership is public on a Roblox profile page in any case. It is NOT authority: the
+		server re-reads `PlayerProfile.GroupRewardClaimed` and re-asks `IsInGroupAsync` on every claim.
+	]]
+	GroupRewardClaimed: boolean,
 	-- Present only on the push that follows a round, so the end screen can show what was earned and
 	-- every other push leaves it nil rather than repeating a stale award.
 	LastAward: RoundAward?,

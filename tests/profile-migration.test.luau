@@ -117,10 +117,101 @@ do
 		"v0 -> v1 stamps the version",
 		result.Profile.SchemaVersion == ProfileMigration.CURRENT_VERSION
 	)
-	check("the migration says what it did", #result.Applied == 1, `{#result.Applied} entries`)
+	--[[
+		TWO entries since C35, not one. A v0 profile is below BOTH thresholds, so it walks the v0->v1
+		step and the v1->v2 step, and `Applied` is the only record of which steps a given profile went
+		through. A count that silently stayed at 1 would mean a step stopped being recorded, which is
+		exactly the thing this field exists to make visible.
+	]]
+	check("the migration says what it did", #result.Applied == 2, `{#result.Applied} entries`)
+	check("v0 -> v2 FILLS the C35 first-seen stamp", result.Profile.FirstSeenUTC == 0)
 	check(
 		"the source table is not mutated",
 		(v0.Stats :: any).TasksDone == nil and rawget(v0 :: any, "SchemaVersion") == nil
+	)
+end
+
+--------------------------------------------------------------------------------
+-- v1 -> v2: the C35 first-seen stamp
+--------------------------------------------------------------------------------
+
+--[[
+	The step that ships the `Balik-Balik` badge, and the one whose failure mode is invisible. If a
+	v2 profile's stamp were dropped on the way through `reconcile`, every session would look like a
+	first-ever join, `Balik-Balik` would never award, and Appendix B's day-2 retention would read as a
+	flat zero — indistinguishable from a game nobody returns to.
+]]
+do
+	local v1 = {
+		SchemaVersion = 1,
+		XP = 300,
+		Coins = 12,
+		Daily = { LastClaimUTC = 1_760_000_000, Streak = 4 },
+	}
+
+	local result = ProfileMigration.migrate(v1)
+
+	check(
+		"v1 migrates rather than reading as current",
+		result.Outcome == "MIGRATED",
+		result.Outcome
+	)
+	check("v1 is recognised as version 1", result.FromVersion == 1, `{result.FromVersion}`)
+	check("v1 -> v2 KEEPS the XP", result.Profile.XP == 300, `{result.Profile.XP}`)
+	check("v1 -> v2 KEEPS the daily streak", result.Profile.Daily.Streak == 4)
+	check("v1 -> v2 leaves the stamp UNSET, not invented", result.Profile.FirstSeenUTC == 0)
+	check("v1 -> v2 leaves the group reward UNCLAIMED", result.Profile.GroupRewardClaimed == false)
+	check("v1 -> v2 records one step", #result.Applied == 1, `{#result.Applied} entries`)
+
+	--[[
+		A REAL v2 STAMP SURVIVES A REJOIN. This is the assertion that matters at runtime: the stamp is
+		written once and read on every later session, so a `reconcile` that reset it would re-arm the
+		badge for a player who had already earned it and inflate day-2 retention on every login.
+	]]
+	local stamped = ProfileMigration.migrate({
+		SchemaVersion = 2,
+		FirstSeenUTC = 1_760_000_000,
+	})
+
+	check(
+		"a stored stamp is carried forward untouched",
+		stamped.Profile.FirstSeenUTC == 1_760_000_000
+	)
+	check("a v2 profile reads as CURRENT", stamped.Outcome == "CURRENT", stamped.Outcome)
+
+	local claimed = ProfileMigration.migrate({ SchemaVersion = 2, GroupRewardClaimed = true })
+
+	check("a claimed group reward survives a rejoin", claimed.Profile.GroupRewardClaimed == true)
+
+	local corruptStamp = ProfileMigration.migrate({ SchemaVersion = 2, FirstSeenUTC = 0 / 0 })
+
+	check("a NaN stamp degrades to unset", corruptStamp.Profile.FirstSeenUTC == 0)
+
+	--[[
+		A CORRUPT CLAIM FLAG DEGRADES TO UNCLAIMED, which is the direction that costs 250 coins rather
+		than the direction that silently withholds a reward a player is owed and leaves no evidence.
+	]]
+	local corruptClaim = ProfileMigration.migrate({
+		SchemaVersion = 2,
+		GroupRewardClaimed = "yes",
+	})
+
+	check(
+		"a non-boolean claim flag reads as UNCLAIMED",
+		corruptClaim.Profile.GroupRewardClaimed == false
+	)
+
+	--[[
+		v3 IS STILL REFUSED. The bump moved the ceiling and must not have removed it — this is the
+		branch that loses data if it is wrong, so it is re-asserted against the NEW current version
+		rather than assumed to have survived.
+	]]
+	local future = ProfileMigration.migrate({ SchemaVersion = 3, XP = 5000 })
+
+	check(
+		"a v3 profile is still REFUSED by a v2 server",
+		future.Outcome == "REFUSED",
+		future.Outcome
 	)
 end
 

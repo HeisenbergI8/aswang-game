@@ -59,6 +59,40 @@ type Profile = ProfileMigration.Profile
 local ProgressionService = {}
 
 --[[
+	FIRED WHEN A PLAYER'S PROFILE IS LOADED AND READABLE (C35), with the value of `FirstSeenUTC` from
+	BEFORE this session stamped it.
+
+	THE SECOND ARGUMENT IS THE WHOLE REASON THIS SIGNAL EXISTS rather than subscribers polling
+	`GetProfile`. `startSession` stamps `FirstSeenUTC` for anyone who has none, so by the time any
+	subscriber could read the live profile it already says "today" — and `Balik-Balik`, which asks
+	whether today differs from the first day, could never be true for anybody. Passing the pre-stamp
+	value is the only way a subscriber can tell a returning player from a new one.
+
+	NOT FIRED when the load failed outright: there is no profile to read, and a subscriber that awarded
+	on a nil would be awarding on a DataStore outage.
+]]
+ProgressionService.ProfileLoaded = Instance.new("BindableEvent")
+
+--[[
+	FIRED AFTER A STAT ACTUALLY MOVED (C35). `(player, statName)`.
+
+	`BumpStat` is the single choke point every badge-gating counter passes through — `TasksDone` from
+	TaskService at the moment a task completes, `Rounds` and `AswangRounds` from `awardRound` at
+	ENDING. One subscription here covers three of the five badges, which is why `BadgeService` does not
+	subscribe to `PhaseChanged` alongside this service and hope the connections fire in the right
+	order. Two services listening to one event and depending on which runs first is the shape of bug
+	that only appears once the service list is reordered for an unrelated reason.
+
+	AFTER the write, never before, and only when the write was not refused — a subscriber's whole job
+	is to read the new value.
+
+	IT CARRIES NO ROLE AND MUST NOT. `AswangRounds` is a stat NAME, not a role: it says this player has
+	now been the Aswang some number of times in their life, and it is only ever bumped at ENDING where
+	the reveal has already gone out. This is a server-side BindableEvent with no remote behind it.
+]]
+ProgressionService.StatChanged = Instance.new("BindableEvent")
+
+--[[
 	SERVER-ONLY STATE. Keyed by UserId, never replicated, never enumerated to a client.
 
 	`sessions` holds the live ProfileStore profile object, not our table — `profile.Data` is the table.
@@ -166,6 +200,24 @@ local function copyInto(target: any, source: any)
 	end
 end
 
+--[[
+	`Save` on a MEANINGFUL CHANGE, which is §6.6's third rule and the one most often skipped. It does
+	not mean "on every field write" — ProfileStore autosaves on its own schedule, and a `Save()` per XP
+	point is a request budget spent on nothing. It means: after a change a player would be angry to
+	lose. A round's award is one. A cosmetic purchase (C34) is one. A stat increment is not.
+]]
+local function saveNow(userId: number)
+	local profile = sessions[userId]
+
+	if profile ~= nil and profile:IsActive() then
+		profile:Save()
+	end
+end
+
+-- Declared ABOVE `startSession` rather than beside its other callers, because `startSession` calls it
+-- for the C35 first-seen stamp — and a `local function` below its use site is not an upvalue at all
+-- but an unknown global, which under `--!strict` the analyzer refuses outright rather than letting it
+-- fail at runtime.
 local function startSession(player: Player)
 	local userId = player.UserId
 
@@ -299,26 +351,59 @@ local function startSession(player: Player)
 	]]
 	task.spawn(ProgressionService.PushProfile, player, nil)
 
+	--[[
+		THE FIRST-SEEN STAMP (C35), AND IT IS READ BEFORE IT IS WRITTEN.
+
+		`Balik-Balik` is Appendix B's day-2 retention, and it asks one question: is today a different
+		UTC day from the first day this game ever saw this player. Stamping first and firing afterwards
+		would make the answer permanently "no" — every subscriber would read a profile that says the
+		player was first seen moments ago. So the pre-stamp value is captured here and carried on the
+		signal, and `BadgeRules` takes it as an argument rather than reading the profile at all.
+
+		WRITTEN ONCE AND NEVER REWRITTEN. A field that moved forward on each login would answer "no"
+		forever in a second way, and this one is not recoverable — there is no other record of when a
+		player arrived.
+
+		Skipped for a read-only profile, like `syncLevel` above and for the same reason: this server
+		does not own that schema. The consequence is that a player whose profile was REFUSED gets no
+		stamp this session and no `Balik-Balik` until they land on a server that understands their
+		version, which is the correct trade against writing into a profile we cannot read properly.
+	]]
+	local data: Profile = profile.Data
+	local firstSeenBefore = data.FirstSeenUTC
+
+	if not readOnly[userId] and firstSeenBefore <= 0 then
+		data.FirstSeenUTC = os.time()
+
+		--[[
+			SAVED IMMEDIATELY, like every other guarded write in this file. §6.6's "meaningful change"
+			covers a once-ever field better than it covers almost anything else: lose this to a crash
+			or a session steal inside the autosave window and the player's NEXT session re-stamps with
+			a later date, so `Balik-Balik` — which IS Appendix B's day-2 retention — silently
+			undercounts them, permanently and with no way to reconstruct the truth.
+
+			The v1 profiles that arrive unstamped have the same gap once, before launch, and that is
+			argued in `ProfileMigration`. This one would recur forever, and a retention dip with no
+			cause in any diff is the most expensive kind of wrong number.
+		]]
+		saveNow(userId)
+	end
+
+	--[[
+		`task.spawn` for the same reason `PushProfile` above is spawned: subscribers award badges,
+		which yields on `UserHasBadgeAsync`, and a yield on the session-start thread would hold up the
+		player's own load behind a Roblox web call.
+	]]
+	task.spawn(function()
+		ProgressionService.ProfileLoaded:Fire(player, firstSeenBefore)
+	end)
+
 	if Config.Debug.VerboseLogging then
 		print(
 			`[Progression] {player.Name}: {result.Outcome} from v{result.FromVersion} -> L{(
 				profile.Data :: Profile
 			).Level}`
 		)
-	end
-end
-
---[[
-	`Save` on a MEANINGFUL CHANGE, which is §6.6's third rule and the one most often skipped. It does
-	not mean "on every field write" — ProfileStore autosaves on its own schedule, and a `Save()` per XP
-	point is a request budget spent on nothing. It means: after a change a player would be angry to
-	lose. A round's award is one. A cosmetic purchase (C34) is one. A stat increment is not.
-]]
-local function saveNow(userId: number)
-	local profile = sessions[userId]
-
-	if profile ~= nil and profile:IsActive() then
-		profile:Save()
 	end
 end
 
@@ -511,6 +596,46 @@ function ProgressionService.GrantCosmetic(player: Player, id: string): boolean
 end
 
 --[[
+	CLAIM §9.2's GROUP JOIN REWARD, ONCE, EVER (C39).
+
+	TEST-AND-SET IN ONE CALL, and that is the whole reason it is a setter here rather than two lines in
+	`CommunityService`. The claim path yields on `Player:IsInGroup` — a Roblox web call — and a player
+	who presses the button twice has two threads in flight across that yield. Read-then-write split
+	across the two files would let both threads see `false` and both pay, which is the classic double
+	spend and is worth 250 coins per press.
+
+	This function does not yield, so the read and the write happen in one resumption and the second
+	caller sees `true`. The caller must pay ONLY on a `true` return, in that order — `CommunityService`
+	does, and its comment says why.
+
+	Returns false for an unclaimed reward on a read-only profile too. That is correct rather than
+	unfortunate: a latched profile cannot record the claim, so paying would grant coins that vanish at
+	the next login and re-arm the button forever.
+]]
+function ProgressionService.ClaimGroupReward(player: Player): boolean
+	local userId = player.UserId
+	local profile = sessions[userId]
+
+	if profile == nil or readOnly[userId] then
+		return false
+	end
+
+	local data: Profile = profile.Data
+
+	if data.GroupRewardClaimed then
+		return false
+	end
+
+	data.GroupRewardClaimed = true
+
+	-- §6.6's "save on a meaningful change". A one-time reward is the definition of one: losing this
+	-- write to a crash re-arms a button that has already paid.
+	saveNow(userId)
+
+	return true
+end
+
+--[[
 	EQUIP (C34). The three-branch write, and the branches are why this is not a table index.
 
 	`Cosmetics.Equipped` is a RECORD with three named fields, not a dictionary, so `equipped[slot]`
@@ -644,6 +769,7 @@ function ProgressionService.PushProfile(player: Player, lastAward: Types.RoundAw
 			RewardXP = preview.RewardXP,
 			RewardCoins = preview.RewardCoins,
 		},
+		GroupRewardClaimed = data.GroupRewardClaimed,
 		LastAward = lastAward,
 	}
 
@@ -663,6 +789,10 @@ function ProgressionService.BumpStat(player: Player, stat: StatName, amount: num
 	local data: Profile = profile.Data
 
 	data.Stats[stat] += math.floor(amount)
+
+	-- After the write, so a subscriber reading `GetProfile().Stats` sees the new total rather than
+	-- the one it was called about.
+	ProgressionService.StatChanged:Fire(player, stat)
 end
 
 --[[

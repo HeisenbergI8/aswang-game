@@ -189,6 +189,19 @@ local EVENTS_UP = {
 	]]
 	"RequestClaimDaily",
 	--[[
+		C39, §9.2. NO ARGUMENTS, for the same reason `RequestClaimDaily` above has none — everything
+		the decision needs is server-side already.
+
+		THE GROUP ID IS NOT AN ARGUMENT, and that is the security design. `Config.Community.GroupId`
+		names the one group this reward is for, and `Player:IsInGroup` is asked about that id on the
+		server. A client-supplied id would let a player name any group they happen to belong to and
+		collect 250 coins for membership of somebody else's.
+
+		Nor is there a "claimed" flag in the request: `Profile.GroupRewardClaimed` is the authority,
+		and a client that could assert its own claim state could re-claim forever.
+	]]
+	"RequestClaimGroupReward",
+	--[[
 		C21. NO ARGUMENTS, deliberately, and for the same reason `RequestTimingStop` above has none.
 
 		There is nothing a client could legitimately name here: which trial, where, and whether it is

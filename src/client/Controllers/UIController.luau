@@ -1228,6 +1228,9 @@ local coinLabel: TextLabel? = nil
 local xpLabel: TextLabel? = nil
 local levelFill: Frame? = nil
 local dailyButton: TextButton? = nil
+-- C39. The lobby's group panel, §9.2's one-time reward. Nil outside the lobby, like every other handle
+-- in this block — `resetProgressPanel` clears it when the panel is torn down.
+local groupButton: TextButton? = nil
 
 --[[
 	One cycler per slot, and a CURSOR per slot that is purely local.
@@ -1435,6 +1438,25 @@ function renderProgress()
 		daily.TextColor3 = if preview.Claimable then COLOUR.Coin else COLOUR.Dim
 	end
 
+	local group = groupButton
+
+	if group ~= nil then
+		--[[
+			THE UNCLAIMED LABEL NAMES THE CONDITION rather than just the reward, because the server can
+			refuse silently and this row is the only place that refusal is explicable. A player who is
+			not in the group presses, nothing happens, and "join the group" is the difference between
+			that reading as a broken button and reading as an instruction.
+
+			`Coin` for the offer and `Dim` once taken, matching the daily row directly above it — one
+			colour meaning per the checklist, and the same one both rows already use for "there is
+			something here for you".
+		]]
+		group.Text = if snapshot.GroupRewardClaimed
+			then "GROUP REWARD claimed"
+			else `JOIN THE GROUP  ·  claim +{Config.Community.GroupJoinRewardCoins}`
+		group.TextColor3 = if snapshot.GroupRewardClaimed then COLOUR.Dim else COLOUR.Coin
+	end
+
 	for _, slot in SLOTS do
 		-- Annotated optional: the map's value type is not, so an unannotated local reads as a
 		-- TextButton the analyzer refuses to compare against nil.
@@ -1493,6 +1515,7 @@ local function teardownProgress()
 	xpLabel = nil
 	levelFill = nil
 	dailyButton = nil
+	groupButton = nil
 	table.clear(slotButtons)
 end
 
@@ -1517,8 +1540,23 @@ local function buildProgress()
 	end
 
 	local frame = panel(gui, "Progress")
-	frame.Size = UDim2.fromOffset(LAYOUT.BarWidth, LAYOUT.LabelSize * 16) -- config-ok: layout multiple
-	frame.Position = UDim2.new(0, LAYOUT.Pad, 0.5, -LAYOUT.LabelSize * 8) -- config-ok: layout multiple
+	--[[
+		SIXTEEN UNITS BECAME EIGHTEEN WHEN C39 ADDED THE GROUP ROW, and the reason is worth a line
+		because nothing catches it: this height is FIXED while the stack inside it is a `UIListLayout`
+		that grows, and the frame has no `ClipsDescendants`. So a row added without touching this
+		number does not clip — it renders BELOW the panel's own rounded background and stroke, in open
+		space, looking like a stray label rather than part of the panel.
+
+		The stack now measures 302px: 20 header + 18 bar + 18 xp + 36 daily + 108 for three cosmetic
+		slots + 36 group = 236, plus seven `Pad // 2` gaps (42), plus top and bottom `Pad` (24).
+		Eighteen units is 324, so there is real headroom; sixteen was 288 and overflowed by 14.
+
+		The half in `Position` tracks it — `LabelSize * 9` is half of `* 18` — because the panel is
+		centred by offsetting half its own height, and the two numbers falling out of step is how a
+		centred panel drifts.
+	]]
+	frame.Size = UDim2.fromOffset(LAYOUT.BarWidth, LAYOUT.LabelSize * 18) -- config-ok: layout multiple
+	frame.Position = UDim2.new(0, LAYOUT.Pad, 0.5, -LAYOUT.LabelSize * 9) -- config-ok: layout multiple
 	frame.Visible = false
 
 	local padding = Instance.new("UIPadding")
@@ -1635,6 +1673,44 @@ local function buildProgress()
 
 		slotButtons[slot] = button
 	end
+
+	--[[
+		§9.2's GROUP PANEL (C39), AND IT IS ONE ROW RATHER THAN A PANEL.
+
+		The competitor shipped 16 months of updates to 1.43M players with no group to announce them to
+		— Appendix C — so this row is worth 250 coins to the project. It is not worth a modal: the
+		lobby is where a waiting player reads the tips C24 put there, and a dialog over that is a
+		thing to dismiss rather than a thing to read.
+
+		BUILT IN THE SAME SHAPE AS THE DAILY ROW ABOVE, deliberately. `ui-polish`'s checklist wants one
+		type ramp and one spacing unit across sibling rows, and copying the row that is already there
+		is how sibling rows stay siblings — a second size or a second alignment here is the 2px
+		misalignment the checklist calls the loudest amateur signal.
+	]]
+	local group = Instance.new("TextButton")
+	group.Name = "GroupReward"
+	group.Size = UDim2.new(1, 0, 0, LAYOUT.LabelSize * 2) -- config-ok: layout multiple
+	group.BackgroundTransparency = 1
+	group.TextColor3 = COLOUR.Dim
+	group.TextSize = LAYOUT.LabelSize
+	group.Font = Enum.Font.GothamBold
+	group.TextXAlignment = Enum.TextXAlignment.Left
+	group.TextTruncate = Enum.TextTruncate.AtEnd
+	group.Text = ""
+	group.LayoutOrder = 8 -- config-ok: stack order, after the three cosmetic slots
+	group.Parent = frame
+
+	group.Activated:Connect(function()
+		--[[
+			FIRED WITHOUT CHECKING THE SNAPSHOT FIRST, for the reason the daily row gives: the label is
+			drawn from a snapshot that may predate the player joining the group in another tab, and the
+			server re-asks `IsInGroupAsync` on every call. A client-side gate would leave someone who
+			has just joined the group looking at a button that refuses to fire.
+		]]
+		Remotes.Get("RequestClaimGroupReward"):FireServer()
+	end)
+
+	groupButton = group
 
 	progressPanel = frame
 	levelLabel = level
