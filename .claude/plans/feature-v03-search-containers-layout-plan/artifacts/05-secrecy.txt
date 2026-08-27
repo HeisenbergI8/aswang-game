@@ -1,0 +1,43 @@
+V03 verification — Claim 5: nothing about the layout is client-readable
+====================================================================================================
+
+All checks below were run FROM THE CLIENT datamodel (`execute_luau`, `datamodel_type: "Client"`),
+mid-round, i.e. from exactly the vantage point a real player's LocalScript has.
+
+CHECK 1 — attributes on every tagged SearchContainer part.
+`part:GetAttributes()` was read for all 15 tagged parts. Full result: every single one returned an
+empty table (`count = 0`). None carries an attribute naming its contents, its opened state, or
+anything else.
+
+  Stall_SW_Counter: {}      Rack2_Sack2: {}       Clutter1_Crate1: {}   Clutter9_Sack1: {}
+  Clutter7_Sack1: {}        Clutter6_Sack3: {}    Stall_NW_Counter: {}  Rack1_Sack2: {}
+  Clutter3_Sack2: {}        Stall_NE_Counter: {}  Clutter8_Crate2: {}   Stall_SE_Counter: {}
+  Clutter5_Drum1: {}        Clutter4_Sack3: {}    Clutter2_Drum1: {}
+
+CHECK 2 — a broader sweep of the whole Workspace tree for a leaked item id.
+Walked every descendant of `workspace` and every attribute key/value pair on it, looking for any
+string value equal to "SALT", "BAWANG" or "BUNTOT_PAGI" (the exact ids `ContainerLayout.itemAt`
+returns). Result: `suspiciousAttrCount = 0`. Nothing in the replicated Workspace carries an item id
+in any attribute, on any instance, tagged or not.
+
+CHECK 3 — is `ContainerLayout` reachable from `ReplicatedStorage.Shared` at all?
+A recursive search by Name (depth 6) under `ReplicatedStorage.Shared` for an instance literally named
+"ContainerLayout" returned nil (absent from the JSON result, i.e. not found). `Shared.pure` DOES
+exist and DOES contain 23 pure modules, but `ContainerLayout` is not one of them:
+
+  SaltCarry, SaltThrow, BodyTransitions, TrialAdmission, RoundTransitions, LightBudget,
+  TrialTimeline, ChatAudience, RejoinResolve, DailyStreak, SkyCycle, BadgeRules, Cosmetics,
+  QuickChatPhrases, ProfileMigration, KillValidation, TransformRules, AudioCues, TokenBucket,
+  XPCurve, PlayerBody, QuickChatTarget, TeachingLines
+
+This matches the plan's stated design exactly: `ContainerLayout.luau` lives under
+`src/server/pure/`, which maps to `ServerScriptService` (does not replicate to clients) — NOT
+`src/shared/pure/`, which maps wholesale into `ReplicatedStorage` and would have made it
+require-able and CALLABLE by any LocalScript. `Shared.pure`'s 23-module listing above is the direct,
+positive confirmation that the boundary was drawn correctly: everything that SHOULD be public is
+there, and the one module that must not be is absent.
+
+RESULT: PROVEN. No attribute, no tag payload, and no reachable module gives a client any information
+about the layout. The three specific things the brief asked to rule out (a contents attribute, a
+ReplicatedStorage layout table, and a client-reachable ContainerLayout) were each checked directly and
+each came back negative.

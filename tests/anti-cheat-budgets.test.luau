@@ -49,6 +49,12 @@ local UP_REMOTES = {
 	-- C22. The trial's own throw. Separate from RequestThrowSalt because ItemService resolves against
 	-- the round phase, and a trial runs at IDLE.
 	"RequestTrialThrow",
+	-- V03. Both argument-free: the server resolves the container from the player's own position, and
+	-- a cancel means "I let go". The cancel's budget is the more generous of the two on purpose —
+	-- see Config, and note that Consume FAILS CLOSED, so a missing budget here disables searching
+	-- entirely rather than leaving it unlimited.
+	"RequestSearch",
+	"RequestCancelSearch",
 }
 
 local failures = 0

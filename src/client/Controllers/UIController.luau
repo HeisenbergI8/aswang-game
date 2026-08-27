@@ -250,6 +250,18 @@ export type ActionHandlers = {
 	Transform: () -> (),
 	Kill: () -> (),
 	Throw: () -> (),
+	--[[
+		V03, §4.4. A PAIR, because searching is a HOLD and not a tap. The pad reports when the thumb
+		goes down and when it comes up — exactly as the quick-chat wheel's press-drag-release does —
+		and registering only a `Search` would give a mobile player a way to start a search and no way
+		to stop one.
+
+		NEITHER IS DRAWN BY `buildTouchPad` YET. That is a real gap and not a rounding error:
+		searching is the ONLY activity in the game (§4.4), and §5 puts ~60% of players on a phone.
+		The contract is widened here so the pad chunk finds both ends waiting for it.
+	]]
+	Search: () -> (),
+	CancelSearch: () -> (),
 }
 
 --[[

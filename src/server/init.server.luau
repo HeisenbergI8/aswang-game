@@ -28,6 +28,19 @@ local SERVICE_ORDER = {
 	"RoleService",
 	"MonsterService",
 	"ItemService",
+	--[[
+		V03. AFTER ItemService and BEFORE RoundService, and only the second half is load-bearing.
+
+		Like every gameplay service here it holds a module reference from its own `require` at load,
+		and this list governs only Init/Start. What it must not do is start AFTER the state machine:
+		`RoundService` starts last precisely so every subscriber is connected before a phase can
+		change, and a SearchService that started afterwards could miss the STARTING that seeds its
+		layout — producing a round with a nil layout and no warning, because the EMPTY path is the
+		only one that warns and this would not take it.
+
+		It requires `AntiCheatService` and `RoundService` and neither requires it back, so no cycle.
+	]]
+	"SearchService",
 	"TrialService",
 	--[[
 		C23/V01. After the two services that still CALL it — ItemService and MonsterService — because

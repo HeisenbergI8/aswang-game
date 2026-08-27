@@ -1,0 +1,68 @@
+V03 verification — Claim 2: searching yields items (the round trip, driven through the real `E` key)
+====================================================================================================
+
+METHOD, and why it changed mid-session:
+
+`SearchController.luau`'s `onUpdate` only calls `print()` for verdicts OTHER than SEARCH_STARTED and
+SEARCH_OK — those two route silently to `OnboardingController.ShowLine`. That means a normal console
+capture shows nothing at all for a successful search, and the round's 20s console volume (round-cycle
+logging happens every ~34s under the debug values) evicts anything from a prior round before it can be
+read. Both problems are solved the same way `.claude/lessons/prove-input-at-the-remote-not-the-outcome`
+prescribes: hook the REMOTE itself, not the visible outcome. A persistent listener was injected via
+`execute_luau` (Client datamodel), attached directly to `Remotes.Get("SearchUpdate").OnClientEvent`,
+appending every payload (`Verdict`, `HoldSeconds`, `Found`, `os.clock()`) to a global table
+`_G.TestSearchLog`, and also `print`ing a `[TEST-HOOK]` line. This is test-only instrumentation
+injected at runtime through the MCP bridge — nothing under `src/` was touched, and the hook is not
+part of the shipped game.
+
+Input was driven for real: `user_keyboard_input` sent `keyDown "E"`, a `wait`, then `keyUp "E"` against
+the live Client datamodel — the same `ContextActionService:BindAction(SEARCH_ACTION, ..., Enum.KeyCode.E)`
+a human's keypress would hit. This is not a direct remote call from the test script; the remote fires
+because the real input path fired it.
+
+CHARACTER POSITIONING: the character was teleported via a plain `HumanoidRootPart.CFrame` set (client
+datamodel) to `Stall_NE_Counter.Position + Vector3.new(0, 4, 5)`, landing ~5 studs from the container —
+inside `Config.Search.RangeStuds = 10`. An earlier attempt that additionally toggled
+`Humanoid:ChangeState(Physics)`/`GettingUp` around the teleport caused a collision fling (the container
+is a thin 10x0.5x2.2 part) that ejected the character out of range within ~0.8s and produced an
+immediate SEARCH_INTERRUPTED — see artifacts/03-interruption.txt, which uses that same recording as
+the interruption evidence since it is a genuine (if accidental) out-of-range release.
+
+RAW HOOK DUMP, this session, in the order events were queued (`_G.TestSearchLog`, read back via a
+second `execute_luau` call after each attempt):
+
+  1. { Verdict = "SEARCH_STARTED",    HoldSeconds = 6, t = 13256.84 }
+  2. { Verdict = "SEARCH_INTERRUPTED", HoldSeconds = 0, t = 13257.66 }   -- +0.82s: the physics-fling run
+  3. { Verdict = "SEARCH_STARTED",    HoldSeconds = 6, t = 13440.42 }
+  4. { Verdict = "SEARCH_OK",         HoldSeconds = 0, t = 13446.55 }   -- +6.13s: a clean, full-length hold
+
+RESULT: PROVEN — the SEARCH_STARTED -> SEARCH_OK round trip, driven by a real held `E` keypress.
+
+  - Entry 3 -> entry 4 elapsed 6.13s, matching `Config.Search.SearchTime = 6` within the tick
+    granularity (server tick is 0.25s) and MCP round-trip slack.
+  - `Found` is absent from entry 4's JSON (i.e. nil) — this run searched an EMPTY container. With
+    7 items across 15 containers, empty is the expected common case (§4.4: "you will open empty
+    ones, and that is the point"), and this is a real recorded instance of it, not an assumption.
+  - Entries 1-2 independently prove the remote fires from a genuine `E` keyDown even when the hold is
+    then broken (see artifacts/03-interruption.txt) — two different real key-holds, two different
+    server-decided outcomes, both delivered through the same silent-to-console remote.
+
+STILL NEEDED for this claim to be complete per the brief: at least one container that YIELDS an item
+(SALT/BAWANG/BUNTOT_PAGI), not just an empty one. See verification.md for whether that was obtained
+before the session's evidence budget ran out, and if not, why (pool is 7/15, so multiple containers
+had to be tried across multiple round reseeds).
+
+UPDATE — the item-found case, obtained in a later round on the same container (fresh reseed):
+
+  5. { Verdict = "SEARCH_STARTED", HoldSeconds = 6, t = 13552.51 }
+  6. { Verdict = "SEARCH_OK", HoldSeconds = 0, Found = "BAWANG", t = 13558.73 }   -- +6.22s
+
+Entry 6 carries Found = "BAWANG" — a real item yielded by a real held `E` keypress against a real
+tagged container, server-resolved and server-decided, with the client's own OnboardingController line
+("You found bawang.") as the intended (unlogged) player-facing surface for this same event.
+
+CLAIM 2 IS NOW FULLY PROVEN: both required outcomes were captured from real input —
+  - an EMPTY container (entry 3 -> entry 4, Found absent)
+  - an ITEM-YIELDING container (entry 5 -> entry 6, Found = "BAWANG")
+Both completions took ~6.1-6.2s from SEARCH_STARTED, consistent with Config.Search.SearchTime = 6
+plus the 0.25s server tick and MCP call slack.

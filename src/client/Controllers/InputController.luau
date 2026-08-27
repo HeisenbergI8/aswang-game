@@ -44,6 +44,7 @@ local InputController = {}
 local TRANSFORM_ACTION = "AswangTransform"
 local KILL_ACTION = "AswangKill"
 local THROW_ACTION = "SaltThrow"
+local SEARCH_ACTION = "SearchContainer"
 
 --[[
 	A plain function for the same reason `performKill` below is one: C18's HUD button must invoke THIS,
@@ -243,6 +244,59 @@ local function onThrowAction(
 	return if performThrow() then Enum.ContextActionResult.Sink else Enum.ContextActionResult.Pass
 end
 
+--[[
+	V03, §4.4. A HOLD RATHER THAN A PRESS, which is why this is a PAIR of functions where every other
+	verb in this file is one.
+
+	NOT GATED ON ROLE, and the absence of that gate is the design. `performTransform` and `performKill`
+	check the role because they are Aswang verbs; searching is everyone's, and §4.4 is explicit that
+	the Aswang searches on identical rules — rummaging in a house is blending justified by mechanics.
+	A gate here would make the monster's client behave differently from a survivor's, which is
+	Amendment A2's oracle in the one place nobody would look for it.
+
+	NEITHER SENDS AN ARGUMENT. The server resolves which container from this player's own character
+	position; naming one here would hand a compromised client a probe. See `Remotes.luau`.
+
+	NO CLIENT-SIDE GATE ON PHASE OR DISTANCE EITHER, unlike `performKill`'s role check. The server
+	answers with a verdict the controller can show, and a client-side pre-check would only ever
+	disagree with it — the client does not know `opened`, and cannot.
+]]
+local function performSearch(): boolean
+	Remotes.Get("RequestSearch"):FireServer()
+
+	return true
+end
+
+local function performCancelSearch(): boolean
+	Remotes.Get("RequestCancelSearch"):FireServer()
+
+	return true
+end
+
+--[[
+	`Begin` starts, `End` AND `Cancel` stop. Cancel matters: ContextActionService fires it when the
+	bind is unbound or the input is stolen — a chat box opening mid-hold — and treating it as anything
+	other than a release leaves a player holding a container they cannot let go of by any input.
+]]
+local function onSearchAction(
+	_actionName: string,
+	inputState: Enum.UserInputState
+): Enum.ContextActionResult
+	if inputState == Enum.UserInputState.Begin then
+		performSearch()
+
+		return Enum.ContextActionResult.Sink
+	end
+
+	if inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
+		performCancelSearch()
+
+		return Enum.ContextActionResult.Sink
+	end
+
+	return Enum.ContextActionResult.Pass
+end
+
 function InputController.Init() end
 
 function InputController.Start()
@@ -275,6 +329,23 @@ function InputController.Start()
 		]]
 		Throw = function()
 			performThrow()
+		end,
+		--[[
+			V03. REGISTERED AS A PAIR because §4.4's verb is a hold, not a tap — the pad reports when
+			the thumb goes down and when it comes up, exactly as `BindQuickChat` does for the wheel's
+			press-drag-release. Registering only a `Search` would give a mobile player a way to start a
+			search and no way to stop one.
+
+			THE PAD DOES NOT DRAW A SEARCH BUTTON YET, and that is a real gap rather than a rounding
+			error: searching is the thing all five players do all round, and §5 puts ~60% of them on a
+			phone. It is exactly the hole this file's header describes closing for tasks, now re-opened
+			by the mechanic that replaced them. It must not survive past V16.
+		]]
+		Search = function()
+			performSearch()
+		end,
+		CancelSearch = function()
+			performCancelSearch()
 		end,
 	})
 
@@ -310,6 +381,17 @@ function InputController.Start()
 		answer for a phone regardless, which is why the throw no longer rests on this key alone.
 	]]
 	ContextActionService:BindAction(THROW_ACTION, onThrowAction, false, Enum.KeyCode.Q)
+
+	--[[
+		V03. `E`, and `false` for the touch-button argument for the same reason every bind in this file
+		passes it: NO BIND HERE CREATES A TOUCH BUTTON. A CAS touch button appears for every client
+		that runs the bind, and the pad is the one thing in this game that places a touch control.
+
+		`E` IS ALSO ROBLOX'S DEFAULT `ProximityPrompt` KEY. No prompt exists in this game today, so
+		there is no conflict now — but this bind is registered first, and a prompt added to the map
+		later would simply look broken.
+	]]
+	ContextActionService:BindAction(SEARCH_ACTION, onSearchAction, false, Enum.KeyCode.E)
 end
 
 return InputController

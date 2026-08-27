@@ -325,6 +325,26 @@ local Config = {
 		-- Seconds to search one container, uninterrupted. The exposure window: long enough that being
 		-- caught mid-search is a real risk, short enough that a survivor will still take the risk.
 		SearchTime = 6,
+
+		--[[
+			V03. How close you must be to a `SearchContainer` to start a search — AND STAY, for the
+			whole six seconds. Leaving this radius releases the hold, which is the rule that makes
+			§4.4's exposure real: a search you could walk away from and come back to would cost
+			nothing, and the cost is the mechanic.
+
+			LARGER THAN `Salt.PickupRangeStuds` (6) ON PURPOSE, and the difference is the interaction.
+			Salt is picked up by walking over it, so its radius is a footprint. A container is opened
+			by standing at it, so its radius is an arm's length plus the slack a phone player needs to
+			hold still for six seconds — §5 puts ~60% of players on one, and a radius tuned on a mouse
+			is a radius that cancels their search every time the thumbstick drifts.
+
+			IT IS ALSO JUST OUTSIDE `Monster.KillRange` (8) AT THIS VALUE, which is worth seeing rather
+			than preserving blindly: a searcher is standing roughly where the Aswang can reach them. If
+			a later tune raises this well above KillRange, searching becomes something you do from
+			outside kill range and §4.4's trade quietly evaporates. Re-open at V16.
+		]]
+		RangeStuds = 10,
+
 		-- Studs the noise carries. DELIBERATELY LARGER THAN ANY OTHER RANGE IN THIS FILE — the point is
 		-- that searching summons the monster, not that it might. Compare Tracker.EarlyRadius = 40: a
 		-- searching survivor is louder than the tracker is sharp, for the whole first half of the night.
@@ -1062,6 +1082,32 @@ local Config = {
 			RequestKill = { Capacity = 3, RefillPerSecond = 0.25 },
 			RequestThrowSalt = { Capacity = 3, RefillPerSecond = 0.2 },
 			RequestQuickChat = { Capacity = 4, RefillPerSecond = 0.5 },
+			--[[
+				V03, §4.4. THE MOST FREQUENT REMOTE A SURVIVOR FIRES, and the budget is sized from the
+				mechanic rather than from a feeling. A search takes Search.SearchTime = 6 seconds, so
+				an honest player starts one every ~7s at absolute best and usually far less often.
+				RefillPerSecond = 0.3 pays for one start every ~3.3s, which is roughly twice the
+				fastest honest rate and leaves room for the two cases that legitimately burn a token
+				without a search happening: a refusal (SEARCH_NO_CONTAINER when the thumb misses) and
+				a restart after an interruption.
+
+				Capacity 4 is the burst. A player walking a row of containers in a house genuinely
+				fires four starts in quick succession as they cancel and re-target.
+			]]
+			RequestSearch = { Capacity = 4, RefillPerSecond = 0.3 },
+			--[[
+				V03. DELIBERATELY MORE GENEROUS THAN `RequestSearch`, and the asymmetry is the point.
+
+				A refused START costs a player one search. A refused CANCEL leaves them holding a
+				container they asked to let go of, which reads as the game ignoring their input — the
+				worse of the two failures, and the one a player blames the game for. The server has
+				five other release paths so the hold is never actually stuck, but "it releases when you
+				walk away" is not the feedback the button promised.
+
+				Cancels also arrive in bursts honestly: a key tapped rather than held fires start and
+				cancel back to back.
+			]]
+			RequestCancelSearch = { Capacity = 6, RefillPerSecond = 0.5 },
 			RequestEquipCosmetic = { Capacity = 5, RefillPerSecond = 0.5 },
 			--[[
 				C34. Priced like the equip next door rather than tighter, even though it SPENDS: the

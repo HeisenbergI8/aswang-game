@@ -514,6 +514,70 @@ export type ClientRoundSnapshot = {
 ]]
 export type TrialPhase = "TRIAL_OFF" | "TRIAL_TASKS" | "TRIAL_CHASE" | "TRIAL_HANDOFF"
 
+--[[
+	V03, §4.4. The answer to "may I search what I am standing at, and what did I get".
+
+	PREFIXED `SEARCH_` FOR `TrialPhase`'S REASON, restated because it is not decoration. `SaltVerdict`
+	already carries a bare `WRONG_PHASE` and `MonsterState` a bare `NORMAL`; a third union sharing
+	those spellings makes a handler wired to the wrong remote a working program with the wrong
+	meaning. `check:remotes` and `check:secrecy` are text tripwires and would pass a semantic mix-up
+	like that. The prefix makes it an analyzer error instead.
+
+	SEARCH_STARTED IS A VERDICT RATHER THAN A SECOND REMOTE. The client needs to know its hold began
+	so it can draw a bar; that is the same conversation as the refusals, on the same wire, to the same
+	one player.
+
+	NONE OF THESE NAMES A CONTAINER, AND NONE NAMES A PLAYER. `SEARCH_OCCUPIED` says "someone is at
+	this one" and `SEARCH_ALREADY_SEARCHED` says "this one is spent" — both are facts about the world
+	that §4.4 puts in the world deliberately ("items belong to the world, not to individuals"), both
+	concern a container the receiver is already standing at, and neither is role-correlated because
+	the Aswang searches on identical rules.
+]]
+export type SearchVerdict =
+	"SEARCH_STARTED" -- the hold began; HoldSeconds is how long it will take
+	| "SEARCH_OK" -- the hold completed; `Found` is the item, or nil for an empty container
+	| "SEARCH_INTERRUPTED" -- you cancelled, moved out of range, died, or the round moved on
+	| "SEARCH_WRONG_PHASE" -- searching is an ACTIVE-phase activity and nothing else
+	| "SEARCH_NOT_ALIVE" -- dead players and mid-round spectators do not search
+	| "SEARCH_NO_CONTAINER" -- nothing tagged within Config.Search.RangeStuds, or the map has no pool
+	| "SEARCH_OCCUPIED" -- somebody else is holding this container right now
+	| "SEARCH_ALREADY_SEARCHED" -- this container was opened earlier in the round
+	| "SEARCH_BUSY" -- you are already holding a different container
+
+--[[
+	V03, §4.4. `SearchUpdate`'s payload. FireClient to ONE player, always; there is no broadcast form
+	of this remote and there must not be.
+
+	THE ABSENT FIELDS ARE THE SECURITY DESIGN, so they are listed rather than merely omitted:
+
+	  · NO CONTAINER ID, in either direction. The client does not name one when it requests — the
+	    server resolves the nearest tagged part from that player's own character position, which is
+	    `ItemService`'s stated rule for pickups — and the server does not name one when it answers.
+	    There is therefore NO KEY ON WHICH TWO CLIENTS COULD DIFFERENCE THEIR PAYLOADS. What colluding
+	    players can pool is what each of them found by standing somewhere and opening something, which
+	    is the information §4.4 intends them to have and §4.5 gives them a phrase for.
+	  · NO LAYOUT, NO REMAINING COUNT, NO "3 of 7 found". A count is a map index compressed: it tells
+	    a client how much of the pool is still worth walking to, which is exactly the walk §4.4 wants
+	    to cost something. It also would not survive Amendment A3's spirit — see `ClientRoundSnapshot`.
+	  · NO SEARCHER. `SEARCH_OCCUPIED` does not say who.
+
+	`Found` IS NOT A ROLE ORACLE. The Aswang searches on identical rules and can find any of the three
+	(§4.4 — denying survivors the buntot pagi is a legitimate strategy that looks exactly like
+	survival), so this field's value distribution is the same for both roles.
+]]
+export type SearchUpdatePayload = {
+	Verdict: SearchVerdict,
+	-- Config.Search.SearchTime on SEARCH_STARTED, 0 on every other verdict. The client draws its own
+	-- bar from this one number; the server does not stream progress, because a per-frame per-player
+	-- remote would be a network cost paid for something the client can interpolate. It carries no
+	-- information — Config is replicated, so the client already knew it.
+	HoldSeconds: number,
+	-- What THIS player just found. nil on every path except a completed search of a seeded container,
+	-- including a completed search of an empty one — "you searched it and it held nothing" and "you
+	-- did not finish" are different verdicts, not different Found values.
+	Found: ItemType?,
+}
+
 -- What the timeline fires, in order. FIRE-ONCE per session — see `shared/pure/TrialTimeline`.
 export type TrialBeat =
 	"BEAT_WELCOME"

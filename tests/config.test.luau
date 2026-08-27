@@ -716,6 +716,55 @@ check(
 	`{weekCoins} coins a week vs {cheapest} for the cheapest unlockable`
 )
 
+--[[
+	V03, §4.4. THE POOL MUST COMFORTABLY EXCEED THE ITEMS IN IT.
+
+	"Seven items across fifteen containers. You will open empty ones, and that is the point." If the
+	item counts climb toward the container count, every container becomes a hit, the six seconds stop
+	being a gamble and searching degenerates into a walk — which is precisely what §4.4 says the
+	randomisation exists to prevent.
+
+	`>= 2 x` is a TIGHT pin: 15 >= 14 passes with one container to spare. That tightness is deliberate
+	rather than accidental. A looser `>= total + 1` would pass at 8 containers holding 7 items, where
+	the property this protects has already been destroyed — so the loose version could never fire and
+	would not be worth the line. If a V16 tune raises an item count and this fails, the fix is to raise
+	ContainerCount and tag more parts in the map, not to widen the pin.
+]]
+local totalItems = Config.Items.SaltSpawnCount
+	+ Config.Items.GarlicSpawnCount
+	+ Config.Items.BuntotPagiSpawnCount
+
+check(
+	"searching is still a gamble — the container pool is at least twice the items placed in it",
+	Config.Search.ContainerCount >= totalItems * 2,
+	`ContainerCount={Config.Search.ContainerCount}, items={totalItems}`
+)
+
+--[[
+	V03, §4.4. A SEARCH MUST OUTLAST THE ASWANG'S WHOLE APPROACH OVERHEAD.
+
+	§4.4: the six seconds "are why the layout being random costs something". The cost is only real if
+	an Aswang who notices a search starting can transform, close, and still arrive — so the hold must
+	exceed the fixed price of a transform and the revert that follows it. Below that, a searcher is
+	finished before the monster has finished changing shape and the risk economy is a decoration.
+
+	This is a JUDGEMENT rather than an arithmetic identity — it does not account for distance, which
+	the map decides — so it is pinned as a floor and expected to be re-argued at V16 with real players.
+]]
+check(
+	"a search lasts longer than a transform and a revert — the monster can reach you mid-hold",
+	Config.Search.SearchTime > Config.Monster.TransformTime + Config.Monster.RevertTime,
+	`SearchTime={Config.Search.SearchTime}, Transform+Revert=`
+		.. `{Config.Monster.TransformTime + Config.Monster.RevertTime}`
+)
+
+-- V03. A radius of zero or less is unsearchable and would read as a dead key bind.
+check(
+	"a container can actually be reached",
+	Config.Search.RangeStuds > 0,
+	`RangeStuds={Config.Search.RangeStuds}`
+)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end

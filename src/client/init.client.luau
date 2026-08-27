@@ -47,6 +47,15 @@ local CONTROLLER_ORDER = {
 		Before InputController for the same reason as everything else in this list: it listens for a
 		remote that can arrive the instant a trial opens.
 	]]
+	--[[
+		V03. AFTER OnboardingController, and that ordering is a real dependency rather than a
+		preference: this controller REQUIRES it, for `ShowLine`. One-way, exactly as TrialController's
+		does — OnboardingController knows nothing about searching, so the arrow cannot become a cycle.
+
+		Before InputController for the same reason as everything else in this list: it listens for a
+		remote that can arrive the instant a key is pressed.
+	]]
+	"SearchController",
 	"TrialController",
 	"InputController",
 }

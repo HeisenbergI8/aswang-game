@@ -1,0 +1,69 @@
+V03 verification — Claim 3: interruption releases the hold, and the container is searchable again
+====================================================================================================
+
+LIVE EVIDENCE (from the same `_G.TestSearchLog` remote hook described in
+artifacts/02-search-remote-hook.txt):
+
+  1. { Verdict = "SEARCH_STARTED",     HoldSeconds = 6, t = 13256.84 }
+  2. { Verdict = "SEARCH_INTERRUPTED", HoldSeconds = 0, t = 13257.66 }   -- +0.82s
+
+WHAT HAPPENED: the character was teleported near `Stall_NE_Counter` using
+`Humanoid:ChangeState(Enum.HumanoidStateType.Physics)` followed by a `CFrame` set and
+`ChangeState(GettingUp)`. That combination produced a genuine physics collision fling against the
+container part (`Stall_NE_Counter` is a thin 10 x 0.5 x 2.2 part — the teleport offset placed the
+character too close to its edge). The character was knocked outside `Config.Search.RangeStuds = 10`
+within under a second, WHILE THE `E` KEY WAS STILL PHYSICALLY HELD (the `keyUp` in that same tool
+call was not scheduled to fire until the 6.3s mark — the server released the hold on its own,
+unprompted by any client cancel).
+
+This was not the deliberate "walk out of range" scripted test the brief describes, but it is the same
+mechanism: a mid-hold position check catching a player outside `RangeStuds` before the hold's own
+deadline. The 0.82s gap is consistent with `searchTick`'s `Config.Search.RangeStuds` check running on
+a 0.25s tick (`task.wait(0.25)` — src/server/Services/SearchService.luau:646) catching the position on
+its second or third pass after the fling.
+
+A cleaner, deliberately-walked repeat was not attempted afterward given the session's time budget —
+each Studio round-trip in this session cost tens of seconds of real/game time against a 20s ACTIVE
+window and an 8s intermission, so a second live capture of the same mechanism was judged lower value
+than the source-code corroboration below, and than getting claims 2 and 4 clean.
+
+SOURCE-CODE CORROBORATION for "the container is then searchable again"
+(src/server/Services/SearchService.luau:339-364, 373-383, read directly, not paraphrased):
+
+  local function releaseHold(userId: number, verdict: Types.SearchVerdict?)
+      local hold = holds[userId]
+      if hold == nil then return end
+      holds[userId] = nil
+      if occupied[hold.ContainerIndex] == userId then
+          occupied[hold.ContainerIndex] = nil
+      end
+      ...
+  end
+
+  local function completeHold(player: Player, hold: Hold)
+      local current = layout
+      opened[hold.ContainerIndex] = true   -- ONLY set here
+      releaseHold(player.UserId, nil)
+      ...
+  end
+
+`opened[containerIndex] = true` is written in exactly one place in the file: inside `completeHold`.
+The interruption path (`releaseHold` called from `searchTick`'s distance branch, or from cancel,
+death, leave, or a phase change) clears `holds` and `occupied` and NEVER touches `opened`. So an
+interrupted search leaves the container exactly as searchable as before the hold began — the lock
+(`occupied`) is released in the same function call that ends the hold, with no path that could leave
+it stuck (the file's own comment at line 331 states this is the reason every release routes through
+one function).
+
+RESULT: PROVEN, live, for "an out-of-range condition mid-hold releases it and sends
+SEARCH_INTERRUPTED" (via the physics-fling capture above). "The container is then searchable again"
+is corroborated by direct source reading rather than a second live capture — cited file:line above,
+and additionally the container in question (`Stall_NE_Counter`) WAS in fact searched to completion in
+later rounds of this same session (see artifacts/02-search-remote-hook.txt, entries 3-4 and 5-6),
+which is consistent with — though not, on its own, proof of — the lock releasing correctly, since
+those were fresh rounds with a fresh `opened` table regardless.
+
+NOT VERIFIED, cleanly: a DELIBERATE walk-away mid-hold, driven by intentional navigation rather than
+an accidental physics fling, with the container re-searched successfully inside the SAME round
+afterward. The mechanism is the same and is proven above; a clean repeat would strengthen but not
+change the conclusion.

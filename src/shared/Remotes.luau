@@ -85,6 +85,25 @@ local EVENTS_DOWN = {
 		the wire — `shared/pure/TeachingLines` is replicated and the client resolves it.
 	]]
 	"TeachingCue",
+	--[[
+		V03, §4.4. FireClient to the ONE player whose search it is. Never FireAllClients — there is no
+		broadcast form of this payload and adding one would be a redesign, not an optimisation.
+
+		WHAT A SECOND CLIENT LEARNS FROM THIS REMOTE: nothing, because it never receives it. The
+		public half of searching is NOISE, and noise is V04's chunk — it will be a broadcast that
+		names a position and no player, and it is deliberately not this remote.
+
+		THE PAYLOAD NAMES NO CONTAINER. `Types.SearchUpdatePayload` carries a verdict, a duration and
+		an optional item, and the reasoning for each absent field is written there. The property worth
+		repeating here is the structural one: with no container id in the payload there is no key on
+		which two colluding clients could difference their updates to reconstruct the layout. The
+		layout exists only in a server-side table and in `server/pure/ContainerLayout`, which does not
+		replicate.
+
+		IT IS NOT A ROLE ORACLE. §4.4 has the Aswang searching on identical rules, so both roles
+		receive this remote with the same verdicts at the same rate for the same reasons.
+	]]
+	"SearchUpdate",
 }
 
 -- Client -> Server (the client asks; the server decides)
@@ -160,6 +179,38 @@ local EVENTS_UP = {
 		`SaltThrow.inCone`, so the throw a player learns here is the throw that works in a round.
 	]]
 	"RequestTrialThrow",
+	--[[
+		V03, §4.4. NO ARGUMENTS, and the absent argument is the entire security design.
+
+		THE CONTAINER IS NOT NAMED BY THE CLIENT. The server resolves the nearest `SearchContainer`
+		part within `Config.Search.RangeStuds` of that player's OWN character position — the rule
+		`ItemService`'s header states for pickups, applied to the one interaction that has a remote:
+		"the server resolves what a player is standing at from that player's own character position,
+		and the client names nothing."
+
+		A `RequestSearch(containerName)` would have been strictly worse in three ways, and the third
+		is the one that matters. It needs a verdict for "that container is not near you"; it needs
+		validation that the named part is the one you are standing at, which is the distance
+		comparison the server was already positioned to make; and it hands a compromised client a
+		PROBE — name every tagged part in turn, read the verdicts, and learn which containers are
+		spent and which are occupied without walking anywhere. The map's part names are readable by
+		any client (Workspace replicates), so the probe would have been trivial to write.
+	]]
+	"RequestSearch",
+	--[[
+		V03. Also argument-free: it means "I let go", and the server already knows whose hold it is.
+
+		SEPARATE FROM `RequestSearch` RATHER THAN A TOGGLE ON IT. A toggle desynchronises the moment a
+		packet is dropped or a token is refused — the client believes it stopped, the server believes
+		it started again — and the failure is a search that silently never completes. Two remotes make
+		each message idempotent: a duplicate cancel releases nothing, a duplicate start hits
+		SEARCH_BUSY.
+
+		THE SERVER DOES NOT DEPEND ON THIS ARRIVING. Five other release paths exist (distance, death,
+		leave, completion, phase change), so a cancel lost to the rate limiter costs at most the
+		remainder of one hold. That is why its budget is the more generous of the two.
+	]]
+	"RequestCancelSearch",
 }
 
 local Remotes = {}

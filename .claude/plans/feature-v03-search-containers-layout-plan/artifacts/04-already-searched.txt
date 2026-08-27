@@ -1,0 +1,28 @@
+V03 verification — Claim 4: a spent container answers SEARCH_ALREADY_SEARCHED
+====================================================================================================
+
+METHOD: within a single ACTIVE round (fresh reseed), the character was teleported next to
+`Stall_NE_Counter` (settled 5.02 studs away, inside RangeStuds=10), then a single
+`user_keyboard_input` call drove the real `E` key twice in sequence:
+
+  keyDown E -> wait 6300ms -> keyUp E -> wait 500ms -> keyDown E -> wait 500ms -> keyUp E
+
+RAW HOOK DUMP (`_G.TestSearchLog`, same remote hook as claims 2-3):
+
+  7. { Verdict = "SEARCH_STARTED", HoldSeconds = 6, t = 13666.84 }
+  8. { Verdict = "SEARCH_OK",      HoldSeconds = 0, Found = "BAWANG", t = 13672.94 }  -- +6.10s
+  9. { Verdict = "SEARCH_ALREADY_SEARCHED", HoldSeconds = 0, t = 13673.63 }           -- +0.68s after #8
+
+RESULT: PROVEN, cleanly, in a single round.
+
+  - Entry 7 -> 8: the first hold ran its full course and yielded BAWANG (a second confirmation of
+    claim 2's item-found path, on the same container).
+  - Entry 9: the second `E` tap, ~0.68s after the container was marked opened, returned
+    SEARCH_ALREADY_SEARCHED IMMEDIATELY — no SEARCH_STARTED precedes it, matching
+    `evaluateSearch`'s stated order (src/server/Services/SearchService.luau:~550-559): the
+    already-opened check is resolved before a hold is ever begun, so a spent container never even
+    starts a bar for a second searcher.
+  - This is the item belonging to the world, not to the player, exactly as `completeHold`'s header
+    comment states (src/server/Services/SearchService.luau:373-379): the SAME player, searching the
+    SAME container again in the SAME round, is refused — the container emptied for everyone the
+    instant it was opened, not just for other players.

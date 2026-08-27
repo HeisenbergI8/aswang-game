@@ -1,0 +1,38 @@
+V03 verification — Claim 1: layout seeds at STARTING, and the map tags reached the running game
+====================================================================================================
+
+1a. CollectionService "SearchContainer" tag query, run in Studio Edit mode BEFORE entering Play,
+    via execute_luau (datamodel_type: Edit), to confirm the map's tags are actually synced into
+    the running DataModel (not just on disk):
+
+    Query: CollectionService:GetTagged("SearchContainer")
+    Result: count = 15
+
+    Names returned (sorted):
+      Clutter1_Crate1, Clutter2_Drum1, Clutter3_Sack2, Clutter4_Sack3, Clutter5_Drum1,
+      Clutter6_Sack3, Clutter7_Sack1, Clutter8_Crate2, Clutter9_Sack1, Rack1_Sack2,
+      Rack2_Sack2, Stall_NE_Counter, Stall_NW_Counter, Stall_SE_Counter, Stall_SW_Counter
+
+    All are Part, Anchored=true. Matches the 15 names listed in the brief exactly.
+
+1b. Console output captured immediately after entering Play mode (SoloTesting=true,
+    VerboseLogging=true), showing the STARTING-phase seed line, repeated identically across
+    every one of 7 consecutive round cycles observed during this session (rounds #1-#7):
+
+    [RoundService] -> STARTING (4s)
+    [SearchService] Container pool OK — 15 containers.
+    [SearchService] Seeded 7 item(s) across 15 containers.
+    [ItemService] Salt pool OK — 6 spawn points.
+    [ItemService] 4 pouch(es) placed of 4 wanted.
+    [Client] Phase -> STARTING (4s)
+
+RESULT: PROVEN.
+  - "Seeded 7 item(s) across 15 containers" appears every round — matches the expected 7 items
+    (4 salt + 2 bawang + 1 buntot pagi from Config.Items) across the 15 tagged containers.
+  - "Container pool OK — 15 containers." confirms SearchPool.evaluate returned OK (not SHORT,
+    not EMPTY, not OVERSIZED, not DUPLICATE_ID) at 15 == Config.Search.ContainerCount.
+  - The warn line 'NO "SearchContainer" PARTS IN THE MAP' never appeared in any of the 7 rounds
+    observed. This directly rules out the pre-tagging state the brief warned about (tags not
+    reaching the running game).
+  - This is deterministic per-round: SearchService reseeds fresh at every STARTING, and the
+    message was byte-identical every time observed (rounds 1 through 7).
