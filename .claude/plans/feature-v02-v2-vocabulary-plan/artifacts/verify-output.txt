@@ -1,0 +1,84 @@
+V02 closing gate — recaptured 2026-08-27T07:24:59Z after the auditor's GarlicSpawnCount comment fix
+commit-base: 943742a
+
+=== npm run verify ===
+
+> aswang-game@0.1.0 verify
+> npm run --silent analyze && npm run --silent lint && npm run --silent fmt:check && npm run --silent check:remotes && npm run --silent check:secrecy && npm run --silent check:config && npm run --silent check:scope && npm run --silent check:ratelimit && npm run --silent check:debug && npm run --silent check:testcount && npm run --silent test:unit && npm run --silent verify:harness
+
+- analyze: ok
+Results:
+0 errors
+0 warnings
+0 parse errors
+- remotes: ok (22 declared, 22 wired)
+- secrecy: ok (the Aswang stays server-side)
+- config: ok (balance stays data-driven)
+- scope: ok (19 out-of-scope shapes watched)
+- ratelimit: ok (every OnServerEvent consults AntiCheat)
+- debug: ok (every Config.Debug switch is off)
+- testcount: ok (suite summaries count what ran)
+  PASS  anti-cheat-budgets: 11 remotes budgeted, 51 assertions
+  AudioCues
+  30/30 checks passed
+  PASS  badge-rules: 28 assertions over the five funnel badges
+  PASS  body-transitions: 33 cells and properties
+  PASS  chat-audience: 34 assertions over the full sender x recipient grid
+  PASS  config: 86 balance invariants
+  PASS  cosmetics: 73 assertions over 9 catalogue entries
+  ....  shipped week: 212 coins over 7 days, day 7 pays 100 (8 rounds' worth)
+  PASS  daily-streak: 48 assertions
+  PASS  kill-validation: 51 grid cells and cases
+  PASS  light-budget: 24 assertions
+  PASS  player-body: 11 cells and properties
+  PASS  profile-migration: 63 assertions over fresh, legacy, current, corrupt and future
+  PASS  quick-chat-phrases: 121 assertions over the closed set and the wheel
+  PASS  quick-chat-target: 31 assertions over the eligibility grid and the tie rule
+  PASS  rejoin-resolve: 61 assertions over the full phase x dealt-in x stored grid
+  PASS  role-draw: 30 assertions — shape, determinism, weighting, degenerate rosters
+  PASS  round-transitions: 56 assertions over 20 exhaustive cases
+  PASS  salt-carry: 38 assertions over the full PlayerState x RoundPhase grid
+  PASS  salt-throw: 70 assertions over the cone, the range and the four MISS worlds
+  PASS  search-pool: 14 assertions across the pool set
+  PASS  sky-cycle: 32 assertions
+  PASS  teaching-lines: 18 assertions over the closed cue set
+  PASS  token-bucket: steady state, burst, refill, backwards clock, degenerate cost, purity
+  PASS  transform-rules: 19 assertions over verdicts, phases, states, cooldown and precedence
+  PASS  trial-admission: 147 assertions over 16 cells and the properties
+  PASS  trial-timeline: 40 assertions over a full 90s walk
+  PASS  win-conditions: 0 assertions — skeleton, awaiting the rewritten win rule
+  ....  shipped pace at the floor rate (50 xp/round, 337s/round): L2 in 3 rounds, L5 in 20, L10 in 71, L100 in 6119
+  PASS  xp-curve: 100 assertions
+- test:unit: 28 file(s) ok
+- harness self-tests skipped (scripts, lessons and settings unchanged since last green run)
+- lessons: 5/40 ok
+  task-driver: fired 376× on Stop, last 2026-08-27T07:21:16.964Z
+  verify-gate: fired 453× on SubagentStop, last 2026-08-27T07:24:07.286Z
+  verify-gate:Stop: fired 376× on Stop, last 2026-08-27T07:21:16.964Z
+  review-gate: fired 375× on Stop, last 2026-08-27T07:21:16.955Z
+  claim-check: fired 376× on Stop, last 2026-08-27T07:21:16.956Z
+  verify-gate:SubagentStop: fired 77× on SubagentStop, last 2026-08-27T07:24:07.288Z
+  ensure-rojo: fired 38× on PreToolUse, last 2026-08-27T05:54:29.026Z
+- heartbeat: 7 hook(s) alive
+- candidates: 73 (29 high) — REVIEW DUE, run `/lessons-review`
+
+=== npm run verify:plan ===
+
+> aswang-game@0.1.0 verify:plan
+> node .claude/scripts/verify-plan.mjs .claude/plans/feature-v02-v2-vocabulary-plan/
+
+PASS  Step 1.1 — Declare the four v2 literal unions beside the existing four  [self]
+PASS  Step 1.2 — Add the carry slot to `ClientRoundSnapshot`  [real]
+PASS  Step 1.3 — Leave Amendment A3's block byte-identical and say so  [self]
+PASS  Step 2.1 — `Enums.ItemType` and `Enums.BodyKind`  [real]
+PASS  Step 2.2 — `Enums.MonsterState` and `Enums.CamouflageForm`  [self]
+PASS  Step 2.3 — Prove every cast resolves  [real]
+PASS  Step 3.1 — `Round` — the two v2 value changes  [self]
+PASS  Step 3.2 — `Monster` — the six numbers v2 adds  [real]
+PASS  Step 3.3 — `Search`, `Tracker` and `Bodies` — three new tables  [real]
+PASS  Step 3.4 — `Items` — §6.5's item block, and `Salt` as a compatibility view  [self]
+PASS  Step 3.5 — The whole-file gate  [real]
+PASS  Step 3.6 — Pin the four aliases to their canonical source  [self]
+
+12 passed, 0 failed, 0 unverifiable
+checks: 6 discriminating, 0 file-exists, 6 self-satisfying

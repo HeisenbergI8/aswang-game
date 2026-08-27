@@ -13,6 +13,53 @@ export type Role = "SURVIVOR" | "ASWANG"
 export type PlayerState = "LOBBY" | "ALIVE" | "DEAD" | "SPECTATOR"
 export type RoundResult = "SURVIVORS_ESCAPED" | "ASWANG_WINS" | "TIMEOUT" | "ABORTED"
 
+--[[
+	THE v2.0 VOCABULARY (V02). Declared here rather than in `Enums.luau` because Enums requires this
+	module for its `:: Types.X` casts, and a union that lives beside its consumer cannot be cast to.
+
+	All four are UPPER_SNAKE string literals, matching the four above: readable in a log line, readable
+	in analytics, and — unlike a number — impossible to confuse with an unrelated enum of the same
+	arity. Luau unions are structural, so none of these is assignable to `RoundPhase` or to each other.
+]]
+
+-- §4.4/§4.6. The three things folklore says stop an aswang, and the entire item vocabulary of v2.0.
+-- §3's OUT list forbids a fourth; `check:scope` watches `weapons?` for the day someone adds one.
+export type ItemType = "SALT" | "BAWANG" | "BUNTOT_PAGI"
+
+--[[
+	§4.3. What the Aswang is doing right now.
+
+	NORMAL and TRANSFORMED are the v1.3 pair. FEEDING (§4.3) is the 5-second lock on a corpse that
+	replaced the kill cooldown. CAMOUFLAGED (§4.3) is the ambient-animal form. EXPOSED is the odd one
+	out and it is a QUESTION for the chunk that builds the state machine, not for V02 — see Follow Ups:
+	§4.3 says camouflage is locked "until it has taken a salt hit", which reads as a LATCH that persists
+	across transforms and feeds, while the other four read as mutually-exclusive activities. V02
+	declares the five values the build plan asks for and takes no position on exclusivity.
+]]
+export type MonsterState = "NORMAL" | "TRANSFORMED" | "EXPOSED" | "FEEDING" | "CAMOUFLAGED"
+
+--[[
+	§4.7. A body on the ground is one of two things, and telling them apart is a DESIGN GOAL rather
+	than a leak: §4.7 requires husk state to be "publicly obvious", because a husk that differed from a
+	live body in some replicated-but-subtle way would let a client enumerate exactly which bodies are
+	husks — and since the Aswang can never be one, every husk is provably innocent. Public information
+	cannot be exploited; half-hidden information can.
+
+	Neither literal contains the word `ghost`, which `check:scope` arms as of V01. That is not luck —
+	`check-scope.mjs` names corpse and husk as its two ALLOW cases.
+]]
+export type BodyKind = "CORPSE" | "HUSK"
+
+--[[
+	§4.3. What a revealed Aswang can turn into. Four ambient forms so the barrio's scenery is a place
+	the monster can hide IN rather than a backdrop, and so §4.5's "It's the [animal]!" phrase has a
+	closed set of things it can name.
+
+	NOT A PET SYSTEM, and the distance matters because `check:scope` arms `pets?`. These are forms the
+	Aswang wears, owned by nobody, purchasable never (§8.3).
+]]
+export type CamouflageForm = "CAT" | "DOG" | "PIG" | "VILLAGER"
+
 export type PlayerStats = {
 	Rounds: number,
 	Survived: number,
@@ -385,6 +432,36 @@ export type ClientRoundSnapshot = {
 	RoundNumber: number,
 	YourRole: Role?, -- only ever the receiving player's OWN role
 	YourState: PlayerState,
+	--[[
+		V02, §4.4. WHAT THE RECEIVING PLAYER IS CARRYING, AND THE `Your` PREFIX IS THE WHOLE CONTRACT.
+
+		Safe for a reason that is structural rather than argued: `RoundSnapshot` is built per player and
+		sent with `:FireClient` precisely because `YourState` already differs between a survivor and a
+		mid-round spectator. There is no broadcast form of this payload to accidentally put someone
+		else's inventory on.
+
+		IT IS NOT A ROLE ORACLE. The Aswang carries nothing — the three items are the survivors' (§4.6)
+		— so its slot is `nil`, which is also what an empty-handed survivor's slot is. The two are
+		indistinguishable, and they must stay that way: do not add a "cannot carry" or "carry denied"
+		value to `ItemType` for the monster's benefit.
+
+		IT IS NOT A DEATH SIGNAL. It is not a count, it does not move when another player dies, and it
+		says nothing about the roster. Amendment A3 (§4.7) is untouched by it.
+
+		CARRY IS DELIBERATELY NOT PUBLIC. §4.5's v2 phrase list includes "I have the buntot pagi" —
+		announcing what you hold is a CHOICE with a cost, and that is what turns the single buntot pagi
+		into a protection problem. A field that told every client who held it would delete that phrase's
+		reason to exist. So: never widen this to another player's carry, and never mirror it onto an
+		attribute or a tag, both of which replicate to everyone.
+
+		OPTIONAL BECAUSE `Config.Items.*SpawnCount` PLUS `Config.Salt.CarryLimit = 1` MEAN ONE SLOT.
+		If the carry limit ever rises this becomes a list, and that is a contract change to argue in a
+		plan rather than a field to widen quietly.
+
+		V02 ADDS NO PRODUCER. `buildSnapshot` does not set it, exactly as it deliberately does not set
+		`YourRole`, so no service changes and `analyze` stays clean.
+	]]
+	YourCarriedItem: ItemType?,
 }
 
 --[[
@@ -414,6 +491,11 @@ export type ClientRoundSnapshot = {
 	none of them contains a token `check-secrecy.mjs` matches. C18 wants an alive count on the HUD
 	(BUILD-PLAN ~line 456) and this is the field it would reach for; Amendment A3 is the sentence
 	that says no.
+
+	V02: STILL NO, AND v2.0 MAKES IT WORSE RATHER THAN BETTER. `Round.MaxPlayers` drops from 8 to 5
+	(§C, spec line 873), so every survivor is a fifth of the field instead of an eighth and a count
+	narrows it twice as fast. The Aswang must now kill EVERYONE (§4.1), which means the count would
+	also be a live progress bar on the monster's own win condition — for both sides, for free.
 ]]
 
 --[[

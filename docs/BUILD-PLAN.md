@@ -188,8 +188,16 @@ Nothing works until the words exist. This chunk adds no behaviour.
 - `Config`: the full v2 block from spec §6.5.
 
 **Done** spec §6.5's Config block present with the comment for every number; enums cast; analyze clean.
-**Verify** `verify` green; `lune run tests/config.test.luau` — which will FAIL until V11 writes the six
-invariants, so this chunk's gate is analyze + lint only, stated explicitly so the red is expected.
+**Verify** `verify` green, **`test:unit` included**.
+
+> **Corrected during V02.** This line used to predict that `lune run tests/config.test.luau` would FAIL
+> until V11 wrote the six invariants, and called V02's gate "analyze + lint only". That was wrong on
+> both counts: the suite already existed and **passed** (82 invariants, exit 0) before V02 started, so
+> there was never a red to expect. The prediction described a hard rename of `Config.Salt.*` to §6.5's
+> `Items.Salt*` names — but five live modules read the old keys, so that branch reds `analyze` too,
+> which this chunk's own **Done** line forbids. V02 therefore makes `Config.Items` canonical and leaves
+> `Config.Salt`'s four renamed keys as aliases into it. **A red `test:unit` here is a real V02 failure,
+> not an expected one.** The aliases are deleted by the chunk that rewrites each last reader.
 
 ---
 

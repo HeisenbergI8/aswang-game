@@ -8,14 +8,99 @@
 	See docs/MVP-SPEC.md Appendix A for guidance on which knob to turn when.
 ]]
 
+--[[
+	§6.5's ITEM BLOCK, HOISTED INTO A LOCAL SO `Config.Salt` CAN ALIAS IT (V02).
+
+	This is the file's only local, and it exists to keep ONE number in ONE place across a rename. §6.5
+	renames four v1.3 salt tunables (`Salt.SpawnCount` -> `Items.SaltSpawnCount`, and three siblings).
+	Five live modules still read the old names — ItemService, TrialService, UIController,
+	InputController and shared/pure/SaltCarry — and a missing Config key is a HARD analyzer error, not
+	a warning:
+
+		TypeError: Key 'SpawnCount' not found in table '{| CarryLimit: number |}'
+
+	V02 is a vocabulary chunk that may not touch services, so `Items` below is CANONICAL and the four
+	matching fields of `Config.Salt` are ALIASES pointing at it. Tune here. `Config.Salt` shrinks to
+	nothing as each consumer is renamed, and disappears with the last one.
+]]
+local Items = {
+	--[[
+		SALT (§4.6) — reveal and damage. Four pouches, one carried at a time.
+
+		READ THIS BEFORE CHANGING SaltDamage OR SaltSpawnCount. §6.5 invariant 1 requires
+		`SaltDamage x (SaltSpawnCount - 1) >= Monster.MaxHealth - Monster.WeakenedThreshold`, so that
+		the second win condition survives ONE missed throw. At the shipped values that is
+		`25 x 3 = 75 >= 100 - 25 = 75` — EQUALITY, with zero margin. Every pouch but one must connect.
+		Tighten either number and survivors can no longer weaken the Aswang at all, and nothing in the
+		game will say so. V11 pins this; until V11 lands, this comment is the only guard.
+
+		The first salt hit is also what UNLOCKS the Aswang's camouflage (§4.3/§4.6) — revealing it is
+		not free — and what interrupts a feed, costing the monster both the heal and the camouflage
+		refresh. Salt is the game's pivot, which is why it has four numbers and three invariants.
+	]]
+	SaltSpawnCount = 4,
+	SaltDamage = 25,
+	-- Invariant 6: RevealDuration > StunDuration, so salting creates a CHASE rather than a freeze. A
+	-- reveal that ended with the stun would be information nobody could act on.
+	SaltStunDuration = 4,
+	SaltRevealDuration = 10,
+	-- Invariant 3: > Monster.KillRange (8). You can salt it before it can reach you, or salt is not
+	-- counterplay — it is a suicide button.
+	SaltThrowRange = 25,
+
+	--[[
+		BAWANG / GARLIC (§4.6) — deny a doorway, never a room.
+
+		A barrier the Aswang will not cross, and its effect is SILENT AND INVISIBLE: no knockback, no
+		VFX, nothing that tells the survivors it worked. That is what makes garlic a loyalty test — place
+		it, ask everyone to walk inside, and watch who declines — rather than a wall.
+
+		Invariant 4: GarlicDuration < Round.Duration / 4 (15 < 75). Garlic buys TIME, never safety
+		(pillar six); §3's OUT list forbids permanent safe rooms outright.
+
+		WHY TWO. It is the middle term of the item economy — 4 salt, 2 bawang, 1 buntot pagi, seven
+		items across Search.ContainerCount = 15 — and the count is what keeps garlic a CHOICE rather
+		than a supply: two is enough to deny a doorway twice, or two doorways once, and never enough to
+		seal a building. One would make finding it decisive; three would approach the safe room §3
+		forbids. No §6.5 invariant pins this, so it is a judgement to re-open at V16 rather than a
+		relationship that will break silently.
+	]]
+	GarlicSpawnCount = 2,
+	GarlicDuration = 15,
+
+	--[[
+		BUNTOT PAGI (§4.6) — the only thing that kills, and there is exactly ONE per round.
+
+		ONE IS A DESIGN CONSTANT, NOT A TUNABLE. Denying survivors the buntot pagi is a real Aswang
+		strategy that looks exactly like ordinary survival, and §4.5 gives the carrier a phrase — "I
+		have the buntot pagi" — that makes them findable, which is what turns the single item into a
+		protection problem. Two would delete both.
+
+		§8.3 is blunter: selling a second one sells the win condition, and it is named there as the
+		sharpest monetisation temptation in the game. `check:scope` arms `weapons?` for the day someone
+		adds a third item.
+
+		It kills only an Aswang that is BOTH Exposed and below Monster.WeakenedThreshold (§4.6).
+	]]
+	BuntotPagiSpawnCount = 1,
+}
+
 local Config = {
 	Round = {
 		Intermission = 25, -- seconds in lobby before a round starts
-		Duration = 420, -- 7 minutes of "night" before sunrise
+		-- §6.5 and §4.1 (spec line 170): a flat 300s of "night" before sunrise. v2.0 shortens the
+		-- round from v1.3's 420 because the Aswang must now kill EVERYONE (§4.1) rather than race a
+		-- gate, and the sharpening tracker (§4.6) is what makes 5 minutes enough to find them.
+		-- §4.1 flags the flat value as an assumption to overrule in one line if it does not hold.
+		Duration = 300,
 		EndScreen = 12, -- reveal + stats screen
 		StartingDelay = 4, -- role assignment + teleport fade
 		MinPlayers = 3, -- MUST be playable at this count (see spec §9 cold start)
-		MaxPlayers = 8,
+		-- §6.5 and §C (spec line 873): 5, not 8 and emphatically not 20. §4.1 (spec line 193) argues it
+		-- as arithmetic rather than taste — every kill costs a transform, an approach, a revert and a
+		-- 5-second feed, and at 7 survivors that bill exceeds the night. Small servers also fill faster
+		-- and feel full sooner.
+		MaxPlayers = 5,
 
 		--[[
 			The floor between one player-triggered respawn and the next.
@@ -67,9 +152,66 @@ local Config = {
 		RevertTime = 1.0,
 		MaxTransformTime = 8, -- forced revert if no kill
 		KillRange = 8, -- studs
+		-- DEAD UNDER v2.0, KEPT BECAUSE IT STILL HAS READERS (V02). §4.3's heading is literally
+		-- "Feeding — what replaced the kill cooldown": FeedDuration below is the v2 mechanism. This is
+		-- still read by MonsterService and pinned by config.test, so deleting it reds analyze AND
+		-- test:unit. It dies with the chunk that builds feeding.
 		KillCooldown = 30, -- seconds after revert
 		TransformedSpeedMult = 1.25,
 		TransformAudioRange = 40, -- how far the transform sound carries
+
+		--[[
+			THE ASWANG'S HEALTH (§4.6), AND THE SECOND WIN CONDITION LIVES IN THESE TWO NUMBERS.
+
+			v1.3 had no monster health at all — survivors escaped or died. v2.0's second win condition is
+			"salt it down, then land the buntot pagi", and §4.6 (spec line 415) gates the kill on the
+			Aswang being BOTH Exposed and below WeakenedThreshold. So these are not flavour: raise
+			MaxHealth or lower WeakenedThreshold and survivors stop being able to win that way, with
+			nothing in the game to tell you. Read the plan's preamble before touching either.
+
+			WeakenedThreshold is a HEALTH PREDICATE, not a `MonsterState` member — see Enums.MonsterState.
+		]]
+		MaxHealth = 100,
+		WeakenedThreshold = 25,
+
+		--[[
+			FEEDING (§4.3) — WHAT REPLACED THE KILL COOLDOWN, and the design's most deliberate window.
+
+			After a kill the Aswang must feed on the corpse, transformed and locked in place, for
+			FeedDuration seconds. That is the ONLY reliably predictable moment in the round: the monster
+			is stationary, visible, and at a location survivors already know because there is a body
+			there. §4.6 says this is the window the buntot pagi needs — without it, killing the Aswang
+			is a coin flip against a faster player.
+
+			So FeedDuration is load-bearing rather than cosmetic. §6.5 invariant 2 requires it to exceed
+			the time to cross ~15 studs and land a swing; at Trial.PlayerBaselineWalkSpeed = 16 that
+			crossing is ~0.94s, leaving ~4s for the approach and the swing. V11 pins the RELATIONSHIP.
+
+			FeedHeal is the other half. It restores health (§4.6's table) and, once the Aswang has been
+			revealed, restores its ability to camouflage (§4.3) — which is why interrupting a feed with
+			salt is a real victory rather than a nuisance: the monster loses both at once.
+		]]
+		FeedDuration = 5,
+		FeedHeal = 25,
+
+		--[[
+			SMOKE (§4.3) — the Aswang's escape, and it belongs to the monster on purpose.
+
+			A burst that breaks line of sight and covers a retreat, so that being salted is a setback
+			rather than a death sentence. An early v2 draft attached the smoke to SALT instead, which
+			meant the survivor who landed the counterplay was the one blinded by it — a counterplay item
+			that punishes its user is a dead item. This is that fix, and it is why the numbers sit under
+			Monster rather than under Items.
+
+			SmokeRadius is a VISUAL and LOS radius, not a damage radius. Nothing takes damage from smoke.
+			Counted against §5's mobile particle budget by whoever builds the effect.
+		]]
+		SmokeDuration = 4,
+		SmokeRadius = 18,
+
+		-- §6.5 FILES THIS UNDER `Bodies`, AND V02 LEAVES IT HERE (V02). The name does not change, so a
+		-- reader finds it either way and no alias is warranted. Moving it reds analyze —
+		-- MonsterService reads it and Types cites it. It moves with the chunk that edits MonsterService.
 		CorpseDuration = 45,
 		-- How long the corpse takes to fade once CorpseDuration is up. Long enough that a survivor
 		-- walking in on the tail of it still registers a body was there; short enough that it is not a
@@ -94,11 +236,26 @@ local Config = {
 		TransformParticleRate = 12,
 	},
 
+	-- §6.5's canonical item block. Declared above so Config.Salt can alias into it; see that comment.
+	Items = Items,
+
 	Salt = {
-		SpawnCount = 4,
-		StunDuration = 4,
-		RevealDuration = 10,
-		ThrowRange = 25,
+		--[[
+			V02: THESE FOUR ARE ALIASES, NOT VALUES. §6.5 renames them; the rename cannot land until the
+			five modules that read them are edited, and V02 may not edit a service. Tune `Items` above —
+			changing a line here does nothing, because there is no value here to change.
+
+			DELETE EACH ONE with the chunk that renames its last reader. What remains below is the half
+			of this table §6.5 does not mention: real values with no v2 counterpart, which stay.
+
+			`tests/config.test.luau` pins each of these four to its canonical source, so replacing a
+			reference here with a literal is a RED SUITE rather than a silent divergence.
+		]]
+		SpawnCount = Items.SaltSpawnCount,
+		StunDuration = Items.SaltStunDuration,
+		RevealDuration = Items.SaltRevealDuration,
+		ThrowRange = Items.SaltThrowRange,
+
 		CarryLimit = 1,
 
 		--[[
@@ -148,6 +305,75 @@ local Config = {
 		PouchRgb = { 240, 238, 225 },
 		RevealGlowFillRgb = { 255, 250, 235 },
 		RevealGlowOutlineRgb = { 190, 235, 255 },
+	},
+
+	--[[
+		V02, §4.4. SEARCHING — what replaced the task system, and the trade at the heart of v2.0.
+
+		Survivors search containers for the three items. Searching takes TIME and makes NOISE, and noise
+		is how the monster finds you (spec line 76). That is the whole loop: every second of progress is
+		a second of exposure, which is what tasks never were.
+
+		V16's third playtest question is whether this feels like survival or like a chore. These three
+		numbers are the ones that decide it, so expect all three to move.
+	]]
+	Search = {
+		-- How many searchable containers the barrio holds. It must comfortably exceed the total items
+		-- placed (Items.*SpawnCount sums to 7) or every container is a hit and searching stops being a
+		-- gamble. V03 owns the layout draw and the map-side tag contract.
+		ContainerCount = 15,
+		-- Seconds to search one container, uninterrupted. The exposure window: long enough that being
+		-- caught mid-search is a real risk, short enough that a survivor will still take the risk.
+		SearchTime = 6,
+		-- Studs the noise carries. DELIBERATELY LARGER THAN ANY OTHER RANGE IN THIS FILE — the point is
+		-- that searching summons the monster, not that it might. Compare Tracker.EarlyRadius = 40: a
+		-- searching survivor is louder than the tracker is sharp, for the whole first half of the night.
+		NoiseRadius = 60,
+	},
+
+	--[[
+		V02, §4.6. THE SHARPENING TRACKER — why hiding does not win.
+
+		The Aswang's sense of where people are gets better as the night goes on. This is the pressure
+		that replaced the escape gate: in v1.3 a survivor who hid in a corner for seven minutes won, and
+		spec §4.6 (line 448) is explicit that under v2.0 hiding buys you two minutes and kills you at
+		five. §4.7 (line 542) adds that the TIMEOUT FLIPPED from v1.3 — the clock running out is now a
+		survivor win — and the tracker is what pays for that flip being fair.
+
+		VAGUE AND SLOW, NEVER A LIVE FEED (spec line 454). The Aswang is a player, not an AI; a live
+		feed hands a human a wallhack and the round stops being a hunt. Interval is how often a ping
+		lands, Radius is how imprecise it is.
+
+		§6.5 invariant 5 (V11): the tracker SHARPENS, never dulls. Late < Early on both axes.
+	]]
+	Tracker = {
+		EarlyInterval = 90, -- seconds between pings in the first half of the round
+		LateInterval = 30, -- and in the second: three times as often
+		EarlyRadius = 40, -- studs of imprecision early — a neighbourhood, not an address
+		LateRadius = 15, -- and late: close enough to walk to, still not a marker on a head
+	},
+
+	--[[
+		V02, §4.7. BODIES — corpses and husks.
+
+		A corpse is a killed player. A husk is one who quit or went AFK, and husks are why the roster
+		never shrinks: the Aswang's win condition is "kill everyone", so a player who leaves must not
+		delete their own square from the board.
+
+		AMENDMENT A3 GOVERNS BOTH (§4.7, spec line 52). Death is not public; a client learns someone
+		died by FINDING the body. Nothing in this table may grow into a count, a roster or a signal.
+
+		`CorpseDuration` is NOT here. §6.5 files it under this table, but it lives at
+		`Monster.CorpseDuration` with live readers; see the comment there.
+	]]
+	Bodies = {
+		-- Seconds of no input before a player is husked. Generous on purpose: a phone that locks (§5
+		-- puts ~60% of players on one) must not cost its owner their round in under two minutes.
+		AfkSeconds = 120,
+		-- §4.7: a husk unreachable for this long is relocated to the nearest walkable point. Someone who
+		-- quit inside a garlic-shielded house, or fell out of the map, must not make kill-everyone
+		-- unwinnable. A husk also cannot benefit from garlic — that rule is code, not a number.
+		HuskRelocateAfter = 60,
 	},
 
 	--[[

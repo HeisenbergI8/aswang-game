@@ -78,6 +78,44 @@ check(
 	`RevealDuration={Config.Salt.RevealDuration}, StunDuration={Config.Salt.StunDuration}`
 )
 
+--[[
+	V02: THE FOUR SALT ALIASES STILL POINT AT `Config.Items`.
+
+	§6.5 renames these four to `Items.Salt*`, but five live modules read the old names, so V02 made
+	`Config.Items` canonical and left `Config.Salt`'s four as REFERENCES into it rather than copies.
+	Nothing mechanically stops a tuning session from replacing a reference with a literal: it
+	typechecks, `check:config` exempts `Config.luau` itself (check-config.mjs:36), and `analyze` and
+	`lint` both stay green while the two numbers silently diverge — with `Items` reading as canonical
+	while five modules quietly use the stale copy.
+
+	These four checks are that guard, and they are the condition attached to choosing the alias branch
+	over a hard rename. DELETE EACH ONE with the alias it guards, in whichever chunk renames its last
+	reader; a check against a field that no longer exists is a loud Lune error, which is correct.
+]]
+check(
+	"Config.Salt.SpawnCount is still an alias of Items.SaltSpawnCount",
+	Config.Salt.SpawnCount == Config.Items.SaltSpawnCount,
+	`Salt.SpawnCount={Config.Salt.SpawnCount}, Items.SaltSpawnCount={Config.Items.SaltSpawnCount}`
+)
+
+check(
+	"Config.Salt.StunDuration is still an alias of Items.SaltStunDuration",
+	Config.Salt.StunDuration == Config.Items.SaltStunDuration,
+	`Salt.StunDuration={Config.Salt.StunDuration}, Items.SaltStunDuration={Config.Items.SaltStunDuration}`
+)
+
+check(
+	"Config.Salt.RevealDuration is still an alias of Items.SaltRevealDuration",
+	Config.Salt.RevealDuration == Config.Items.SaltRevealDuration,
+	`Salt.RevealDuration={Config.Salt.RevealDuration}, Items.SaltRevealDuration={Config.Items.SaltRevealDuration}`
+)
+
+check(
+	"Config.Salt.ThrowRange is still an alias of Items.SaltThrowRange",
+	Config.Salt.ThrowRange == Config.Items.SaltThrowRange,
+	`Salt.ThrowRange={Config.Salt.ThrowRange}, Items.SaltThrowRange={Config.Items.SaltThrowRange}`
+)
+
 -- Spec §4.6, C13: four pouches cannot be placed at three points. This is the relation that turns a
 -- map defect into a startable round with less salt than the design assumes, and the only symptom
 -- otherwise is "salt feels rarer than it should" six playtests later.
