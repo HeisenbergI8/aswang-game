@@ -245,6 +245,13 @@
           {
             "type": "command",
             "command": "node",
+            "args": [".claude/scripts/guard-loop-pause.mjs"],
+            "statusMessage": "Checking the loop was not stalled",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "node",
             "args": [".claude/scripts/lesson-prompt.mjs"],
             "statusMessage": "Checking for anything worth learning",
             "timeout": 30

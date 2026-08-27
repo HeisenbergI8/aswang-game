@@ -10,6 +10,7 @@
 .loop-state.json
 .verify-state.json
 .claim-state.json
+.loop-pause-state.json
 .review-state.json
 .lessons-state.json
 .lesson-prompt-state.json

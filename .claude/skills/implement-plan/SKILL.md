@@ -95,9 +95,21 @@ This log is what the auditor reads. Deviations recorded here are legitimate engi
 deviations discovered by the auditor in the diff are findings against you.
 
 ### 6. Checkpoint
-After each phase, tell the user in one or two lines what landed and what is next. For phases touching
-more than a handful of files, or any phase whose plan step you deviated from, pause for confirmation
-before continuing.
+After each phase, tell the user in one or two lines what landed and what is next — then **start the
+next phase in the same turn**. A checkpoint is a progress report, not a question.
+
+**Pause for confirmation only when the answer changes what you build next:** a deviation that alters
+the plan's REMAINING phases, a step you believe is wrong, a destructive or outward-facing action, or a
+decision that is genuinely the user's. A type annotation, a reordered diff, a renamed local — log those
+under **Deviations** and keep going.
+
+**Inside a `/build` run this is enforced, not advised.** `guard-loop-pause.mjs` blocks a turn that ends
+by asking to continue a live run, because the run *is* the permission: `/build` stops for a problem and
+nothing else, and any message from the user — including "yes, continue" — **pauses the run**. That is
+how a loop halts at `iterations: 0`, having driven nothing, looking exactly like a working one.
+
+A real blocker is still a real blocker. Say so plainly and name it as one; the guard does not match a
+substantive question, and it stands aside after two blocks regardless.
 
 ## When a Gate Fails
 

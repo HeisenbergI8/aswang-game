@@ -397,9 +397,10 @@ Rules enforced by code rather than by instruction, so they hold regardless of wh
 | `Stop` claim gate | a claim about a green gate is checked against a ledger | `claim-check.mjs` |
 | `Stop` review gate | the reviewers are named when source changed and `verify` went green | `review-gate.mjs` |
 | `Stop` driver | the task loop's whether-and-what-next decision | `task-driver.mjs` |
+| `Stop` loop-pause gate | a live `/build` run is never ended by ASKING to continue it — the run is the permission, and a user reply pauses it | `guard-loop-pause.mjs` |
 | `permissions.deny` + `autoMode.hard_deny` | declarative backstop; holds if a hook script errors | `.claude/settings.json` |
 | `analyze-baseline.json` | tracked at the repo root, so widening the gate shows in a diff. `--update` refuses to run under an agent | `check-analyze.mjs` |
-| 28 self-test suites | every guard and gate proven in BOTH directions | `harness-selftest.mjs` |
+| 31 self-test suites | every guard and gate proven in BOTH directions | `harness-selftest.mjs` |
 
 All hook wiring lives in `.claude/settings.json`. **Do not move per-agent hooks into agent frontmatter** —
 `hooks:` there is documented as agent-scoped and has been observed not to fire, while settings.json hooks
