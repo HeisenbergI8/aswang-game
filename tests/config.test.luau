@@ -765,6 +765,117 @@ check(
 	`RangeStuds={Config.Search.RangeStuds}`
 )
 
+--[[
+	V04, §4.4. THE NOISE BLOCK. Six of these eight guard things with no symptom: a tracker that reads
+	an empty window, a cap that silently truncates one, a cue more precise than the pulse it is meant
+	to be worse than, and a movement threshold that would turn V13's only input into a monster
+	tracker.
+]]
+
+-- §4.4: "it is the loudest thing a survivor does". If a V16 tune inverts this, searching stops being
+-- the risk the whole economy is built on and nothing in the game says so.
+for action, tuning in Config.Noise.Actions do
+	check(
+		`searching is at least as loud as {action}`,
+		Config.Noise.Actions.SEARCH.Loudness >= tuning.Loudness,
+		`SEARCH={Config.Noise.Actions.SEARCH.Loudness}, {action}={tuning.Loudness}`
+	)
+	check(
+		`searching carries at least as far as {action}`,
+		Config.Noise.Actions.SEARCH.Radius >= tuning.Radius,
+		`SEARCH={Config.Noise.Actions.SEARCH.Radius}, {action}={tuning.Radius}`
+	)
+end
+
+-- Config.Search's own comment has claimed this since V02 ("a searching survivor is louder than the
+-- tracker is sharp, for the whole first half of the night"). A comment is not a check.
+check(
+	"a search is louder than the early tracker is sharp",
+	Config.Noise.Actions.SEARCH.Radius > Config.Tracker.EarlyRadius,
+	`Radius={Config.Noise.Actions.SEARCH.Radius}, EarlyRadius={Config.Tracker.EarlyRadius}`
+)
+
+-- One search, one noise. Below this, tapping the search key faster than the hold lasts buys extra
+-- noise events per search, which is both a history flood and a way to fake activity in a corner.
+check(
+	"a search cannot be louder than once per search",
+	Config.Noise.Actions.SEARCH.MinInterval >= Config.Search.SearchTime,
+	`MinInterval={Config.Noise.Actions.SEARCH.MinInterval}, SearchTime={Config.Search.SearchTime}`
+)
+
+-- V13's first pulse fires at Tracker.EarlyInterval and reads this history and NOTHING ELSE. A
+-- shorter window means the first pulse of every round reads an empty table.
+check(
+	"the noise history outlives the first tracker pulse",
+	Config.Noise.HistorySeconds >= Config.Tracker.EarlyInterval,
+	`HistorySeconds={Config.Noise.HistorySeconds}, EarlyInterval={Config.Tracker.EarlyInterval}`
+)
+
+--[[
+	THE BOUND, PROVEN RATHER THAN ASSERTED. Age is what bounds the history; MaxRecords is a safety
+	net. If the net is tighter than the worst case the throttles allow, it silently starts trimming
+	the WINDOW instead — the tracker goes blind on the early round and nothing reports it.
+
+	THIS SUMS ACROSS ACTIONS RATHER THAN DIVIDING BY THE SMALLEST INTERVAL, and the first version of
+	this check got that wrong. `NoiseService.lastEmitAt` is keyed `(UserId, action)` — its own comment
+	says "keyed by action rather than by player alone so that using an item does not silence a
+	search" — so one player emits EVERY action concurrently and the worst case is the sum, not the
+	single fastest row. The V04 exploit audit proved the difference by simulation against the real
+	`NoiseLog.append`: with a third emitter wired, the true peak hits the cap and starts eating the
+	window while this check still reported 300.
+
+	IT SUMS OVER EVERY PRICED ACTION, INCLUDING THE TWO WITH NO EMITTER. Pricing an action is the
+	commitment; DOOR and SPRINT are priced (Config.Noise.Actions) and the chunk that finally wires one
+	must not have to rediscover this relationship. Summing only over wired actions would make this
+	check pass today and fail silently on the diff that adds the caller — which is the exact failure
+	mode the check exists to prevent.
+
+	THE `+ 1` IS THE FENCEPOST: a window of HistorySeconds at MinInterval spacing holds
+	floor(H/I) + 1 records, not H/I. The audit's simulation measured 410 where the naive arithmetic
+	said 400, and that gap is exactly one record per player per action.
+]]
+local worstCaseRecords = 0
+
+for _, tuning in Config.Noise.Actions do
+	worstCaseRecords += math.floor(Config.Noise.HistorySeconds / tuning.MinInterval) + 1
+end
+
+worstCaseRecords *= Config.Round.MaxPlayers
+
+check(
+	"the record cap can never truncate the history window",
+	Config.Noise.MaxRecords >= worstCaseRecords,
+	`MaxRecords={Config.Noise.MaxRecords}, worst case={worstCaseRecords}`
+)
+
+-- Every action needs a throttle for the sum above to be finite. Zero would also let one player fill
+-- the history alone.
+for action, tuning in Config.Noise.Actions do
+	check(`{action} has a throttle`, tuning.MinInterval > 0, `{tuning.MinInterval}`)
+end
+
+-- §4.6: the pulse reveals an area, never an address. Being in EARSHOT should always beat the pulse,
+-- and the cue's grid is what keeps it from being an address instead.
+check(
+	"the cue is coarse enough to stay an area",
+	Config.Noise.CueGridStuds > 0 and Config.Noise.CueGridStuds < Config.Tracker.LateRadius,
+	`CueGridStuds={Config.Noise.CueGridStuds}, LateRadius={Config.Tracker.LateRadius}`
+)
+
+--[[
+	THE ANTI-ORACLE GUARD. No sprint verb exists; the only thing above the 16-stud baseline is a
+	TRANSFORMED ASWANG. If a movement emitter is ever wired with a threshold under that, V13's only
+	input becomes a monster tracker pointed at the monster — a leak with no role token in it, which
+	`check:secrecy` structurally cannot see.
+]]
+check(
+	"no speed this game can produce crosses the sprint threshold",
+	Config.Noise.SprintSpeedStuds
+		> Config.Trial.PlayerBaselineWalkSpeed * Config.Monster.TransformedSpeedMult,
+	`SprintSpeedStuds={Config.Noise.SprintSpeedStuds}, fastest=`
+		.. `{Config.Trial.PlayerBaselineWalkSpeed * Config.Monster.TransformedSpeedMult}`
+)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end

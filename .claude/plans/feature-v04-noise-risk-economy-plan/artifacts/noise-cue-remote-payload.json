@@ -1,0 +1,21 @@
+{
+  "_comment": "Captured directly off the NoiseCue remote via a transient OnClientEvent listener attached with execute_luau (datamodel_type: Client), per .claude/lessons/prove-input-at-the-remote-not-the-outcome.md -- this is the raw payload the server sent, not an inference from a downstream effect.",
+  "_container_true_position": { "X": 58.900001525878909, "Y": 2.5999999046325685, "Z": -47.43000030517578 },
+  "_expected_grid": "Config.Noise.CueGridStuds = 8",
+  "captured": [
+    {
+      "Action": "SEARCH",
+      "Loudness": 1,
+      "Position": { "X": 56, "Y": 0, "Z": -48 },
+      "Mine": true,
+      "At": 18548.23602791666
+    }
+  ],
+  "_verification": {
+    "quantisation_X": "58.9 / 8 = 7.3625 -> round = 7 -> 7*8 = 56 == captured.X (56). MATCH.",
+    "quantisation_Y": "2.6 / 8 = 0.325 -> round = 0 -> 0*8 = 0 == captured.Y (0). MATCH.",
+    "quantisation_Z": "-47.43 / 8 = -5.929 -> round = -6 -> -6*8 = -48 == captured.Z (-48). MATCH.",
+    "loudness": "Config.Noise.Actions.SEARCH.Loudness = 1, captured Loudness = 1. MATCH.",
+    "mine": "true -- solo test, the actor is the only player, so Mine=true on every capture. The Mine=false / 'someone else's noise' path (which produces the client log line '[AudioController] cue CUE_NOISE -- SEARCH, 60 studs') could NOT be exercised solo -- it requires a second player within Config.Noise.Actions.SEARCH.Radius=60 studs. See verification.md Not Verified section."
+  }
+}

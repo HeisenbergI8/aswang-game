@@ -578,6 +578,47 @@ export type SearchUpdatePayload = {
 	Found: ItemType?,
 }
 
+--[[
+	V04, §4.4. THE FOUR NOISY ACTIONS.
+
+	Only two of them have an emitter in V04, and that is a statement about the GAME rather than about
+	this chunk: `grep -rni door src --include="*.luau"` finds no door, and `grep -rn "Sprint\|Crouch"`
+	finds no movement verb. `NoiseModel` prices all four so the model is decided in one place; the
+	chunk that adds a door adds the call, not the price.
+]]
+export type NoiseAction = "SEARCH" | "ITEM_USE" | "DOOR" | "SPRINT"
+
+--[[
+	V04, §4.4. `NoiseCue`'s payload. FireClient, to one player at a time, after the server has
+	decided that player is within the noise's radius.
+
+	THE ABSENT FIELDS ARE THE SECURITY DESIGN, so they are listed rather than merely omitted:
+
+	  · NO ACTOR, in any form — not a UserId, not a name, not a character reference. §4.4's whole
+	    point is that hearing a search tells you somebody is searching, not who. Adding one would
+	    also be the first place a role could be inferred, since only the receiver knows it was not
+	    them.
+	  · NO RADIUS AND NO DISTANCE. The client reads `Config.Noise.Actions[Action].Radius` for its
+	    rolloff — Config is replicated, so this is a lookup rather than a transfer — and a DISTANCE
+	    would be a solved triangle: three cues and a compromised client has an exact position.
+	  · NO COUNT AND NO HISTORY. The history is server-only (§4.4, build plan V04) and V13 is its
+	    only reader.
+
+	`Position` IS QUANTISED to Config.Noise.CueGridStuds by the sender and is therefore a CELL, not a
+	person. §4.6 requires the Aswang's information to be an area rather than an address.
+]]
+export type NoiseCuePayload = {
+	Action: NoiseAction,
+	-- 0..1, scaling the volume. The receiver already knows this number from Config; it is sent so
+	-- the client never has to guess which action produced the cue it is playing.
+	Loudness: number,
+	Position: Vector3,
+	-- Whether the receiver is the one who made it. TRUE ONLY FOR THE ACTOR, which is why the actor's
+	-- cue can be non-positional and can carry a line of copy: it is the "that was loud" feedback
+	-- §4.6 asks for, and a sound you cannot perceive is not tension, it is a dice roll.
+	Mine: boolean,
+}
+
 -- What the timeline fires, in order. FIRE-ONCE per session — see `shared/pure/TrialTimeline`.
 export type TrialBeat =
 	"BEAT_WELCOME"

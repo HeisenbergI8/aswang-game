@@ -78,6 +78,18 @@ local PERMITTED_PHASES: { [string]: { [string]: boolean } } = {
 	CUE_TRANSFORM = { STARTING = true, ACTIVE = true },
 	CUE_HEARTBEAT = { ACTIVE = true },
 	CUE_SUNRISE = { ACTIVE = true, ENDING = true },
+	--[[
+		V04, §4.4. ACTIVE ONLY, because nothing can make noise outside it — `NoiseService.Emit`
+		refuses every other phase, and this row is the second half of that statement rather than a
+		restriction on top of it.
+
+		BOTH IDS ARE PERMITTED ON IDENTICAL TERMS FOR EVERY PLAYER IN THE ROUND. There is no role
+		branch, no form branch and no per-player exception, for `CUE_FOOTSTEP`'s reason two rows
+		down: a rule that can refuse a cue for some players and not others is a difference, and in
+		this game a difference IS the leak (`.claude/lessons/absence-is-observable.md`).
+	]]
+	CUE_NOISE = { ACTIVE = true },
+	CUE_NOISE_SELF = { ACTIVE = true },
 	CUE_FOOTSTEP = {
 		IDLE = true,
 		INTERMISSION = true,
@@ -98,10 +110,19 @@ local PERMITTED_PHASES: { [string]: { [string]: boolean } } = {
 	DEAD is allowed. A dead player is still in the world spectating and can already SEE a transformed
 	monster; refusing them the audio would remove nothing and would make dead players audibly
 	different from living ones, which is the failure mode `absence-is-observable` names.
+
+	V04 RENAMED THIS FROM `MONSTER_CUES`, and the rename is the honest version of what it always
+	was: the rule is "must not reach somebody outside the round", and the monster's cues were simply
+	the only members. §4.4's noise cues need the same rule for the same reason — a lobby player
+	hearing a search knows somebody is out there arming themselves, from outside the barrio. The
+	server already refuses them (NoiseService.dispatchCue), so this is the second lock rather than
+	the first.
 ]]
-local MONSTER_CUES: { [string]: boolean } = {
+local ROUND_ONLY_CUES: { [string]: boolean } = {
 	CUE_TRANSFORM = true,
 	CUE_HEARTBEAT = true,
+	CUE_NOISE = true,
+	CUE_NOISE_SELF = true,
 }
 
 local OUTSIDE_THE_ROUND: { [string]: boolean } = {
@@ -140,7 +161,7 @@ function AudioCues.isCuePermitted(cueId: string, phase: RoundPhase, state: Playe
 		return false
 	end
 
-	if MONSTER_CUES[cueId] and OUTSIDE_THE_ROUND[state] then
+	if ROUND_ONLY_CUES[cueId] and OUTSIDE_THE_ROUND[state] then
 		return false
 	end
 

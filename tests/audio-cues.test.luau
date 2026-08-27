@@ -90,6 +90,33 @@ for _, phase in PHASES do
 	check(`footsteps in {phase}`, AudioCues.isCuePermitted("CUE_FOOTSTEP", phase, "ALIVE"))
 end
 
+--[[
+	V04, §4.4. THE NOISE CUES. Two properties, and the second is the one no playtest would show you:
+	a cue heard by somebody in the LOBBY is information leaving the round, and the person who has it
+	is not even in the barrio.
+]]
+for _, cueId in { "CUE_NOISE", "CUE_NOISE_SELF" } do
+	check(`{cueId} plays during ACTIVE`, AudioCues.isCuePermitted(cueId, "ACTIVE", "ALIVE"))
+	check(`{cueId} reaches the dead`, AudioCues.isCuePermitted(cueId, "ACTIVE", "DEAD"))
+	check(
+		`{cueId} does not reach the lobby`,
+		not AudioCues.isCuePermitted(cueId, "ACTIVE", "LOBBY")
+	)
+	check(
+		`{cueId} does not reach a spectator`,
+		not AudioCues.isCuePermitted(cueId, "ACTIVE", "SPECTATOR")
+	)
+
+	for _, phase in PHASES do
+		if phase ~= "ACTIVE" then
+			check(
+				`{cueId} is silent in {phase}`,
+				not AudioCues.isCuePermitted(cueId, phase, "ALIVE")
+			)
+		end
+	end
+end
+
 print(`  {checked - failures}/{checked} checks passed`)
 
 if failures > 0 then

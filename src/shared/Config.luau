@@ -85,6 +85,91 @@ local Items = {
 	BuntotPagiSpawnCount = 1,
 }
 
+--[[
+	V04's NOISE BLOCK, HOISTED INTO A LOCAL SO `Search.NoiseRadius` CAN ALIAS IT (§4.4).
+
+	Spec §6.5's committed table has exactly one noise number in it, `Search.NoiseRadius = 60`, and
+	§4.4 needs a price for every noisy action. This block is CANONICAL and that one key below is an
+	ALIAS into it — the same one-number-one-home move V02 made for `Config.Salt`, pointed the other
+	way because the spec-named key here has no readers to break.
+
+	LOUDNESS IS A 0..1 SCALAR and RADIUS IS STUDS. Nothing in V04 reads Loudness except the cue's
+	volume; it exists because V13's tracker needs to weigh a search against a footstep when it picks
+	an area, and a field added later is a field every record written before it is missing.
+
+	MININTERVAL IS THE PER-ACTOR THROTTLE, and it is doing two jobs. It keeps the history bounded by
+	a provable margin (see MaxRecords), and it is the anti-spam guard that replaces a rate limit —
+	V04 adds no client remote, so `check:ratelimit` has nothing to see here, and start/cancel search
+	spam is answered by this number rather than by AntiCheatService.
+]]
+local Noise = {
+	--[[
+		How long a noise stays in the server's history. MUST NOT DROP BELOW `Tracker.EarlyInterval`
+		(90): V13's first pulse fires at 90 seconds and reads this history and nothing else, so a
+		shorter window means the first pulse of every round reads an empty table and the Aswang is
+		told nothing at the exact moment §4.6 says the pressure begins. tests/config.test.luau pins it.
+	]]
+	HistorySeconds = 120,
+	--[[
+		THE HARD CAP, and it is a safety net rather than the bound. Age is the real bound; this stops
+		a pathological emit rate from growing memory inside the window. It is pinned ABOVE the worst
+		case the throttles allow, so the cap can never truncate the window and silently blind the
+		tracker.
+
+		THE WORST CASE IS A SUM ACROSS ACTIONS, NOT A DIVISION BY THE FASTEST ONE. This comment used
+		to say "MaxPlayers (5) x HistorySeconds (120) / the smallest MinInterval (2) = 300", and both
+		it and the invariant that enforced it were WRONG. The throttle is keyed `(UserId, action)`
+		(see NoiseService.lastEmitAt), so one player emits every action concurrently:
+
+		    MaxPlayers x SUM over actions of (floor(HistorySeconds / MinInterval) + 1)
+		    = 5 x ((120/6 + 1) + (120/2 + 1) x 3) = 5 x 204 = 1020
+
+		The V04 exploit audit caught this by simulating against the real `NoiseLog.append` — at 300
+		the check reported 37% of headroom that did not exist, and a third emitter would have started
+		eating the window with `npm run verify` still green.
+
+		2048 RATHER THAN 1020, and the slack is deliberate: this is a safety net, and a net sized to
+		the exact worst case is one rounding change away from being the binding constraint. A record
+		is five numbers and a short string, so the memory is irrelevant next to the failure it
+		prevents. tests/config.test.luau computes the bound from Config rather than restating it here.
+	]]
+	MaxRecords = 2048,
+	--[[
+		The cue's position is rounded to this grid before it is sent (§4.6's "vague, never live").
+		Without it a client's audio engine localises a searcher to within a stud THROUGH A WALL,
+		which is strictly better information than V13's late-round 15-stud pulse — V04 would obsolete
+		the balance-critical chunk of the whole rewrite. Pinned below `Tracker.LateRadius`.
+	]]
+	CueGridStuds = 8,
+	--[[
+		THE SPRINT THRESHOLD, AND IT IS A SECRECY GUARD RATHER THAN A BALANCE KNOB.
+
+		There is no sprint verb in this game. The only thing that moves above the 16-stud baseline is
+		a TRANSFORMED ASWANG (Monster.TransformedSpeedMult = 1.25 -> 20 studs/s), so a movement
+		emitter with a threshold below 20 fires for exactly one player and turns V13's only input
+		into a monster tracker pointed at the monster. This sits above that, so a naive emitter wired
+		later emits nothing rather than an oracle. tests/config.test.luau pins the relationship.
+	]]
+	SprintSpeedStuds = 22,
+	--[[
+		SEARCH IS THE LOUDEST AND THE FURTHEST, and that is §4.4 rather than taste: "it is the loudest
+		thing a survivor does, and it is the thing they must do". Every other row is priced under it,
+		and tests/config.test.luau pins the ordering so a V16 tune cannot quietly invert it.
+
+		DOOR AND SPRINT HAVE NO EMITTER IN V04 — neither verb exists in src/. They are priced here
+		because the model must answer for them (build plan V04) and because a number decided at the
+		same time as its siblings is a number in the same units.
+	]]
+	Actions = {
+		-- MinInterval matches Search.SearchTime: one search, one noise, however often the key is
+		-- tapped.
+		SEARCH = { Loudness = 1, Radius = 60, MinInterval = 6 },
+		ITEM_USE = { Loudness = 0.7, Radius = 40, MinInterval = 2 },
+		DOOR = { Loudness = 0.5, Radius = 30, MinInterval = 2 },
+		SPRINT = { Loudness = 0.6, Radius = 35, MinInterval = 2 },
+	},
+}
+
 local Config = {
 	Round = {
 		Intermission = 25, -- seconds in lobby before a round starts
@@ -345,11 +430,27 @@ local Config = {
 		]]
 		RangeStuds = 10,
 
-		-- Studs the noise carries. DELIBERATELY LARGER THAN ANY OTHER RANGE IN THIS FILE — the point is
-		-- that searching summons the monster, not that it might. Compare Tracker.EarlyRadius = 40: a
-		-- searching survivor is louder than the tracker is sharp, for the whole first half of the night.
-		NoiseRadius = 60,
+		--[[
+			V04. AN ALIAS. Tune `Noise.Actions.SEARCH.Radius`; this is §6.5's name for the same number,
+			kept so a reader of the spec's committed Config table still finds it here.
+
+			Studs the noise carries. DELIBERATELY LARGER THAN ANY OTHER RANGE IN THIS FILE — the point
+			is that searching summons the monster, not that it might. Compare Tracker.EarlyRadius = 40:
+			a searching survivor is louder than the tracker is sharp, for the whole first half of the
+			night. That comparison is now an invariant rather than a comment.
+		]]
+		NoiseRadius = Noise.Actions.SEARCH.Radius,
 	},
+
+	--[[
+		V04, §4.4. THE RISK ECONOMY'S PRICE LIST. Canonical; `Search.NoiseRadius` aliases into it.
+
+		Read by `shared/pure/NoiseModel` (which takes it as a parameter rather than requiring this
+		file — a pure module cannot see `script`), by `NoiseService`'s throttle, and by the client's
+		cue for its rolloff distance. See the hoisted `Noise` local above for why each number is
+		what it is.
+	]]
+	Noise = Noise,
 
 	--[[
 		V02, §4.6. THE SHARPENING TRACKER — why hiding does not win.
@@ -990,6 +1091,10 @@ local Config = {
 			CUE_TRANSFORM = "rbxassetid://9125474505",
 			CUE_HEARTBEAT = "rbxassetid://139459003161851",
 			CUE_SUNRISE = "rbxassetid://4501062448",
+			-- V04. Sourced by hand later (the `asset-pipeline` skill); blank is a supported shipping
+			-- state and `AudioController.logCue` is what proves the cue FIRED before a sound exists.
+			CUE_NOISE = "",
+			CUE_NOISE_SELF = "",
 		},
 
 		-- The bed sits UNDER everything. A night ambience loud enough to notice is a night ambience
@@ -1009,6 +1114,18 @@ local Config = {
 		-- broadcast with no role token in it, which `check:secrecy` cannot see. See
 		-- `.claude/lessons/absence-is-observable.md`.
 		FootstepVolume = 0.4,
+
+		--[[
+			V04, §4.4. Two volumes because the two noise cues do different jobs: CUE_NOISE is a
+			positional sound in the world, scaled further by the action's Loudness at the play site;
+			CUE_NOISE_SELF is your own, non-positional, and wants to be plainly audible — §4.6: "a sound
+			you cannot perceive is not tension, it is a dice roll."
+
+			IDENTICAL FOR EVERY PLAYER AND EVERY ROLE, like FootstepVolume above and for the same reason.
+			A quieter noise for one player is a role broadcast with no role token in it.
+		]]
+		NoiseVolume = 0.55,
+		NoiseSelfVolume = 0.7,
 
 		--[[
 			How long the footstep retarget waits for Roblox to attach its default character sounds.

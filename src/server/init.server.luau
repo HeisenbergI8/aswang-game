@@ -27,6 +27,17 @@ local SERVICE_ORDER = {
 	-- Gameplay
 	"RoleService",
 	"MonsterService",
+	--[[
+		V04. BEFORE its two callers (ItemService, SearchService) and, like every gameplay service
+		here, before RoundService — which starts last precisely so every subscriber is connected
+		before a phase can change. A NoiseService that started afterwards could miss the transition
+		that clears the previous round's history, and the symptom would be a V13 pulse pointing at
+		where somebody stood last round.
+
+		It requires RoundService and neither of its callers, and nothing requires it back, so no
+		cycle.
+	]]
+	"NoiseService",
 	"ItemService",
 	--[[
 		V03. AFTER ItemService and BEFORE RoundService, and only the second half is load-bearing.

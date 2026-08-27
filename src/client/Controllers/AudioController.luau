@@ -99,9 +99,20 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 
+--[[
+	V04. A ONE-WAY ARROW, exactly as `SearchController` and `TrialController` already draw it:
+	OnboardingController knows nothing about noise, so this cannot become a cycle. Note that it
+	INVERTS this file's position in CONTROLLER_ORDER — AudioController is first, Onboarding sixth —
+	and that is safe because the list governs Init/Start only, while `require` at load is
+	independent of it. `ShowLine` is called from a remote handler that can only fire during ACTIVE,
+	long after every controller's Init has run.
+]]
+local OnboardingController = require(script.Parent.OnboardingController)
+
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local AudioCues = require(Shared.pure.AudioCues)
 local Config = require(Shared.Config)
+local NoiseModel = require(Shared.pure.NoiseModel)
 local Remotes = require(Shared.Remotes)
 local SkyCycle = require(Shared.pure.SkyCycle)
 local Types = require(Shared.Types)
@@ -109,6 +120,11 @@ local Types = require(Shared.Types)
 local AudioController = {}
 
 local STINGER_NAME = "AswangTransformStinger"
+local NOISE_ANCHOR_NAME = "NoiseCueAnchor"
+
+-- Player-facing copy lives on the client, the rule `SearchController` and `TeachingLines` both
+-- follow: the payload carries an action id, never a sentence, so text never crosses the wire.
+local NOISE_LINE = "That was loud."
 
 -- The receiver's own phase and state, off the snapshot every client gets. Neither is a secret and
 -- neither describes anybody else.
@@ -630,6 +646,111 @@ local function onSnapshot(snapshot: Types.ClientRoundSnapshot)
 	onSunriseProgress(snapshot)
 end
 
+--[[
+	SOMEBODY ELSE'S NOISE, AT A CELL IN THE WORLD.
+
+	A CLIENT-CREATED, CLIENT-PARENTED Part and Sound. Nothing here replicates and nothing here is
+	visible to another player — which is the whole reason the cue is safe: a server-made Sound
+	parented into a character would be heard by EVERY client, turning "somebody was loud" into a
+	per-player public broadcast. `playStinger` states the same property for its local-only Sound.
+
+	THE POSITION IS ALREADY QUANTISED by the server (Config.Noise.CueGridStuds). This function must
+	not refine it, offset it, or draw anything at it — §4.6 wants an area, and a marker would make
+	the cell an address on screen.
+
+	RANGE COMES FROM `NoiseModel`, not from the payload. Config is replicated and the module is in
+	shared/pure/, so the client re-derives the same Radius the server used. An unpriced action
+	returns nil and is dropped with a warn — a LOOKUP, not a cast (the C21 lesson).
+
+	⚠ UNCONFIRMED, inherited from `QuickChatController.renderPing`: whether a client-created `Part`
+	in `workspace` stays local under §5's StreamingEnabled is not established anywhere in this repo.
+	Conventionally it does. If a playtest shows otherwise, the fallback named there is to parent the
+	anchor to `Camera`, and the same fallback applies here.
+]]
+local function playNoiseCue(payload: Types.NoiseCuePayload)
+	local emission = NoiseModel.evaluate(payload.Action, {}, Config.Noise)
+
+	if emission == nil then
+		warn(`[AudioController] no Config.Noise price for "{payload.Action}" — nothing played.`)
+		return
+	end
+
+	local anchor = Instance.new("Part")
+
+	anchor.Name = NOISE_ANCHOR_NAME
+	anchor.Size = Vector3.one
+	anchor.Transparency = 1
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.Position = payload.Position
+	anchor.Parent = workspace
+
+	local sound = newSound("CUE_NOISE", Config.Audio.NoiseVolume * payload.Loudness, anchor)
+
+	if sound == nil then
+		-- An unknown cue id: `newSound` has already warned. The anchor would otherwise sit in the
+		-- world forever, since the cleanup below never runs.
+		anchor:Destroy()
+		return
+	end
+
+	sound.RollOffMaxDistance = emission.Radius
+	sound.RollOffMode = Enum.RollOffMode.Linear
+
+	logCue("CUE_NOISE", `{payload.Action}, {emission.Radius} studs`)
+	sound:Play()
+
+	--[[
+		THE ANCHOR IS DESTROYED, NOT THE SOUND — destroying the parent takes the Sound with it, and
+		leaving the Part behind would leak one Instance per audible noise for the session.
+		`Sound.Ended` is the wrong lifetime for the same reason `playOneShot` gives: A BLANK SoundId
+		NEVER ENDS, and blank is the supported state until the assets are sourced.
+	]]
+	task.delay(Config.Audio.CueCleanupSeconds, function()
+		if anchor.Parent ~= nil then
+			anchor:Destroy()
+		end
+	end)
+end
+
+--[[
+	THE CUE. One remote, two shapes, and the branch is a fact about the RECEIVER.
+
+	`Mine` IS NON-POSITIONAL, parented to SoundService like the bed and the sunrise: you do not
+	localise your own noise, you just hear that you made it. §4.6 is the requirement — "survivors
+	must know when they made noise; a sound you cannot perceive is not tension, it is a dice roll" —
+	and audio-first-UI-second is the build plan's, so the line of copy follows the sound rather than
+	replacing it.
+
+	THE STATE GATE IS CONSULTED ON BOTH PATHS, and `playStinger`'s comment is the reason to be
+	explicit about it: `isCuePermitted` sat written, tested and never called for a whole chunk, which
+	the C29 exploit audit found. The server already refuses LOBBY and SPECTATOR; this is the second
+	lock, not the first.
+
+	THE ASWANG TAKES THIS PATH UNCHANGED. There is no role branch in this file, none in the sender,
+	and none in `AudioCues` — see the plan's Overview, question 1.
+]]
+local function onNoiseCue(payload: Types.NoiseCuePayload)
+	if payload.Mine then
+		if not AudioCues.isCuePermitted("CUE_NOISE_SELF", phase, state) then
+			return
+		end
+
+		playOneShot("CUE_NOISE_SELF", Config.Audio.NoiseSelfVolume, SoundService, "own noise")
+		OnboardingController.ShowLine(NOISE_LINE)
+
+		return
+	end
+
+	if not AudioCues.isCuePermitted("CUE_NOISE", phase, state) then
+		return
+	end
+
+	playNoiseCue(payload)
+end
+
 function AudioController.Init() end
 
 function AudioController.Start()
@@ -642,6 +763,7 @@ function AudioController.Start()
 
 	Remotes.Get("RoundSnapshot").OnClientEvent:Connect(onSnapshot)
 	Remotes.Get("MonsterTransformed").OnClientEvent:Connect(onTransformed)
+	Remotes.Get("NoiseCue").OnClientEvent:Connect(onNoiseCue)
 
 	-- One loop for the session. It reads `phase` rather than being restarted per phase, so a phase
 	-- change can never leave two schedulers running against the same SoundService.

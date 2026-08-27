@@ -104,6 +104,31 @@ local EVENTS_DOWN = {
 		receive this remote with the same verdicts at the same rate for the same reasons.
 	]]
 	"SearchUpdate",
+	--[[
+		V04, §4.4. FireClient, to every player the SERVER has decided is close enough to hear it —
+		never FireAllClients. `Types.NoiseCuePayload` is the payload.
+
+		THE BROADCAST FORM IS THE WHOLE RISK AND IT IS REFUSED. A FireAllClients carrying a position
+		would hand every client a live index of where everybody in the barrio is acting, readable
+		from a compromised client with no exploit beyond listening. §4.6 allows the Aswang an AREA on
+		a 90s-to-30s pulse (V13); a broadcast noise feed is a live map, which is strictly more than
+		the tracker will ever give it and would obsolete the balance-critical chunk of the rewrite.
+		The distance test happens on the server, and a player out of earshot receives NOTHING.
+
+		WHAT A SECOND CLIENT LEARNS: that something loud happened, roughly where, and what kind of
+		action it was. Not who did it — the payload has no player field of any kind, and the position
+		is quantised to Config.Noise.CueGridStuds before it is sent.
+
+		IT IS NOT A ROLE ORACLE, and the reasoning is §4.4's rather than this remote's: the Aswang
+		searches and throws on identical rules, emits identical noise, and receives this cue on
+		identical terms. There is no branch anywhere in the send path that reads a role. The
+		asymmetry that WOULD leak — one player never producing a cue, or never receiving one — is
+		`.claude/lessons/absence-is-observable.md`, and it is why no exemption exists here.
+
+		THE `Mine` FLAG IS NOT A LEAK: a client only ever sees its own payloads, so a boolean about
+		the receiver is the same shape as every field on `ProfileSnapshot`.
+	]]
+	"NoiseCue",
 }
 
 -- Client -> Server (the client asks; the server decides)

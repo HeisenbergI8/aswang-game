@@ -1,0 +1,401 @@
+V04 Noise System — Studio console capture, solo playtest session
+Captured via mcp__Roblox_Studio__get_console_output, `get_studio_state` confirmed Play mode,
+studio_id ab384d6d-f33b-419a-bb40-4a49c27fa039 (aswang.rbxl).
+
+Debug values in effect (set by coordinator, not by this agent):
+  Round.Intermission = 8, Round.Duration = 20, Round.EndScreen = 6,
+  Debug.SoloTesting = true, Debug.VerboseLogging = true
+
+Sequence of events relevant to V04, in order:
+
+  round #3 ACTIVE: player held E for ~1s at Workspace.Barrio.Dressing.Stall_SE.Stall_SE_Counter
+  (0.92 studs away, well inside Config.Search.RangeStuds=10), then released early (before the
+  6s SearchTime completes) —
+
+    [NoiseService] SEARCH recorded — 1 in history.
+    [AudioController] cue CUE_NOISE_SELF — own noise
+    [SearchController] SEARCH_INTERRUPTED
+
+  -> proves: a search emits IMMEDIATELY at the start of the hold (both lines appear before the
+     SEARCH_INTERRUPTED that only fires on early release), and a CANCELLED search still emitted
+     — the noise was recorded before the cancel was even processed.
+
+  rounds #4 through #15 (12 full round cycles, ~450s of real time): player walked with W/A/D for
+  a sustained 8s block at round #4 (confirmed by HumanoidRootPart position moving from
+  (-13.4, 3.0, -47.1) to (13.3, 3.0, -46.9), ~27 studs of real movement) and was otherwise present
+  through 11 more full round cycles. ZERO additional [NoiseService] lines appear anywhere in this
+  span.
+
+  -> proves: walking never emits noise, confirmed over a single deliberate 8s walk test AND over
+     an extended ~450s incidental-idle/movement window across 12 rounds.
+
+Full raw console output follows (oldest first):
+
+[ProfileStore]: Roblox API services unavailable - data will not be saved
+[Progression] DataStoreState is "NoAccess" — NOTHING WILL PERSIST. In Studio: Game Settings > Security > Enable Studio Access to API Services, and the place must be published.
+[Badges] 5 of 5 badge ids are unset (Welcome, FirstTask, FirstRound, FirstBlood, BalikBalik) — those badges will NOT award. Create them in the Creator Hub and put the ids in Config.Badges (C35).
+[Community] Config.Community.GroupId is 0 — the group join reward will refuse every claim. Create the Roblox group and set the id (C36).
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 17 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Progression] Demiurgos_18: CURRENT from v2 -> L1
+[Client] Ready. 10 controllers loaded.
+[AudioController] cue CUE_BED_LOBBY — bed
+[Client] Snapshot — INTERMISSION round #0 · you: LOBBY (7s left)
+[AudioController] cue CUE_FOOTSTEP — retargeted on Demiurgos_18
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #1 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L1
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #1 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[SearchController] SEARCH_WRONG_PHASE
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #1 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #2 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #2 · you: ALIVE (19s left)
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L1
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #2 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #2 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #3 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #3 · you: ALIVE (19s left)
+[NoiseService] SEARCH recorded — 1 in history.
+[AudioController] cue CUE_NOISE_SELF — own noise
+[SearchController] SEARCH_INTERRUPTED
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L2
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #3 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #3 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #4 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #4 · you: ALIVE (19s left)
+--- W/A walk test #1 here: keyDown W 3000ms, keyUp, keyDown A 2000ms, keyUp ---
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L2
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #4 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+--- (this ENDING/INTERMISSION boundary is where the W/A test above actually landed, per
+    position-delta confirmation taken separately; see report body) ---
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #4 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[AudioController] cue CUE_WIND — ambient one-shot in INTERMISSION
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #5 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #5 · you: ALIVE (19s left)
+--- second, deliberate W/D walk test here: keyDown W 4000ms, keyUp, keyDown D 4000ms, keyUp.
+    Position confirmed to move from (-13.4, 3.0, -47.1) to (13.3, 3.0, -46.9), ~27 studs. ---
+[TeachingService] cued 11461085874: CUE_FIRST_SALT
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L2
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #5 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #5 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #6 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[AudioController] cue CUE_DOGS — ambient one-shot in STARTING
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #6 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L2
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #6 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #6 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #7 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #7 · you: ALIVE (19s left)
+[AudioController] cue CUE_WIND — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L2
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #7 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #7 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #8 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #8 · you: ALIVE (19s left)
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L3
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #8 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #8 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #9 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #9 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L3
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #9 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #9 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[AudioController] cue CUE_WIND — ambient one-shot in INTERMISSION
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #10 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #10 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L3
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #10 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #10 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[AudioController] cue CUE_WIND — ambient one-shot in INTERMISSION
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #11 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #11 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L3
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #11 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #11 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #12 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #12 · you: ALIVE (19s left)
+[AudioController] cue CUE_WIND — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L3
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #12 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #12 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[AudioController] cue CUE_WIND — ambient one-shot in INTERMISSION
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #13 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #13 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L4
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #13 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #13 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[AudioController] cue CUE_WIND — ambient one-shot in INTERMISSION
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #14 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #14 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L4
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #14 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #14 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #15 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #15 · you: ALIVE (19s left)
+</content>

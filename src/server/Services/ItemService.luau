@@ -29,6 +29,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AntiCheatService = require(script.Parent.AntiCheatService)
 local MonsterService = require(script.Parent.MonsterService)
+local NoiseService = require(script.Parent.NoiseService)
 local RoundService = require(script.Parent.RoundService)
 local TeachingService = require(script.Parent.TeachingService)
 local SearchPool = require(script.Parent.Parent.pure.SearchPool)
@@ -773,6 +774,26 @@ function ItemService.Start()
 			-- hit branch so that no future early-return can skip it. A miss that cost nothing would make
 			-- salt a probe you throw at everyone, which is the thing pure/SaltThrow's header refuses.
 			carried[player.UserId] = math.max(0, (carried[player.UserId] or 0) - 1)
+
+			--[[
+				V04, §4.4. A THROW IS LOUD, AND IT IS EQUALLY LOUD ON A MISS.
+
+				THE SAME ARGUMENT AS THE LINE ABOVE, AND THE SAME ONE pure/SaltThrow MAKES ABOUT ITS
+				SINGLE MISS VERDICT. A noise that only fired on OK would be an identity probe with a
+				sound instead of a return value: throw a pouch at somebody, listen, learn what the
+				verdict refuses to tell you. Both verdicts reach this line, so both sound alike.
+
+				From the THROWER's position, which the server has because it resolved the throw from
+				it (broadcastEffect derives its origin the same way). The impact point is where the
+				salt landed, not where the noise was made.
+			]]
+			local throwerRoot = if player.Character
+				then player.Character:FindFirstChild("HumanoidRootPart")
+				else nil
+
+			if throwerRoot ~= nil and throwerRoot:IsA("BasePart") then
+				NoiseService.Emit(player, "ITEM_USE", throwerRoot.Position)
+			end
 
 			if verdict == "OK" and target ~= nil then
 				applyHit(target)

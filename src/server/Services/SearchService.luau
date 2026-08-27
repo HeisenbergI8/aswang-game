@@ -38,6 +38,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AntiCheatService = require(script.Parent.AntiCheatService)
+local NoiseService = require(script.Parent.NoiseService)
 local RoundService = require(script.Parent.RoundService)
 -- The one verdict module every tag-driven pool in this game shares. Generic over
 -- (names, required, expected) and naming no mechanic, so this is a second CALLER rather than a second
@@ -321,6 +322,29 @@ local function beginHold(player: Player, containerIndex: number, name: string)
 		EndsAt = os.clock() + Config.Search.SearchTime,
 	}
 	occupied[containerIndex] = player.UserId
+
+	--[[
+		V04, §4.4. THE PRICE, PAID UP FRONT. "The noise is the entire risk economy… you cannot be
+		safe and productive at the same time."
+
+		AT THE START RATHER THAN AT COMPLETION, deliberately: a search cancelled at 5.9 seconds has
+		still happened, and a noise that waited for SEARCH_OK would make start/cancel a free, silent
+		way to learn which containers are still worth walking to.
+
+		AT THE CONTAINER rather than at the player — the server resolved which container this is, so
+		the position is already known and does not wobble with where inside RangeStuds the searcher
+		stands. Nil when a map author deleted the part between the resolve and here; the hold is
+		still valid and the tick will release it, so this skips the noise rather than erroring.
+
+		NO ROLE BRANCH, AND THERE MUST NOT BE ONE. See this file's header: the Aswang searches on
+		identical rules, so it makes identical noise. A silent monster is identified by the container
+		nobody heard.
+	]]
+	local container: BasePart? = containersByName[name]
+
+	if container ~= nil then
+		NoiseService.Emit(player, "SEARCH", container.Position)
+	end
 
 	sendUpdate(player, "SEARCH_STARTED", nil)
 end
