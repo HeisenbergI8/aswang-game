@@ -38,6 +38,9 @@
     "preflight": "node .claude/scripts/preflight.mjs",
     "candidates": "node .claude/scripts/candidates.mjs list",
     "lessons": "node .claude/scripts/lessons.mjs list",
-    "run:status": "node .claude/scripts/run-state.mjs status"
+    "run:status": "node .claude/scripts/run-state.mjs status",
+
+    "rojo:status": "node .claude/scripts/ensure-rojo.mjs --status",
+    "rojo:bless": "node .claude/scripts/ensure-rojo.mjs --bless"
   }
 }

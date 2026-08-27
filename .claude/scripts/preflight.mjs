@@ -26,6 +26,8 @@
 
 import { execFileSync } from 'node:child_process'
 
+import { VERDICT_REASONS, blessedSessionId, readSessionId, serving, studioAttached, syncVerdict } from './ensure-rojo.mjs'
+
 // Rojo's default serve port. Its HTTP API answers on /api/rojo with server metadata, so a response of
 // any kind proves a live server rather than merely an open socket.
 const ROJO_URL = 'http://localhost:34872/api/rojo'
@@ -89,21 +91,35 @@ export const cleanTreeCheck = () => {
   }
 }
 
-export const rojoCheck = async () =>
-  (await reachable(ROJO_URL))
-    ? { name: 'rojo-serve', ok: true }
-    : {
-        name: 'rojo-serve',
-        ok: false,
-        reason: 'rojo serve is not running — code on disk is NOT in Studio, so nothing observed there is evidence'
-      }
+// ── THREE FACTS, REPORTED SEPARATELY ───────────────────────────────────────────
+//
+// The first version collapsed these into one `rojo-serve` line and shipped a false green: a Studio
+// plugin retry loop holds an ESTABLISHED socket exactly like a healthy sync does, so "the port answers
+// and something is attached" was read as "Studio has my code" while every edit went nowhere.
+//
+// `ensure-rojo.mjs` now starts the server automatically, which makes reporting these separately
+// mandatory rather than tidy — an auto-started server means `rojo-serve` is almost always green, and a
+// green line nobody can fail is a line nobody reads.
+export const rojoChecks = async () => {
+  const up = await serving()
+  const sessionId = up ? await readSessionId() : null
+  const attached = studioAttached()
+  const verdict = syncVerdict({ serving: up, attached, sessionId, blessedSessionId: blessedSessionId() })
+
+  return [
+    { name: 'rojo-serve', ok: up, reason: up ? undefined : VERDICT_REASONS['no-server'] },
+    { name: 'rojo-attached', ok: attached, reason: attached ? undefined : VERDICT_REASONS['not-attached'] },
+    // THE ONE THAT LICENSES EVIDENCE. The two above only explain why this one failed.
+    { name: 'rojo-synced', ok: verdict === 'ok', reason: VERDICT_REASONS[verdict] ?? undefined }
+  ]
+}
 
 export const preflight = async ({ needsStudio = false } = {}) => {
   const checks = [toolchainCheck(), treeGreenCheck(), cleanTreeCheck()]
 
   // CONDITIONAL, deliberately. A phase that touches no runtime behaviour must not be blocked by a
   // Rojo server nobody asked to be running — that would make every run require a second terminal.
-  if (needsStudio) checks.push(await rojoCheck())
+  if (needsStudio) checks.push(...(await rojoChecks()))
 
   const failed = checks.filter(check => !check.ok)
 
@@ -152,15 +168,43 @@ const selfTest = async () => {
 
   check('rojo-serve is not checked unless the work needs Studio', withoutStudio.checks.some(entry => entry.name === 'rojo-serve'), false)
 
+  // The reason string is what the halt report prints, so it must say what to DO, not merely what is
+  // wrong. "rojo serve is not running" sends someone to a terminal; "studio unreachable" does not.
   const names = (await preflight({ needsStudio: true })).checks.map(entry => entry.name)
 
   check('rojo-serve IS checked when the work needs Studio', names.includes('rojo-serve'), true)
 
-  // The reason string is what the halt report prints, so it must say what to DO, not merely what is
-  // wrong. "rojo serve is not running" sends someone to a terminal; "studio unreachable" does not.
-  const rojo = await rojoCheck()
+  // ── The three Rojo lines, all conditional, all present when Studio is needed ─
+  //
+  // Conditional, or a preflight demanding Studio for a pure-logic phase gets disabled within a week.
+  // Present when it IS needed, because `rojo-synced` is the only one `ensure-rojo.mjs` cannot satisfy
+  // by starting a server — and it is the one that licenses behavioural evidence.
+  for (const line of ['rojo-serve', 'rojo-attached', 'rojo-synced']) {
+    check(`${line} is not checked unless the work needs Studio`, withoutStudio.checks.some(entry => entry.name === line), false)
+    check(`${line} IS checked when the work needs Studio`, names.includes(line), true)
+  }
 
-  check('the rojo reason names the command when it fails', rojo.ok || rojo.reason.includes('rojo serve'), true)
+  // The reason strings are what a person reads at 1am. Each must name the next ACTION.
+  const reasons = await rojoChecks()
+  const reasonFor = name => reasons.find(entry => entry.name === name)
+
+  check(
+    'the not-attached reason names the Connect click',
+    reasonFor('rojo-attached').ok || reasonFor('rojo-attached').reason.includes('Connect'),
+    true
+  )
+  check(
+    'the unsynced reason names the bless command',
+    reasonFor('rojo-synced').ok || reasonFor('rojo-synced').reason.includes('rojo:bless') || reasonFor('rojo-synced').reason.includes('rojo serve'),
+    true
+  )
+  // A socket is not a sync. If rojo-attached is green, rojo-synced must still be free to be red —
+  // collapsing them is the exact bug this rewrite fixes.
+  check(
+    'attached does not imply synced',
+    syncVerdict({ serving: true, attached: true, sessionId: 'x', blessedSessionId: null }) !== 'ok',
+    true
+  )
 
   console.log(failures ? `  FAIL  preflight: ${ran - failures}/${ran} cases` : `  PASS  preflight: ${ran}/${ran} cases`)
 

@@ -77,6 +77,12 @@
           {
             "type": "command",
             "command": "node",
+            "args": [".claude/scripts/guard-inplace-edit.mjs"],
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "node",
             "args": [".claude/scripts/guard-commit.mjs"],
             "statusMessage": "Checking the commit",
             "timeout": 120
@@ -86,6 +92,13 @@
       {
         "matcher": "mcp__Roblox_Studio__.*",
         "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".claude/scripts/ensure-rojo.mjs"],
+            "statusMessage": "Checking Rojo",
+            "timeout": 30
+          },
           {
             "type": "command",
             "command": "node",

@@ -150,7 +150,10 @@ if (process.argv[1]?.endsWith('hook-heartbeat.mjs')) {
   //
   // Deduplicated by NAME: `verify-gate` is registered on both Stop and SubagentStop, and listing it
   // twice makes the alarm read as a bug in the alarm — which is how an alarm gets ignored.
-  const instrumented = ['verify-gate', 'claim-check', 'review-gate', 'task-driver']
+  // `ensure-rojo` is here because it is the one hook whose failure is INVISIBLE BY CONSTRUCTION: it
+  // emits nothing, decides nothing, and exits 0 either way. If it stops firing, Studio silently goes
+  // back to needing a hand-started server — and the first symptom is a verification of stale code.
+  const instrumented = ['verify-gate', 'claim-check', 'review-gate', 'task-driver', 'ensure-rojo']
   const silent = [...new Set(registered.map(hook => hook.name))].filter(
     name => instrumented.includes(name) && !seen[name]
   )

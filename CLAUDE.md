@@ -43,7 +43,9 @@ spec wins and the conflict gets raised rather than quietly resolved.
 ## Commands
 
 ```bash
-rojo serve                # live sync into Studio — start this first, every session
+rojo serve                # live sync into Studio. Started automatically before any Studio MCP call
+npm run rojo:status       # the three facts: serving, attached, synced
+npm run rojo:bless        # record this server session as proven-syncing (after a canary check)
 npm run verify            # THE gate: analyze + lint + format + 5 checks + tests + harness  (~15s)
 npm run verify:fast       # analyze + remotes + secrecy + toolchain                          (~3s)
 ```
@@ -103,6 +105,27 @@ Rojo syncs three locations and overwrites what it finds there:
 nothing to recover because it never existed on disk. `guard-studio-sync.mjs` refuses those writes; every
 other Studio MCP tool stays fully available, and they are how the `playtester` earns its evidence. See
 `.claude/skills/studio-sync/SKILL.md`.
+
+**Rojo is started for you. It is not synced for you.** `ensure-rojo.mjs` fires before every
+`mcp__Roblox_Studio__*` call and starts `rojo serve` if the port is silent. That removes the forgotten
+terminal, and nothing more — `preflight -- --studio` reports **three** separate facts:
+
+| Line | Proves |
+| --- | --- |
+| `rojo-serve` | the port answers. A server exists |
+| `rojo-attached` | a RobloxStudio process holds a socket to it |
+| `rojo-synced` | **the only one that licenses evidence** — this server session was PROVEN to sync |
+
+The third exists because the first two were once collapsed into "connected" and shipped a false green: a
+Studio plugin retry loop holds an ESTABLISHED socket exactly like a healthy sync does. Proving a sync
+needs a DataModel read, which needs MCP, which a hook does not have — so `npm run rojo:bless` records a
+session id you have proven by writing a canary into a synced file and reading it back out of Studio.
+A restarted server clears the blessing automatically. **Unblessed reads as not-proven**, so a forgotten
+bless costs a stopped run rather than a fabricated verification.
+
+**Never `perl -i` or `sed -i` a file under `src/`.** They rename a sibling temp file over the original
+and Rojo 7.7.0 panics in `change_processor.rs:172` — while the edit succeeds and the shell reports
+success. `guard-inplace-edit.mjs` refuses those; write the whole file instead.
 
 **The MAP is not in Git.** Geometry, lighting, sounds and spawn points live in the place file, which is
 gitignored — binary and merge-hostile. Its backup is Roblox's cloud place-version history, so **publish
@@ -364,6 +387,8 @@ Rules enforced by code rather than by instruction, so they hold regardless of wh
 | `tools:` frontmatter | the three auditors have no Edit/Write at all | `.claude/agents/*-auditor.md` |
 | `PreToolUse` write guard | architect writes only to `.claude/plans/`; playtester to plans and `tests/` | `guard-agent-write.mjs`, scoped by `agent_type` |
 | `PreToolUse` Studio guard | no script source written inside Studio, where Rojo would overwrite it | `guard-studio-sync.mjs` |
+| `PreToolUse` Rojo starter | `rojo serve` is running before anything looks at Studio. Cannot connect the plugin, so `preflight` checks that separately | `ensure-rojo.mjs` |
+| `PreToolUse` in-place guard | no `perl -i` / `sed -i` on a Rojo-watched path — it CRASHES Rojo 7.7.0 and the edit still succeeds | `guard-inplace-edit.mjs` |
 | `PreToolUse` destructive guard | nothing destructive reaches outside the repo; no `git clean -f`, `reset --hard`; no deleting a `.rbxl` | `guard-destructive.mjs` |
 | `PreToolUse` commit guard | no place file, sourcemap, build output or harness state committed; no commits on a red tree | `guard-commit.mjs` |
 | `PostToolUse` analyze gate | `.luau` edits typechecked at write time, coalesced | `gate-luau-analyze.mjs` |

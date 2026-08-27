@@ -64,7 +64,7 @@ Three checks, in order. Skipping the first is the most expensive mistake availab
 Studio looks exactly like a working one.
 
 ```bash
-npm run preflight -- --studio      # is `rojo serve` running at all?
+npm run preflight -- --studio      # THREE: serving, attached, and PROVEN-SYNCED (the one that counts)
 ```
 
 1. **Is Rojo serving?** If not, Studio is showing code from before your change. Everything you observe is

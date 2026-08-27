@@ -74,6 +74,7 @@ export const SUITES = [
   // truncates a phase hands over a short contract that verify-plan still grades green.
   ['plan-phase', ['.claude/scripts/plan-phase.mjs', '--self-test']],
   ['preflight', ['.claude/scripts/preflight.mjs', '--self-test']],
+  ['ensure-rojo', ['.claude/scripts/ensure-rojo.mjs', '--self-test']],
 
   // The accountability layer.
   ['hook-payload', ['.claude/scripts/lib/hook-payload.mjs', '--self-test']],
@@ -86,6 +87,7 @@ export const SUITES = [
   // The guards.
   ['guards', ['.claude/scripts/tests/guards.test.mjs']],
   ['guard-studio-sync', ['.claude/scripts/guard-studio-sync.mjs', '--self-test']],
+  ['guard-inplace-edit', ['.claude/scripts/guard-inplace-edit.mjs', '--self-test']],
   ['guard-commit', ['.claude/scripts/guard-commit.mjs', '--self-test']],
   ['gate-luau-analyze', ['.claude/scripts/gate-luau-analyze.mjs', '--self-test']],
 

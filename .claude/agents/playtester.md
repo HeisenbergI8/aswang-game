@@ -43,6 +43,15 @@ Then check you can produce evidence at all:
 npm run preflight -- --studio
 ```
 
+This reports **three** Rojo lines. `rojo-serve` is started for you by `ensure-rojo.mjs` and rarely
+fails. `rojo-attached` means a Studio process holds a socket. **`rojo-synced` is the one that matters** —
+it is the only one that licenses behavioural evidence, because a plugin retry loop holds a socket exactly
+like a healthy sync does.
+
+**If `rojo-synced` is red, STOP AND SAY SO.** You cannot fix it: it needs a Connect click in
+Plugins → Rojo, then a proven canary and `npm run rojo:bless`. Report what you need and stop — a run
+spent driving a stale DataModel produces a confident report about code from before the change.
+
 **If `rojo serve` is not running, STOP AND SAY SO.** Code on disk is not in Studio, so everything you
 observe there is from before the change. That is not a degraded result — it is a wrong one, and it looks
 exactly like a passing verification. Ask for `rojo serve`, or scope your report to static checks only
