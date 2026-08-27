@@ -129,6 +129,17 @@ anyway, so the debug values cannot reach history.
 - **Player count is a Studio UI action you cannot drive.** Anything needing two clients — the transform
   seen from another player's camera, mid-round join, ghost chat — needs a human to set
   Test → Clients and Servers → 2 players. Say so and stop rather than approximating it.
+- **`Config.Debug.ForceAswangWhenSolo` is NOT the solo-testing fix it reads as, and this costs two
+  sessions if you learn it the hard way.** It changes WHICH candidate is drawn as the Aswang. It does
+  not add a second player. So it unblocks exactly one class of test — "what does the Aswang's own
+  client see" — and nothing that ACTS ON another player: the kill, and therefore the feed, the corpse,
+  the salt interrupt and every mechanic hanging off them. `RoundService` draws candidates from real
+  connected Players, so with one client `RequestKill` has no valid target and the whole path below it
+  is unreachable at any Config value.
+  **Decide this BEFORE the first Play session, not after five rounds of nothing happening:** name the
+  mechanic under test, ask whether it acts on a second player, and if it does, report the multi-client
+  requirement immediately and stop. Two blocked sessions producing no behavioural evidence is the
+  observed cost of finding out in the wrong order (V06).
 
 What to exercise, in priority order:
 
