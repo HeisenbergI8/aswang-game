@@ -237,10 +237,24 @@ local Config = {
 		RevertTime = 1.0,
 		MaxTransformTime = 8, -- forced revert if no kill
 		KillRange = 8, -- studs
-		-- DEAD UNDER v2.0, KEPT BECAUSE IT STILL HAS READERS (V02). §4.3's heading is literally
-		-- "Feeding — what replaced the kill cooldown": FeedDuration below is the v2 mechanism. This is
-		-- still read by MonsterService and pinned by config.test, so deleting it reds analyze AND
-		-- test:unit. It dies with the chunk that builds feeding.
+		--[[
+			DEAD UNDER v2.0 BY INTENT, ALIVE IN CODE BY COUNT — and V06 DID NOT RETIRE IT (V06).
+
+			§4.3's heading is literally "Feeding — what replaced the kill cooldown", and V06 built the
+			feed. It did not delete this number, and the reason is a list rather than a preference:
+			`pure/TransformRules` and `pure/KillValidation` both take a `Cooldown` field, MonsterService
+			passes this value at three call sites, and three Lune suites assert relationships over it
+			(`config`, `transform-rules`, `anti-cheat-budgets`). Deleting it reds `analyze` AND
+			`test:unit`, and it changes what an Aswang may do the instant it reverts — which is a
+			BALANCE question for V16, not a cleanup.
+
+			WHAT V06 DID CHANGE IS WHEN IT STARTS. `revert()` stamps `LastRevertedAt` and both pure
+			modules measure from it; V06 moved the post-kill revert to the END of the feed, so this
+			countdown now begins FeedDuration seconds later than it did under v1.3.
+
+			It dies with a chunk of its own, whose subject line is `balance(monster):`. See the V06
+			plan's Follow Ups.
+		]]
 		KillCooldown = 30, -- seconds after revert
 		TransformedSpeedMult = 1.25,
 		TransformAudioRange = 40, -- how far the transform sound carries
@@ -297,6 +311,25 @@ local Config = {
 		]]
 		FeedDuration = 5,
 		FeedHeal = 25,
+
+		--[[
+			THE LEASH (V06, §4.3) — AND IT IS THE SERVER'S AUTHORITY, NOT THE MOVEMENT LOCK.
+
+			§4.3 says the feed happens "locked in place". `MonsterService` sets `WalkSpeed = 0` for the
+			duration, and that is what makes an honest client stand still — but a client OWNS its
+			character's physics, so WalkSpeed is an affordance and never a guarantee. The guarantee is
+			this number: every tick, the server measures the feeder's distance to the body it is
+			feeding on, and beyond this many studs the feed ends with no heal and no camouflage
+			refresh. A client that walks away from the lock gets exactly what a salt hit would have
+			cost it, which is why walking away buys nothing.
+
+			SMALLER THAN `KillRange` (8), AND `tests/config.test.luau` PINS THAT. A leash at or above
+			the kill range would let the monster drift a full kill's worth of distance and still be
+			"locked in place", at which point the corpse has stopped being the reliable window §4.3
+			says the buntot pagi needs. Compare `Search.RangeStuds = 10`, which is deliberately looser:
+			a container is furniture you stand beside, a body is one you stand ON.
+		]]
+		FeedLeashStuds = 6,
 
 		--[[
 			SMOKE (§4.3) — the Aswang's escape, and it belongs to the monster on purpose.

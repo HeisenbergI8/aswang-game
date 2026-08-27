@@ -1,0 +1,71 @@
+Follow-up session, same Studio instance ("aswang.rbxl"), after the coordinator set
+Config.Debug.ForceAswangWhenSolo = true on top of the five values already in place
+(Round.Intermission=8, Round.Duration=20, Round.EndScreen=6, Debug.SoloTesting=true,
+Debug.VerboseLogging=true).
+
+Sync re-verified live before trusting anything (Edit-mode execute_luau):
+  Intermission=8, Duration=20, EndScreen=6, SoloTesting=true, VerboseLogging=true,
+  ForceAswangWhenSolo=true, KillValidation module present in ReplicatedStorage.Shared.pure.
+
+Two static fixes confirmed by reading the current file (not from memory of the prior session):
+  - src/shared/pure/KillValidation.luau: `Verdict` union gained "FEEDING" (line ~52); `Request` gained
+    `Feeding: boolean` (line ~89); `evaluate` checks `if request.Feeding then return "FEEDING" end`
+    (line ~186), placed after NOT_TRANSFORMED and before the cooldown check, exactly where the
+    comment says it must sit (a FEEDING killer would otherwise read a stale LastRevertedAt and pass
+    the cooldown gate as OK).
+  - src/server/Services/MonsterService.luau: both `validateAndKill` (line 1706) and
+    `validateAndKillHusk` (line 1596) now build the request with `Feeding = monster.Feeding`.
+    `revert()` (starts line 748) now restores `FeedBaseJumpPower`/`FeedBaseJumpHeight` alongside
+    `BaseWalkSpeed` (~lines 796-804), so `beginFeed`'s own refusal branch and `validateAndKillHusk`
+    (the two callers that reach `revert` with a feed still nominally live) no longer leave a zeroed
+    JumpPower/JumpHeight exposed for a quarter-second tick.
+  - `lune run tests/kill-validation.test.luau` -> "PASS kill-validation: 55 grid cells and cases"
+    (was 51 before this change, per the coordinator's message; confirmed by direct run, not taken on
+    faith).
+
+Play mode entered. Console (verbatim, first round):
+
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 17 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Progression] Demiurgos_18: CURRENT from v2 -> L1
+[Client] Ready. 11 controllers loaded.
+[AudioController] cue CUE_BED_LOBBY — bed
+[Client] Snapshot — INTERMISSION round #0 · you: LOBBY (7s left)
+[AudioController] cue CUE_FOOTSTEP — retargeted on Demiurgos_18
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+...
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #1 · you: ALIVE (19s left)
+
+The forced-Aswang line is new and confirms the fix works exactly as intended: the sole client is
+deterministically dealt the Aswang role.
+
+A screen capture during ACTIVE showed the on-screen role card reading "ASWANG" with two action
+prompts, "TRANSFORM (T)" and "KILL (F)" — visually confirming the client-side role state changed
+correctly. (Viewed directly in the tool output; not persisted to a file — no tool in this session's
+kit writes a Studio screen_capture result to disk.)
+
+THE DEEPER BLOCKER: there is no one to kill. `search_game_tree` on the Server datamodel during this
+same ACTIVE phase found exactly one entry under `Players` (`Players.Demiurgos_18`), and both
+`Workspace.Corpses` and `Workspace.Husks` exist as folders with zero children. `RoundService`'s
+`dealtInUserIds()` only draws UserIds from `state.PlayerStates`, which is populated only by real
+connected Players (src/server/Services/RoundService.luau:599-611) — `ForceAswangWhenSolo` changes
+*which* candidate is picked as Aswang, it does not add a second candidate. With one candidate forced
+to Aswang, the round has zero survivors and zero husks; a husk is only created when a connected
+Player disconnects or idles out mid-round (RoundService.luau ~1051-1061), which itself requires a
+second Player to have been connected in the first place.
+
+Net effect: `RequestKill` has no valid TargetUserId to send in this session, in any phase, no matter
+how long the round runs. `beginFeed` (MonsterService.luau:1278) is reachable only from `commitKill`,
+which is reachable only from a kill that actually validated against a live target or husk
+(`validateAndKill` / `validateAndKillHusk`) — neither exists here. This is true for all seven
+questions, not just the new one: none of them can be produced with exactly one Studio client
+connected, regardless of Config.
+
+Play mode exited cleanly (start_stop_play, is_start=false) after two round cycles confirming the same
+result both times ("[RoleService] DEBUG — Aswang FORCED..." with no console line from MonsterService
+ever appearing).

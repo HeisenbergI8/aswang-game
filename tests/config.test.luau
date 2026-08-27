@@ -55,6 +55,64 @@ check(
 	`KillCooldown={Config.Monster.KillCooldown}`
 )
 
+--[[
+	§6.5 INVARIANT 2, AND §4.3'S "THE FEED DURATION IS LOAD-BEARING, NOT COSMETIC" (V06).
+
+	"It must exceed the time for a survivor to cross ~15 studs and land a buntot pagi swing… otherwise
+	someone tunes it to 3 seconds later and silently deletes a win condition."
+
+	WHY IT IS SILENT: the feed is the ONLY reliably predictable moment in the round — the monster is
+	stationary, visible, and standing somewhere survivors already know because there is a body there.
+	§4.6 says that window is what the buntot pagi needs. Shorten it and nothing errors, nothing warns,
+	and the second win condition quietly becomes a coin flip against a faster player. The symptom is
+	"the Aswang always wins", which reads as balance and gets fixed by moving a different number.
+
+	THE SWING HAS NO CONFIG NUMBER UNTIL V08. These two locals are the placeholder, and they are
+	locals rather than Config entries because they are not knobs — they are this test's model of a
+	human. V08 replaces SWING_SECONDS with the strike's real wind-up and deletes this note.
+]]
+local CROSSING_STUDS = 15 -- §4.3's own figure
+local REACTION_SECONDS = 1 -- registering the kill and turning toward it
+local SWING_SECONDS = 1 -- placeholder; V08 replaces this with the strike's real wind-up
+
+local crossing = CROSSING_STUDS / Config.Trial.PlayerBaselineWalkSpeed
+local window = crossing + REACTION_SECONDS + SWING_SECONDS
+
+check(
+	"the feed outlasts a survivor crossing fifteen studs and landing a swing",
+	Config.Monster.FeedDuration > window,
+	`FeedDuration={Config.Monster.FeedDuration}, needed>{window}`
+)
+
+--[[
+	AND THE FEED MUST NOT BECOME THE DOMINANT TERM IN HOW LONG A MONSTER IS A MONSTER (V06).
+
+	V06 defers the post-kill revert until the feed ends and makes `transform`'s MaxTransformTime timer
+	decline while a feed is live, so the form is held for at most MaxTransformTime + FeedDuration.
+	That bound is fine at 8 + 5. It stops being fine the moment FeedDuration passes MaxTransformTime,
+	at which point the "8 second" transform is mostly feeding and §4.3 step 4's forced revert has
+	stopped meaning anything. Nothing in the game reports that; the transform simply gets long.
+]]
+check(
+	"the feed never outlasts the transform it is holding open",
+	Config.Monster.FeedDuration < Config.Monster.MaxTransformTime,
+	`FeedDuration={Config.Monster.FeedDuration}, MaxTransformTime={Config.Monster.MaxTransformTime}`
+)
+
+--[[
+	AND THE LEASH MUST MEAN "LOCKED IN PLACE" (V06, §4.3).
+
+	The leash is the server's authority over the feed — `WalkSpeed = 0` is an affordance a compromised
+	client ignores, and the distance test is what actually costs it the heal. A leash at or above
+	KillRange would let the monster drift a full kill's worth of distance and still be feeding, at
+	which point the corpse has stopped being the fixed, known point §4.3 sells it as.
+]]
+check(
+	"the feed leash keeps the monster on the body",
+	Config.Monster.FeedLeashStuds < Config.Monster.KillRange,
+	`FeedLeashStuds={Config.Monster.FeedLeashStuds}, KillRange={Config.Monster.KillRange}`
+)
+
 -- Spec §4.3: the transform must be witnessable. A windup shorter than a frame is an invisible kill,
 -- which §2 lists as the thing the design pillar explicitly kills.
 check(

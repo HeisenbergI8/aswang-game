@@ -56,6 +56,12 @@ local CONTROLLER_ORDER = {
 		remote that can arrive the instant a key is pressed.
 	]]
 	"SearchController",
+	--[[
+		V06. AFTER OnboardingController, and that ordering is a real dependency rather than a
+		preference: this controller REQUIRES it, for `ShowLine`. One-way, exactly as SearchController's
+		is — OnboardingController knows nothing about feeding, so the arrow cannot become a cycle.
+	]]
+	"FeedController",
 	"TrialController",
 	"InputController",
 }

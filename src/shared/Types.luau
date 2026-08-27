@@ -579,6 +579,55 @@ export type SearchUpdatePayload = {
 }
 
 --[[
+	V06, §4.3. WHAT A FEED LOOKS LIKE TO THE ONE PLAYER DOING IT.
+
+	THREE OUTCOMES, NOT SIX REASONS. `pure/FeedRules` returns six verdicts and five of them are
+	refusals; those exist for the server's log and none of them crosses the wire. What the feeder
+	needs is the same three things a searcher needs — it started, it finished, it broke — which is why
+	this union is shaped like `SearchVerdict`'s first three values and not like the pure module's.
+
+	`FEED_INTERRUPTED` IS ONE VALUE COVERING SIX PATHS: salt, walking past the leash, the corpse
+	fading or being destroyed, dying, the round ending, and disconnecting. Splitting them would tell
+	the Aswang WHY its feed broke, and the one it would most like to know — "was that salt, or did I
+	drift?" — is a fact about a survivor's aim that the monster should have to work out by looking.
+]]
+export type FeedVerdict =
+	"FEED_STARTED" -- the feed began; HoldSeconds is how long it will take
+	| "FEED_OK" -- the feed completed; the heal has already been applied server-side
+	| "FEED_INTERRUPTED" -- it broke, by any of six paths, and paid nothing
+
+--[[
+	V06, §4.3. `FeedUpdate`'s payload. FireClient to the ONE player whose feed it is, always; there is
+	no broadcast form of this remote and there must not be.
+
+	THE ABSENT FIELDS ARE THE SECURITY DESIGN, so they are listed rather than merely omitted:
+
+	  · NO HEALTH, in any form — not a value, not a fraction, not a "you are weak now". §4.6 is
+	    explicit that "a health value attached to a player is the reveal", and the ONLY licensed
+	    readout is the Exposed glow's brightness, which exists only while the licence does. A feed
+	    changes the health and this payload still says nothing about it.
+	  · NO VICTIM AND NO POSITION. The feeder is standing on the body; a field naming it would be the
+	    server telling a client something the client is already looking at, and it would be the first
+	    place a corpse's identity could be logged and differenced.
+	  · NO CAMOUFLAGE CHARGE. V07's reward rides `MonsterService.FeedCompleted`, a server-side
+	    BindableEvent. When V07 needs to tell the client it may hide again, that is a decision for
+	    V07's plan to argue in a diff — not a field to widen quietly here.
+
+	IT IS NOT A ROLE ORACLE, and the reason is that no second client ever receives it. A remote that
+	only the Aswang can receive tells the Aswang something it already knows: it just killed somebody.
+	Compare `RoleAssigned`, which is allowlisted in `check-secrecy.mjs` on exactly this reasoning —
+	fired to one player, carrying only that player's own business.
+]]
+export type FeedUpdatePayload = {
+	Verdict: FeedVerdict,
+	-- Config.Monster.FeedDuration on FEED_STARTED, 0 on the other two — `SearchUpdatePayload`'s rule,
+	-- for its reason: a client that could read a timing difference off an ending could distinguish
+	-- the paths this union deliberately collapses. It carries no information either way, since
+	-- Config replicates and the client already knew the number.
+	HoldSeconds: number,
+}
+
+--[[
 	V04, §4.4. THE FOUR NOISY ACTIONS.
 
 	Only two of them have an emitter in V04, and that is a statement about the GAME rather than about

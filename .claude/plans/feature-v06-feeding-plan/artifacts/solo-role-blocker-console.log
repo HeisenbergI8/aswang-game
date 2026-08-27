@@ -1,0 +1,151 @@
+Console output from a Play-mode session, Studio, solo client "Demiurgos_18".
+Config at capture time: Round.Intermission=8, Round.Duration=20, Round.EndScreen=6,
+Debug.SoloTesting=true, Debug.VerboseLogging=true, Debug.ForceAswangWhenSolo=false (unset — committed default).
+
+Five full round cycles (#1-#5) ran back to back. In every one:
+  - "[RoleService] Drew 1 roles." fires at the top of INTERMISSION.
+  - The client's own snapshot line stays "you: ALIVE" through STARTING, ACTIVE and ENDING every round.
+  - No [MonsterService] line of any kind appears anywhere in the log — no transform, no kill, no
+    "Refused feed", no "Feed broken". The Aswang-side code path never ran once in 5 rounds.
+  - The on-screen HUD role card (screen_capture, viewed but not persisted to disk — no tool in this
+    session's toolset writes a Studio screen_capture image to a file path) read "SURVIVOR" during
+    round #1's ACTIVE phase.
+
+This matches RoleService.luau's own documented behaviour: `RoleDraw.draw` clamps picks to
+`#candidates - 1`, so a 1-candidate pool always keeps that candidate as a survivor — deterministically,
+not probabilistically. The only override is `Config.Debug.ForceAswangWhenSolo`, gated to
+`RunService:IsStudio() and SoloTesting and ForceAswangWhenSolo and #candidates <= MinPlayers`, which
+was left at its committed default of `false` for this run. With one real client and no husk on the
+board (husks are created only by a player leaving/idling, not present at round start), there is no way
+to reach `beginFeed` — the function this whole chunk (V06) is about — without that flag.
+
+=== raw console, verbatim ===
+[ProfileStore]: Roblox API services unavailable - data will not be saved
+[Progression] DataStoreState is "NoAccess" — NOTHING WILL PERSIST. In Studio: Game Settings > Security > Enable Studio Access to API Services, and the place must be published.
+[Badges] 5 of 5 badge ids are unset (Welcome, FirstTask, FirstRound, FirstBlood, BalikBalik) — those badges will NOT award. Create them in the Creator Hub and put the ids in Config.Badges (C35).
+[Community] Config.Community.GroupId is 0 — the group join reward will refuse every claim. Create the Roblox group and set the id (C36).
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 17 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Progression] Demiurgos_18: CURRENT from v2 -> L1
+[Client] Ready. 11 controllers loaded.
+[AudioController] cue CUE_BED_LOBBY — bed
+[Client] Snapshot — INTERMISSION round #0 · you: LOBBY (7s left)
+[AudioController] cue CUE_FOOTSTEP — retargeted on Demiurgos_18
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #1 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L1
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #1 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #1 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #2 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #2 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L1
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #2 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #2 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #3 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #3 · you: ALIVE (19s left)
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L2
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #3 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #3 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #4 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #4 · you: ALIVE (19s left)
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L2
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #4 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #4 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #5 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #5 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L2
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #5 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #5 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed

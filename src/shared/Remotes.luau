@@ -129,6 +129,39 @@ local EVENTS_DOWN = {
 		the receiver is the same shape as every field on `ProfileSnapshot`.
 	]]
 	"NoiseCue",
+	--[[
+		V06, §4.3. FireClient to the ONE player whose feed it is. Never FireAllClients — there is no
+		broadcast form of this payload and adding one would be a redesign, not an optimisation.
+
+		WHAT A SECOND CLIENT LEARNS FROM THIS REMOTE: nothing, because it never receives it. The public
+		half of a feed is that a monster is standing on a body in the open for five seconds, which is
+		§4.3's entire design — "a corpse becomes bait… survivors now know exactly where the monster is
+		and exactly how long it will be there" — and it needs no remote at all. It replicates as
+		geometry and it is meant to be seen.
+
+		IT IS NOT A ROLE ORACLE, AND THE ARGUMENT IS `RoleAssigned`'S. Only the Aswang can ever receive
+		this, which is exactly the property that makes it safe rather than dangerous: it is fired to a
+		single player and carries only that player's own business, so the set of clients that learn
+		anything from it is the set of clients that already knew. `check-secrecy.mjs` allowlists
+		`RoleAssigned` on that reasoning and this remote does not need allowlisting at all, because
+		`Types.FeedUpdatePayload` contains no role, no UserId and no health.
+
+		THE PAYLOAD NAMES NO VICTIM AND NO BODY. Deliberate, and for `SearchUpdate`'s structural reason:
+		with no id in the payload there is nothing for a compromised client to log, difference or
+		accumulate. The feeder is standing on the corpse — a field naming it would be the server
+		telling a client what it is looking at.
+
+		AND NO HEALTH, IN ANY FORM. §4.6: "a health value attached to a player is the reveal." A feed
+		changes the Aswang's health by FeedHeal and this remote still says nothing about it; the only
+		licensed readout is the Exposed glow's brightness, which exists only while the licence does.
+
+		FEEDING EMITS NO `NoiseCue`, EITHER, AND THAT IS A REFUSAL RATHER THAN AN OMISSION. §4.4's four
+		noisy actions are SEARCH, ITEM_USE, DOOR and SPRINT. A fifth for feeding would be the first
+		mechanic in this game whose noise ONLY ONE ROLE CAN PRODUCE — a cue no survivor could ever have
+		caused, delivered to every listener in radius. That is `.claude/lessons/absence-is-observable.md`
+		inverted into a presence, and `check:secrecy` would be green over it.
+	]]
+	"FeedUpdate",
 }
 
 -- Client -> Server (the client asks; the server decides)

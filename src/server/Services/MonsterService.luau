@@ -29,13 +29,33 @@
 	`verify` and `check:secrecy` green over them. See `.claude/lessons/absence-is-observable.md`: the
 	leak is a DIFFERENCE between players, not a piece of data.
 
-	THE FOUR SEAMS THE NEXT THREE CHUNKS CALL, so nobody has to guess which one to reach for:
+	V06 ADDS ONE REMOTE AND IT GOES TO ONE PLAYER. `FeedUpdate` is FireClient to the feeder, carrying
+	a three-value verdict and a duration the client already had from replicated Config. There is no
+	broadcast form. The PUBLIC half of a feed needs no remote at all and never gets one: a transformed
+	monster standing on a body for five seconds is §4.3's "corpse becomes bait" rendering itself, and
+	it replicates as geometry.
+
+	FEEDING EMITS NO NOISE CUE, AND THAT IS A REFUSAL. §4.4 names four noisy actions and feeding is
+	not one. A fifth would be the first cue in this game only one role can cause — see `Remotes.luau`'s
+	`FeedUpdate` entry for the full argument. `check:secrecy` would be green over it.
+
+	THE ONE REPLICATED DIFFERENCE A FEED CREATES IS `WalkSpeed = 0`, on a character already in monster
+	form and already announced, for exactly FeedDuration seconds. `endFeed` is the single restore path
+	and all six exits go through it; a seventh exit that does not is the C04/C14 brand again.
+
+	THE FIVE SEAMS THE NEXT THREE CHUNKS CALL, so nobody has to guess which one to reach for:
 
 	  · `ApplySaltHit(player)` — V08. Revert, -SaltDamage floored at WeakenedThreshold, Exposed for
 	    SaltRevealDuration. The ONLY entry point for a salt hit; there is no bare `ForceRevert` any
 	    more, precisely so a caller cannot revert without damaging.
-	  · `HealFromFeed(userId) -> boolean` — V06, on a COMPLETED feed. Returns whether state existed,
-	    never the health. Does not restore camouflage; that is V07's half of §4.3's reward.
+	  · `HealFromFeed(userId) -> boolean` — WIRED AT V06, called by `completeFeed` and by nothing else.
+	    Returns whether state existed, never the health. Does not restore camouflage.
+	  · `FeedCompleted` (BindableEvent) — V07'S SEAM, ADDED AT V06 AND CONNECTED TO BY NOTHING. Fires
+	    with the feeding Player on a COMPLETED feed and never on an interrupted one. §4.3 gives a
+	    completed feed two rewards and V06 pays one: this event is where V07 hangs the other. The
+	    reason the heal and the camouflage refresh cannot come apart is that `completeFeed` is the only
+	    caller of `HealFromFeed` AND the only firer of this event, and `endFeed` — which all six
+	    interruption paths go through — does neither.
 	  · `IsExposed(userId) -> boolean` — V08's strike gate, half one.
 	  · `IsWeakened(userId) -> boolean` — V08's strike gate, half two. §4.6: the buntot pagi kills an
 	    Aswang that is BOTH. AND them with `RoundService.GetAswangUserId()` on the server and hand a
@@ -87,6 +107,7 @@ local TeachingService = require(script.Parent.TeachingService)
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
+local FeedRules = require(Shared.pure.FeedRules)
 local KillValidation = require(Shared.pure.KillValidation)
 local MonsterHealth = require(Shared.pure.MonsterHealth)
 local Remotes = require(Shared.Remotes)
@@ -94,6 +115,30 @@ local TransformRules = require(Shared.pure.TransformRules)
 local Types = require(Shared.Types)
 
 local MonsterService = {}
+
+--[[
+	THE V07 SEAM, AND V06 CONNECTS NOTHING TO IT (V06, §4.3).
+
+	§4.3 gives a completed feed two rewards: `+FeedHeal` health, and — "once the Aswang has been
+	revealed" — its camouflage back. V06 owns the first and V07 owns the second, and this event is the
+	joint. It fires with the feeding Player, from `completeFeed`, on a COMPLETED feed and never on an
+	interrupted one.
+
+	THAT IS WHAT MAKES §4.3'S "INTERRUPTING A FEED IS A REAL VICTORY" TRUE STRUCTURALLY RATHER THAN
+	CAREFULLY. The heal and this event have exactly one caller between them; every interruption path
+	goes through `endFeed`, which calls neither. Nobody has to remember to withhold the camouflage
+	refresh on a salt hit, because there is no code that could grant it.
+
+	IT CARRIES A PLAYER AND NOTHING ELSE. No health, no victim, no charge count, no body. A listener
+	that needs more should take a UserId and ask this service, the way `ItemService` already ANDs
+	`IsTransformed` with `RoundService.GetAswangUserId()` — the seams answer questions, they do not
+	volunteer state.
+
+	A BindableEvent RATHER THAN A REMOTE, and the distinction is the secrecy one: this never leaves the
+	server. The client half of a feed is `FeedUpdate`, fired to the feeder alone, and it deliberately
+	carries no camouflage field — see `Types.FeedUpdatePayload`.
+]]
+MonsterService.FeedCompleted = Instance.new("BindableEvent")
 
 --[[
 	THE HEALTH TUNING (V05, §4.6), ASSEMBLED ONCE FROM TWO CONFIG BLOCKS.
@@ -167,6 +212,49 @@ type MonsterState = {
 	-- The same `os.clock()` generation trick `revert()` uses, for the same reason: a second salt hit
 	-- landing during the first one's window must not have its expiry cut short by the first timer.
 	ExposedGeneration: number,
+	--[[
+		FEEDING (V06, §4.3). SERVER-ONLY, LIKE EVERY OTHER FIELD IN THIS TABLE.
+
+		Three facts and no fourth. `Feeding` is the state, `FeedBody` is the corpse it is pinned to,
+		`FeedEndsAt` is the `os.clock()` deadline. There is no generation counter here and that is
+		deliberate: `revert()` and `applyExposed` both need one because both arm a `task.delay` whose
+		callback can outlive the thing that armed it, and a feed has no delayed callback at all — it
+		is driven by a tick that reads this table fresh every pass, so a stale one cannot exist.
+
+		`FeedBody` IS A MODEL REFERENCE, NOT A POSITION. A corpse is anchored and cannot move, so a
+		cached position would be correct — but a cached position cannot tell the tick that the body
+		was DESTROYED, which is what `clearCorpses` does on the way into INTERMISSION. Holding the
+		Model lets `bodyKindOf` re-answer every tick and lets a destroyed body end the feed through
+		the same path a husk would.
+
+		NOT A `MonsterState` ENUM VALUE. `Enums.luau:62-72` defers "one field or a field plus a flag"
+		to the chunk that builds the state machine, and V06 is not it: `Transformed` has four readers
+		outside this file and `Exposed` is a LATCH that coexists with the form. V06 adds one boolean
+		and derives the enum on demand. V07 decides the final shape.
+	]]
+	Feeding: boolean,
+	FeedBody: Model?,
+	FeedEndsAt: number?,
+	--[[
+		THE LOCK'S CAPTURED STATE (V06, §4.3). Added in Phase 3 rather than Phase 2 so that the feed
+		lifecycle landed with no Humanoid write in it at all — the two halves are separable and the
+		dangerous one is this one.
+
+		C04'S LESSON, APPLIED TO TWO MORE FIELDS: capture what you are about to change, restore what
+		you captured, never a hardcoded default. C04 restored every part to white Plastic at scale 1.0
+		and branded the ex-Aswang map-wide; the same mistake here is `JumpPower = 50` on revert, which
+		is right for almost every player and wrong for whoever the game gave a different value.
+
+		BOTH PROPERTIES, NOT ONE. `Humanoid.UseJumpPower` decides which of JumpPower and JumpHeight is
+		live, and nothing in this repo sets it. Writing and restoring both means the lock holds and the
+		restore is correct without this file having to know which mode is in use.
+
+		WALKSPEED IS NOT HERE, DELIBERATELY. `BaseWalkSpeed` above already holds the honest
+		pre-transform speed, captured by `captureLook`, and that is what the feed restores — not the
+		transformed speed, which is C14's bug spelled out.
+	]]
+	FeedBaseJumpPower: number?,
+	FeedBaseJumpHeight: number?,
 }
 
 -- SERVER-ONLY. Keyed by UserId. Never replicated — the only thing that crosses is the broadcast.
@@ -174,6 +262,7 @@ local monsters: { [number]: MonsterState } = {}
 
 local transformedRemote = Remotes.Get("MonsterTransformed")
 local killedRemote = Remotes.Get("PlayerKilled")
+local feedRemote = Remotes.Get("FeedUpdate")
 
 -- One parent for every corpse, so the raycast can exclude them wholesale and a phase change can clear
 -- them with a single Destroy. Created on Start, never destroyed.
@@ -201,11 +290,49 @@ local function stateFor(userId: number): MonsterState
 		Exposed = false,
 		ExposedGlow = nil,
 		ExposedGeneration = 0,
+		Feeding = false,
+		FeedBody = nil,
+		FeedEndsAt = nil,
+		FeedBaseJumpPower = nil,
+		FeedBaseJumpHeight = nil,
 	}
 
 	monsters[userId] = created
 
 	return created
+end
+
+--[[
+	THE MONSTER'S STATE AS `pure/FeedRules` WANTS IT (V06, §4.3).
+
+	`Enums.MonsterState` has five members and this function produces three. The two it never produces
+	are the whole content of the decision, so they are stated rather than omitted:
+
+	  · `EXPOSED` IS A LATCH, NOT AN ACTIVITY. §4.6's reveal coexists with whatever form the monster
+	    is in — a salted Aswang is Exposed AND still an Aswang. Returning EXPOSED here would shadow
+	    TRANSFORMED, and `FeedRules` would answer NOT_TRANSFORMED for a glowing monster standing on
+	    a body it is entitled to feed on. That is not a hypothetical: §4.3 makes salt the thing that
+	    INTERRUPTS a feed, so a salted feeder is the common case, not the edge one.
+	  · `CAMOUFLAGED` has no producer until V07. `FeedRules` still answers for it and the grid still
+	    covers it, because `pure/BodyTransitions`'s header is right that a state with no stated answer
+	    is where these tables acquire bugs.
+
+	`FEEDING` REQUIRES BOTH FLAGS, AND THAT IS LOAD-BEARING FOR THE TICK. `Feeding and Transformed`,
+	never `Feeding` alone: `FeedRules.mayContinue` reads a non-FEEDING state as "the form went away
+	under the feed" and ends it, which is exactly the backstop that catches a revert from a source
+	nobody has thought of. Written as `if Feeding then return "FEEDING"`, a reverted-but-still-flagged
+	monster would report FEEDING forever and the backstop would never fire.
+]]
+local function monsterStateOf(monster: MonsterState): Types.MonsterState
+	if monster.Feeding and monster.Transformed then
+		return Enums.MonsterState.Feeding
+	end
+
+	if monster.Transformed then
+		return Enums.MonsterState.Transformed
+	end
+
+	return Enums.MonsterState.Normal
 end
 
 --------------------------------------------------------------------------------
@@ -658,6 +785,29 @@ local function revert(player: Player)
 			if monster.BaseWalkSpeed ~= nil then
 				humanoid.WalkSpeed = monster.BaseWalkSpeed
 			end
+
+			--[[
+				AND THE FEED'S JUMP LOCK (V06), RESTORED HERE SO NO CALLER CAN GET ONE WITHOUT THE OTHER.
+
+				`endFeed` restores all three properties and is the path every feed exit is SUPPOSED to
+				take — but two callers reach `revert` with a feed still live: `beginFeed`'s refusal
+				branch and `validateAndKillHusk`. Both used to leave `JumpPower = 0` on a character
+				that had just been publicly reverted, until the next `feedTick` pass caught it up to a
+				quarter-second later. One character reading 0 while everyone else reads 50 is the
+				C04/C14 brand, and "it is only 250ms" is the argument that shipped it twice.
+
+				Putting the restore next to the WalkSpeed one makes the class of bug impossible rather
+				than absent: a future caller cannot restore the speed and forget the jump, because
+				there is no longer a version of this code that does one and not the other. `endFeed`
+				still does its own restore for the paths where `revert` early-returns.
+			]]
+			if monster.FeedBaseJumpPower ~= nil then
+				humanoid.JumpPower = monster.FeedBaseJumpPower
+			end
+
+			if monster.FeedBaseJumpHeight ~= nil then
+				humanoid.JumpHeight = monster.FeedBaseJumpHeight
+			end
 		end
 
 		restoreLook(monster)
@@ -763,7 +913,22 @@ local function transform(player: Player)
 		clearable only by a phase change.
 	]]
 	task.delay(Config.Monster.MaxTransformTime, function()
-		if monster.Generation == generation and monster.Transformed then
+		--[[
+			`not monster.Feeding` IS V06'S ADDITION AND IT IS NOT COSMETIC.
+
+			Transform at t=0, kill at t=7, feed until t=12 — and without this clause the 8-second
+			forced revert fires at t=8, in the middle of a feed, reverting a monster that §4.3 requires
+			to stay "transformed, locked in place, visible" for five full seconds. The feed would then
+			be broken by the game's own timer rather than by a survivor, which is the mechanic failing
+			silently in the Aswang's favour's opposite direction.
+
+			NOTHING RE-ARMS THIS TIMER, and nothing needs to: `endFeed` reverts on every one of its six
+			paths, so a declined forced revert is a revert deferred to the feed's end, not one skipped.
+			The form is therefore held for at most MaxTransformTime + FeedDuration, and
+			`tests/config.test.luau` pins FeedDuration below MaxTransformTime so that bound stays a
+			transform with a feed on the end rather than a feed with a transform on the front.
+		]]
+		if monster.Generation == generation and monster.Transformed and not monster.Feeding then
 			revert(player)
 		end
 	end)
@@ -887,6 +1052,412 @@ local function hasLineOfSight(killerRoot: BasePart, targetRoot: BasePart): boole
 	return result == nil
 end
 
+--------------------------------------------------------------------------------
+-- The feed (§4.3, V06). What replaced the kill cooldown.
+--------------------------------------------------------------------------------
+
+--[[
+	THE ONLY FUNCTION IN THIS FILE THAT SENDS ANYTHING ABOUT A FEED. FireClient, to one player.
+
+	A TYPED LOCAL RATHER THAN AN INLINE TABLE, for `SearchService.sendUpdate`'s reason: `FireClient`
+	takes `...any`, so an inline literal is checked against nothing and a typo'd field name ships. The
+	annotation is what makes `Types.FeedUpdatePayload`'s absent-field argument enforceable rather than
+	aspirational, and it is what `check-secrecy.mjs` resolves the payload back to when it scans the
+	fire site.
+
+	`HoldSeconds` IS ZERO ON EVERY ENDING. Only a live feed has a duration; a completion and an
+	interruption both send 0, so a client cannot read a timing difference off which one it got.
+	`SearchUpdatePayload` sets the same rule for the same reason.
+]]
+local function sendFeedUpdate(player: Player, verdict: Types.FeedVerdict)
+	local payload: Types.FeedUpdatePayload = {
+		Verdict = verdict,
+		HoldSeconds = if verdict == "FEED_STARTED" then Config.Monster.FeedDuration else 0,
+	}
+
+	feedRemote:FireClient(player, payload)
+end
+
+--[[
+	WHAT KIND OF BODY IS THIS? (V06, §4.7) The first live use of `Enums.BodyKind`, which V02 declared
+	and deliberately wired nowhere.
+
+	ANSWERED BY PARENT FOLDER, and that is not a shortcut — it is where the distinction actually
+	lives. `makeCorpse` reparents a body into `workspace.Corpses` and renames it `Corpse_{userId}`;
+	`RoundService.onPlayerRemoving` reparents a departing character into `workspace.Husks` as
+	`Husk_{userId}`. The two folders ARE the two kinds.
+
+	AND IT IS WHY `FeedRules` DOES NOT MODEL THE HUSK -> CORPSE TRANSITION. That transition already
+	exists, one screen down: `validateAndKillHusk` marks the husk killed in `RoundService` and calls
+	`makeCorpse` on the same Model, which moves it between these two folders. A husk that has been
+	killed IS a corpse by the time anything asks, so the rule "a husk is not feedable until it has
+	been killed" needs no clock and no second state — it is this function returning a different word.
+
+	NAME MATCHING IS DELIBERATELY NOT USED. `Corpse_{userId}` would work today and would silently
+	start lying the moment anything renames a body; the parent is what the rest of this file already
+	treats as authoritative (`clearCorpses` iterates it, the kill's raycast excludes it wholesale).
+
+	nil FOR ANYTHING ELSE, INCLUDING A DESTROYED MODEL. `clearCorpses` Destroys bodies on the way into
+	INTERMISSION, which sets `Parent` to nil — and `FeedRules` reads nil as NOT_A_CORPSE and ends the
+	feed. That is the corpse-destroyed exit, and it costs no extra code.
+]]
+local function bodyKindOf(body: Model): Types.BodyKind?
+	local parent = body.Parent
+
+	if parent == nil then
+		return nil
+	end
+
+	if parent == corpses then
+		return Enums.BodyKind.Corpse
+	end
+
+	if parent == RoundService.GetHusksFolder() then
+		return Enums.BodyKind.Husk
+	end
+
+	return nil
+end
+
+--[[
+	HOW FAR THE FEEDER HAS STRAYED FROM THE BODY. `SearchService.holdDistance` with a corpse in place
+	of a container, and the nil case means the same thing: something stopped existing, so break the
+	hold rather than error inside the tick.
+
+	RESOLVED FROM BOTH SIDES EVERY TICK, not cached. The corpse is anchored and cannot move, so a
+	cached corpse position would be correct — but the FEEDER moves, which is the entire point of the
+	leash, and a character that is replaced underneath a feed (a respawn, a `LoadCharacterAsync` from
+	`RoundService`) must read as nil rather than as a stale distance of zero.
+]]
+local function feedDistance(player: Player, body: Model): number?
+	local bodyRoot = rootOf(body)
+	local character = player.Character
+	local root = if character ~= nil then rootOf(character) else nil
+
+	if bodyRoot == nil or root == nil then
+		return nil
+	end
+
+	return (bodyRoot.Position - root.Position).Magnitude
+end
+
+--[[
+	THE ONLY WAY A FEED ENDS. Six paths reach here and every one of them must:
+
+	  1. the tick's deadline (via completeFeed, which calls this first)
+	  2. salt — `ApplySaltHit`
+	  3. walking past the leash, or the body ceasing to be a corpse — the tick
+	  4. dying, or the character going away — `watchCharacter`
+	  5. the round leaving ACTIVE — `onPhaseChanged`
+	  6. disconnecting — `onPlayerRemoving`
+
+	`verdict` IS nil WHEN THE CALLER SENDS ITS OWN MESSAGE. `completeFeed` sends FEED_OK and must not
+	be followed by a FEED_INTERRUPTED; every other caller passes FEED_INTERRUPTED. This is
+	`SearchService.releaseHold`'s contract verbatim, and it is copied rather than reinvented because
+	the failure it prevents — two contradictory messages for one ending — is the same failure.
+
+	SAFE TO CALL FOR A PLAYER WHO IS NOT FEEDING. Three of the six paths fire for players who were
+	not, and an early return is cheaper than six callers checking.
+
+	IT CALLS `revert`, AND THAT IS §4.3 STEP 4 ARRIVING LATE ON PURPOSE. Under v1.3 `commitKill`
+	reverted immediately; V06 moved that here, because §4.3 requires the feed to happen "transformed
+	… and visible" and a monster that reverted a frame after the kill is neither. Every feed therefore
+	ends in a revert, whichever of the six paths got here — which is also what stops a broken feed
+	leaving a permanent monster standing in the barrio.
+]]
+local function endFeed(userId: number, verdict: Types.FeedVerdict?)
+	-- READ, do not construct. `stateFor` here would re-insert a departed player's UserId, which is
+	-- the bug `revert()`'s first line and `applyHealthEvent`'s first line were both written to avoid.
+	local monster: MonsterState? = monsters[userId]
+
+	if monster == nil or not monster.Feeding then
+		return
+	end
+
+	-- STATE FIRST, THEN THE WORLD. `revert` below can reach code that asks whether this player is
+	-- feeding; it must already read false by then, or a re-entrant path finds a half-ended feed.
+	monster.Feeding = false
+	monster.FeedBody = nil
+	monster.FeedEndsAt = nil
+
+	local player = Players:GetPlayerByUserId(userId)
+
+	if player ~= nil then
+		--[[
+			UNLOCK FIRST, THEN REVERT, AND BOTH WRITE THE SAME WALKSPEED.
+
+			`revert()` restores `BaseWalkSpeed` too — but only when the player is still `Transformed`,
+			and it early-returns otherwise. At least one path reaches here with that already false: the
+			tick's NOT_TRANSFORMED branch fires BECAUSE a revert has happened. Leaving the unlock to
+			`revert` would therefore strand WalkSpeed at 0 on exactly the path a salt hit takes, which
+			is the most common interruption in the game.
+
+			BaseWalkSpeed, NOT THE TRANSFORMED SPEED. C14 restored the captured transformed value onto
+			an un-transformed player and left one character in the barrio reading 20 while everyone
+			else read 16 — a permanent role brand with the full gate green over it.
+		]]
+		local character = player.Character
+		local humanoid = if character ~= nil
+			then character:FindFirstChildOfClass("Humanoid")
+			else nil
+
+		if humanoid ~= nil then
+			if monster.BaseWalkSpeed ~= nil then
+				humanoid.WalkSpeed = monster.BaseWalkSpeed
+			end
+
+			if monster.FeedBaseJumpPower ~= nil then
+				humanoid.JumpPower = monster.FeedBaseJumpPower
+			end
+
+			if monster.FeedBaseJumpHeight ~= nil then
+				humanoid.JumpHeight = monster.FeedBaseJumpHeight
+			end
+		end
+
+		monster.FeedBaseJumpPower = nil
+		monster.FeedBaseJumpHeight = nil
+
+		revert(player)
+	end
+
+	if verdict == nil then
+		return
+	end
+
+	-- The player may have left between the top of this function and here; `endFeed`'s nil-verdict
+	-- callers are the ones who know that, but a re-check costs a comparison and a departing player is
+	-- a warn in the log otherwise.
+	if player ~= nil then
+		sendFeedUpdate(player, verdict)
+	end
+end
+
+--[[
+	THE FEED RAN ITS COURSE. THE ONLY PATH THAT PAYS ANYTHING (§4.3, §4.6).
+
+	`endFeed` FIRST, so the state is already clean before the rewards land. `HealFromFeed` reads
+	`monsters[userId]` and `FeedCompleted`'s listener may too; both should see a monster that has
+	finished feeding, not one mid-teardown.
+
+	THE HEAL GOES THROUGH `MonsterService.HealFromFeed`, WHICH GOES THROUGH `pure/MonsterHealth`. Not
+	`monster.Health += Config.Monster.FeedHeal`, which would be a second implementation of §4.6's
+	arithmetic — one that does not cap at MaxHealth, does not repaint the Exposed glow, and is not
+	covered by `tests/monster-health.test.luau`. V05 built that seam and wrote "V06, on a COMPLETED
+	feed" on it; this is the call it was written for.
+
+	THE GLOW REPAINT IS NOT OPTIONAL AND IT IS ALREADY HANDLED. `applyHealthEvent` calls
+	`refreshExposedGlow` on every health change, and V05's comment there names this exact case: a feed
+	completed inside a live Exposed window would otherwise restore 25 health and leave the glow reading
+	the pre-feed value for the rest of the ten seconds — survivors looking at a monster that appears
+	one hit from death and is not. Nothing to add here; do not add a second repaint.
+]]
+local function completeFeed(player: Player)
+	endFeed(player.UserId, nil)
+
+	MonsterService.HealFromFeed(player.UserId)
+
+	--[[
+		AND V07'S HALF. Fired here and nowhere else, so an interrupted feed cannot pay it — see the
+		event's own comment. V06 connects no listener; `FeedCompleted` has no subscriber until V07,
+		which is the same state `SearchService.ItemFound` shipped in at V03.
+	]]
+	MonsterService.FeedCompleted:Fire(player)
+
+	--[[
+		FEED_OK LAST, after the heal and after V07's seam. The client is being told a thing that has
+		already fully happened server-side — it draws no conclusion the server has not already reached,
+		and it cannot be raced by a listener that errors.
+
+		`endFeed` ABOVE WAS PASSED nil PRECISELY SO THIS LINE IS THE ONLY MESSAGE. Two messages for one
+		ending — FEED_INTERRUPTED then FEED_OK — is `SearchService.releaseHold`'s stated failure mode.
+	]]
+	sendFeedUpdate(player, "FEED_OK")
+end
+
+--[[
+	START A FEED. ONE CALLER: `commitKill`, on a kill the server has already validated (§4.3).
+
+	THERE IS NO `RequestFeed` AND THERE MUST NOT BE. §4.3: "After a kill, the Aswang MUST feed on the
+	corpse for 5 seconds." An opt-in feed is a feed the Aswang declines, and declining costs nothing
+	once the kill cooldown has stopped being the gate — which is the whole point of the chunk. §4.3's
+	own bullet says the mechanic exists so the monster "cannot chain-kill, because it is pinned to the
+	body it just made"; a remote a client can simply not fire deletes that property. It also means this
+	chunk adds no `OnServerEvent` handler, no `AntiCheatService.Consume` site and no `Config.AntiCheat
+	.Budgets` entry — the strongest anti-cheat property available here is the absence of an entry point.
+
+	THE VALIDATION STILL RUNS, EVEN THOUGH THE SERVER IS THE ONLY CALLER. `FeedRules.evaluate` is not
+	guarding against a client here; it is guarding against the server having changed its mind between
+	`makeCorpse` and this line — a phase that ended, a body that failed to parent, a killer whose
+	character went away inside `commitKill`. Refusing on those is how a feed that cannot work becomes
+	a log line instead of a monster locked in place forever.
+
+	AND A REFUSED FEED STILL OWES A REVERT. §4.3 step 4 says the transform ends after a kill; V06 moved
+	that revert into `endFeed`, so a feed that never starts has to do it here or the killer stays a
+	monster until `MaxTransformTime` — which, because the forced-revert timer learns to decline while
+	feeding (Step 2.5), it might not even do. This is the single easiest line in the chunk to omit and
+	the hardest to notice: the symptom is a monster that occasionally never reverts.
+]]
+local function beginFeed(player: Player, body: Model)
+	local monster: MonsterState? = monsters[player.UserId]
+
+	if monster == nil then
+		return
+	end
+
+	local distance = feedDistance(player, body)
+
+	local verdict = FeedRules.evaluate({
+		MonsterState = monsterStateOf(monster),
+		BodyKind = bodyKindOf(body),
+		-- nil means the killer or the body has no root part any more. `math.huge` rather than a
+		-- sentinel number: FeedRules refuses a non-finite distance by the same guard that refuses a
+		-- NaN one, so "we could not measure" and "too far" resolve to one OUT_OF_RANGE.
+		Distance = if distance ~= nil then distance else math.huge,
+		Phase = RoundService.GetPhase(),
+		Range = Config.Monster.FeedLeashStuds,
+	})
+
+	if verdict ~= "OK" then
+		-- LOGGED, NEVER ECHOED, on the same terms as the transform and the kill refusals above. There
+		-- is no client to echo to here, and the property is kept anyway: a verdict that could safely
+		-- be echoed is the one worth having.
+		if Config.Debug.VerboseLogging then
+			print(`[MonsterService] Refused feed for {player.Name}: {verdict}`)
+		end
+
+		revert(player)
+
+		return
+	end
+
+	monster.Feeding = true
+	monster.FeedBody = body
+	monster.FeedEndsAt = os.clock() + Config.Monster.FeedDuration
+
+	--[[
+		THE LOCK (§4.3, "locked in place"). AN AFFORDANCE, NOT THE AUTHORITY — `feedTick`'s leash is
+		what actually holds a feed to a body, because a client owns its own character's physics and can
+		ignore every line below. This is what makes an honest client stand still.
+
+		GUARDED ON `BaseWalkSpeed`, SO THE RESTORE CANNOT FAIL. Do not lock what you cannot unlock: one
+		character reading WalkSpeed 0 for the rest of the round is a map-wide role brand that
+		`check:secrecy` cannot see. The nil case is unreachable — `captureLook` sets it at the start of
+		every transform and FeedRules refuses a feed by anyone untransformed — and it is guarded anyway,
+		because "unreachable" is what C04 and C14 both were.
+	]]
+	local character = player.Character
+	local humanoid = if character ~= nil then character:FindFirstChildOfClass("Humanoid") else nil
+
+	if humanoid ~= nil and monster.BaseWalkSpeed ~= nil then
+		monster.FeedBaseJumpPower = humanoid.JumpPower
+		monster.FeedBaseJumpHeight = humanoid.JumpHeight
+
+		-- 0 is on `check-config.mjs`'s IDIOMATIC list; these are not knobs. "Cannot move" has one
+		-- value and it is not a balance number, exactly as `makeCorpse`'s own `WalkSpeed = 0` says.
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+		humanoid.JumpHeight = 0
+	end
+
+	sendFeedUpdate(player, "FEED_STARTED")
+end
+
+--[[
+	THE TICK. Four exits and one completion, four times a second.
+
+	IT ITERATES `monsters`, NOT A SEPARATE FEED TABLE, and that is the one-authority decision from
+	Step 2.1 paying off: there is nothing here that can disagree with the state, and nothing that
+	`onPhaseChanged`'s `table.clear` could leave behind. The table holds at most one entry per player
+	who has ever fired RequestTransform this round — realistically one — so the skip is free.
+
+	ASSIGNING TO FIELDS OF A VALUE DURING A GENERALISED-FOR IS DEFINED BEHAVIOUR IN LUAU, and unlike
+	`SearchService.searchTick` this loop never removes a KEY: `endFeed` clears three fields on an
+	entry and leaves the entry in place. Strictly safer than the precedent it copies.
+
+	`mayContinue`, NOT `evaluate`. The state here IS `FEEDING`, which `evaluate` refuses with
+	ALREADY_FEEDING by design — see `pure/FeedRules`'s header for why these are two functions and not
+	one with a flag.
+]]
+local function feedTick()
+	local now = os.clock()
+
+	for userId, monster in monsters do
+		if not monster.Feeding then
+			continue
+		end
+
+		local player = Players:GetPlayerByUserId(userId)
+
+		-- Path 6's backstop. `onPlayerRemoving` normally gets here first; this covers the window
+		-- where it has not fired yet. No verdict — there is nobody left to send one to.
+		if player == nil then
+			endFeed(userId, nil)
+			continue
+		end
+
+		--[[
+			DEAD, or a mid-round SPECTATOR. An allowlist against `Enums.PlayerState.Alive`, never
+			`~= Dead`: `PlayerState` has four values and exactly one of them may be feeding. This is
+			`pure/PlayerBody`'s rule and C01's bug wearing its fourth hat.
+
+			IT IS NOT REDUNDANT WITH THE FORM CHECK BELOW. A killed Aswang aborts the round (§4.8), so
+			today an Aswang cannot be DEAD mid-feed — but V08 builds the buntot pagi strike, which is
+			a second way for a feeding monster to stop being alive, and this line is what makes that
+			end the feed rather than leave a tick running against a corpse's corpse.
+		]]
+		if RoundService.GetPlayerState(player) ~= Enums.PlayerState.Alive then
+			endFeed(userId, "FEED_INTERRUPTED")
+			continue
+		end
+
+		local body = monster.FeedBody
+
+		if body == nil then
+			endFeed(userId, "FEED_INTERRUPTED")
+			continue
+		end
+
+		local distance = feedDistance(player, body)
+
+		--[[
+			THE LEASH, THE FORM AND THE BODY, ALL THREE THROUGH THE PURE MODULE.
+
+			  · past FeedLeashStuds        -> OUT_OF_RANGE     the monster walked off its meal
+			  · the form went away         -> NOT_TRANSFORMED  a salt hit, or any revert
+			  · the body left the folder   -> NOT_A_CORPSE     `clearCorpses` destroyed it
+			  · the round left ACTIVE      -> WRONG_PHASE      `onPhaseChanged` normally gets here first
+
+			ALL FOUR COLLAPSE TO ONE `FEED_INTERRUPTED` ON THE WIRE. `Types.FeedVerdict`'s comment says
+			why: telling the Aswang WHICH of these broke its feed hands it "was that salt, or did I
+			drift?" for free, and that is a fact about a survivor's aim it should have to work out by
+			looking.
+		]]
+		local verdict = FeedRules.mayContinue({
+			MonsterState = monsterStateOf(monster),
+			BodyKind = bodyKindOf(body),
+			Distance = if distance ~= nil then distance else math.huge,
+			Phase = RoundService.GetPhase(),
+			Range = Config.Monster.FeedLeashStuds,
+		})
+
+		if verdict ~= "OK" then
+			if Config.Debug.VerboseLogging then
+				print(`[MonsterService] Feed broken for {player.Name}: {verdict}`)
+			end
+
+			endFeed(userId, "FEED_INTERRUPTED")
+			continue
+		end
+
+		local endsAt = monster.FeedEndsAt
+
+		if endsAt ~= nil and now >= endsAt then
+			completeFeed(player)
+		end
+	end
+end
+
 --[[
 	The commit, in the ONE order that works. Every line here depends on the one above it.
 
@@ -897,6 +1468,15 @@ end
 	  3. The revert (§4.3 step 4, "after a kill it must revert"). This is ALSO what starts the cooldown,
 	     because revert() stamps LastRevertedAt — §4.3 step 5's "30s from revert" is not implemented as
 	     a separate timer anywhere, it is this line.
+	     V06 REPLACED THIS LINE WITH `beginFeed`, AND THE REVERT MOVED TO THE END OF THE FEED. §4.3's
+	     "Feeding — what replaced the kill cooldown" requires the feed to happen "transformed, locked
+	     in place, visible": a monster that reverted a frame after the kill is none of those, and there
+	     would be nothing for a survivor to walk up to. `endFeed` now calls `revert` on all six of its
+	     paths, so the transform still always ends — FeedDuration seconds later than it used to, which
+	     also moves the start of the KillCooldown countdown by the same amount. That is a BALANCE
+	     change for V16 to judge and it is recorded in Config's KillCooldown comment.
+	     A REFUSED FEED STILL REVERTS, inside `beginFeed`. Without that line a feed that cannot start
+	     leaves a permanent monster, because the forced-revert timer below now declines while feeding.
 	  4. The broadcast, last, so no client is told about a kill the server has not finished committing.
 ]]
 local function commitKill(killer: Player, victim: Player, victimCharacter: Model, position: Vector3)
@@ -925,7 +1505,13 @@ local function commitKill(killer: Player, victim: Player, victimCharacter: Model
 	-- or one survivor pressing the stock reset button ends a 3-player round as ASWANG_WINS.
 	RoundService.MarkKilled(victim, true)
 
-	revert(killer)
+	--[[
+		§4.3 STEP 4, VIA THE FEED (V06). `victimCharacter` is the corpse by this line — `makeCorpse`
+		above mutated it in place and reparented it into `workspace.Corpses` — so this is the body the
+		Aswang is pinned to, handed over directly rather than looked up. There is no corpse registry
+		precisely because this line already holds the Model.
+	]]
+	beginFeed(killer, victimCharacter)
 
 	--[[
 		TWO FIELDS AND ONE RECIPIENT. See Types.PlayerKilledPayload: the killer appears nowhere in it,
@@ -1005,6 +1591,9 @@ local function validateAndKillHusk(
 		KillerState = RoundService.GetPlayerState(killer),
 		TargetState = Enums.PlayerState.Alive,
 		Transformed = monster.Announced,
+		-- V06, §4.3: a monster pinned to a corpse may not take a second body. The husk path is the
+		-- SECOND entrance to that window, so it is gated identically to validateAndKill.
+		Feeding = monster.Feeding,
 		KillerPos = vec(killerRoot.Position),
 		TargetPos = vec(targetRoot.Position),
 		Range = Config.Monster.KillRange,
@@ -1106,6 +1695,15 @@ local function validateAndKill(killer: Player, targetUserId: number)
 			warning does.
 		]]
 		Transformed = monster.Announced,
+		--[[
+			V06, §4.3: "it cannot chain-kill, because it is pinned to the body it just made."
+
+			WITHOUT THIS FIELD THAT SENTENCE IS FALSE. V06 defers the post-kill revert to the end of
+			the feed, and `revert()` is what stamps `LastRevertedAt` — so through the whole feed the
+			killer is Announced with a stale timestamp and `ON_COOLDOWN` cannot fire. See the field's
+			own comment in `pure/KillValidation`.
+		]]
+		Feeding = monster.Feeding,
 		KillerPos = vec(killerRoot.Position),
 		TargetPos = vec(targetRoot.Position),
 		Range = Config.Monster.KillRange,
@@ -1169,6 +1767,20 @@ local function onPhaseChanged(phase: Types.RoundPhase)
 	for userId in monsters do
 		local player = Players:GetPlayerByUserId(userId)
 
+		--[[
+			AND EVERY LIVE FEED (V06, §4.3), BEFORE THE REVERT BELOW AND BEFORE `table.clear`.
+
+			`endFeed` restores the movement lock and then reverts, so this line does the loop's revert
+			for a feeder and the one below early-returns. Ordered this way rather than after, because a
+			revert that ran first would leave `Feeding` true on an entry `table.clear` is about to drop
+			— and with it a character whose WalkSpeed is 0 and whose owner is standing in the lobby.
+
+			`FEED_INTERRUPTED` RATHER THAN nil: the player is still here and their client is still
+			drawing a feed bar. The round ending is exactly the case where a client left holding a
+			stale bar looks like the game froze.
+		]]
+		endFeed(userId, "FEED_INTERRUPTED")
+
 		if player ~= nil then
 			revert(player)
 		end
@@ -1219,6 +1831,11 @@ local function watchCharacter(player: Player, character: Model)
 	end
 
 	humanoid.Died:Connect(function()
+		-- V06: a feeding Aswang that dies stops feeding, and gets its Humanoid back to the honest
+		-- baseline before anything else looks at it. Today only a fall or a reset reaches here — a
+		-- killed Aswang aborts the round — but V08's buntot pagi strike is a second way, and this is
+		-- the line that makes the feed end rather than tick on against a body that has no driver.
+		endFeed(player.UserId, "FEED_INTERRUPTED")
 		revert(player)
 	end)
 end
@@ -1279,6 +1896,23 @@ end
 	character has.
 ]]
 local function onPlayerRemoving(player: Player)
+	--[[
+		THE FEED GOES BEFORE THE ENTRY DOES (V06), for the reason the line below this one exists.
+
+		V05's comment here is the whole argument and it applies unchanged: nilling the entry forgets
+		the state, it does not undo what the state did to the world. `RoundService.onPlayerRemoving`
+		reparents the departing character into `workspace.Husks` as `Husk_{userId}`, and MonsterService
+		runs FIRST in SERVICE_ORDER — so a feed left un-ended here becomes a husk standing in the
+		barrio with WalkSpeed 0 and jumping disabled, which is one property scan away from naming the
+		round's Aswang. `feedTick`'s `player == nil` branch would eventually reach it and find the
+		entry already gone.
+
+		nil VERDICT, NOT `FEED_INTERRUPTED`: there is nobody left to send it to, and `FireClient` to a
+		departing player is a warn in the log for no benefit. Same contract as
+		`SearchService.releaseHold`'s nil case.
+	]]
+	endFeed(player.UserId, nil)
+
 	clearExposed(player.UserId)
 
 	monsters[player.UserId] = nil
@@ -1388,6 +2022,24 @@ end
 	never ends a round, which is why `MonsterHealth.apply` floors it at `WeakenedThreshold`.
 ]]
 function MonsterService.ApplySaltHit(player: Player)
+	--[[
+		THE FEED DIES FIRST (V06, §4.3). "Salt it mid-meal and it loses the heal and the camouflage
+		refresh, and has to leave the body."
+
+		BEFORE `revert`, NOT AFTER, AND NOT LEFT TO THE TICK. `endFeed` is what withholds both rewards
+		— it is the path that fires neither `HealFromFeed` nor `FeedCompleted` — and calling it here
+		makes the interruption exact. Left to `feedTick`'s NOT_TRANSFORMED backstop, a hit landing in
+		the last quarter-second of a feed races the deadline, and the outcome of §4.3's most important
+		counterplay would depend on tick alignment.
+
+		`endFeed` CALLS `revert` ITSELF, so the line below runs a second time and early-returns. That
+		redundancy is deliberate and cheap: this function's contract is "revert, damage, expose" and
+		removing its own revert on the grounds that a callee happens to do it would make the ordering
+		depend on `endFeed`'s internals.
+
+		SAFE FOR A PLAYER WHO IS NOT FEEDING, which is most salt hits. `endFeed` early-returns.
+	]]
+	endFeed(player.UserId, "FEED_INTERRUPTED")
 	revert(player)
 	applyHealthEvent(player.UserId, "SALT")
 	applyExposed(player)
@@ -1487,6 +2139,27 @@ function MonsterService.Start()
 	RoundService.PhaseChanged.Event:Connect(onPhaseChanged)
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+	--[[
+		THE FEED'S CLOCK (V06). Lifted from `SearchService.Start`, quarter-second cadence and all.
+
+		A LOOP RATHER THAN A `task.delay(FeedDuration)`, and the difference is §4.3's "interruptible".
+		A delayed callback knows only that five seconds passed; it cannot notice that the monster
+		walked away at second two, and a feed that pays out because nobody was watching is not a
+		mechanic. Four times a second is `SearchService`'s cadence for the same reason — the leash is
+		six studs and a transformed Aswang covers about five in a quarter-second, so the worst-case
+		overshoot is roughly one leash.
+
+		RUNS UNCONDITIONALLY, in every phase. `feedTick` skips every entry that is not feeding, and
+		`monsters` is empty outside a round; gating the loop on the phase would be a second copy of
+		the phase rule with nothing to gain.
+	]]
+	task.spawn(function()
+		while true do
+			feedTick()
+			task.wait(0.25) -- config-ok: scheduler tick, not a balance knob
+		end
+	end)
 
 	-- Anyone already here. Same reasoning as RoundService.Start's backfill: connect first, then sweep,
 	-- and accept that a player arriving in the window is handled twice. watchCharacter is idempotent

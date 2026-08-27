@@ -42,6 +42,7 @@ local function valid(): KillValidation.Request
 		KillerState = "ALIVE",
 		TargetState = "ALIVE",
 		Transformed = true,
+		Feeding = false,
 		KillerPos = { X = 0, Y = 0, Z = 0 },
 		TargetPos = { X = 0, Y = 0, Z = 0 },
 		Range = 8,
@@ -223,6 +224,42 @@ end) == "NOT_ASWANG")
 -- §4.3 step 3. The seventh condition, and the one C05's bullet list does not name.
 check("an untransformed Aswang cannot kill", verdictWith(function(request)
 	request.Transformed = false
+end) == "NOT_TRANSFORMED")
+
+--[[
+	V06, §4.3 — AND THIS IS THE REGRESSION TEST FOR A REAL BUG, not a hypothetical.
+
+	V06 moved the post-kill revert to the END of the feed. `revert()` is what stamps `LastRevertedAt`,
+	and `LastRevertedAt` IS the kill cooldown — so for the whole feed the killer is Transformed with a
+	stale timestamp and `ON_COOLDOWN` cannot fire. An exploit audit proved a second kill returned OK
+	1 second into a feed, which deletes §4.3's stated reason for the mechanic existing: "it cannot
+	chain-kill, because it is pinned to the body it just made."
+
+	THE THIRD CASE IS THE ONE THAT MATTERS. A feeding killer with a stale `LastRevertedAt` is exactly
+	the shipped bug: the cooldown answers OK, so only the Feeding check refuses it.
+]]
+check("a feeding Aswang cannot take a second body", verdictWith(function(request)
+	request.Feeding = true
+end) == "FEEDING")
+
+check("feeding is refused before the cooldown, not by it", verdictWith(function(request)
+	request.Feeding = true
+	-- Cooldown fully elapsed, as it is for a first kill of the round.
+	request.LastRevertedAt = nil
+end) == "FEEDING")
+
+check("the chain-kill window V06 opened is closed", verdictWith(function(request)
+	request.Feeding = true
+	-- The shipped bug exactly: reverted 40s ago, transformed again, killed, now 1s into the feed.
+	-- Without the Feeding check every condition below answers OK and the second kill lands.
+	request.LastRevertedAt = 60
+	request.Now = 101
+end) == "FEEDING")
+
+-- And the form still outranks it: "you are not a monster" is the more fundamental fact.
+check("an untransformed killer reports the form, not the feed", verdictWith(function(request)
+	request.Transformed = false
+	request.Feeding = true
 end) == "NOT_TRANSFORMED")
 
 check("the Aswang cannot kill itself", verdictWith(function(request)

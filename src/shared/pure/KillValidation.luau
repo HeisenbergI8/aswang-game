@@ -48,6 +48,9 @@ export type Verdict =
 	| "SELF"
 	| "NOT_ASWANG"
 	| "NOT_TRANSFORMED"
+	-- V06, §4.3. Pinned to the corpse it just made. See `Feeding` in Request for why this is not
+	-- covered by ON_COOLDOWN any more.
+	| "FEEDING"
 	| "ON_COOLDOWN"
 	| "TARGET_NOT_ALIVE"
 	| "TARGET_IS_ASWANG"
@@ -62,6 +65,28 @@ export type Request = {
 	KillerState: PlayerState,
 	TargetState: PlayerState,
 	Transformed: boolean,
+	--[[
+		V06, §4.3. IS THE KILLER PINNED TO A CORPSE RIGHT NOW?
+
+		THIS FIELD EXISTS BECAUSE V06 BROKE THE ASSUMPTION THE COOLDOWN CHECK BELOW RESTED ON, and the
+		header of `evaluate` predicted it in as many words: the cooldown was "redundant" only because
+		`TransformRules` refused the FORM until the cooldown elapsed, so an on-cooldown Aswang could
+		never be transformed in the first place. V06 holds the form open through the whole feed and
+		defers the revert — and `revert()` is what stamps `LastRevertedAt`, which IS the cooldown. So
+		for the length of a feed the killer is transformed with a stale timestamp, and every check
+		below answers OK for a second kill.
+
+		THAT DELETES §4.3'S STATED REASON FOR THE MECHANIC: "It cannot chain-kill, because it is
+		pinned to the body it just made." Without this field the pin is decoration — kill A, then kill
+		B standing next to A, and the only cost is that the second `beginFeed` refuses with
+		ALREADY_FEEDING. Two kills, one transform, no cooldown, and in a 3-player round that is the
+		round.
+
+		A FIELD HERE RATHER THAN A GUARD IN `MonsterService`, so the rule is in the module the grid
+		covers. A service-level check would fix the same hole and would be invisible to
+		`tests/kill-validation.test.luau`, which is where every other kill precondition is proven.
+	]]
+	Feeding: boolean,
 	KillerPos: Vec3,
 	TargetPos: Vec3,
 	Range: number,
@@ -147,6 +172,19 @@ function KillValidation.evaluate(request: Request): Verdict
 	-- §4.3 step 3. The kill belongs to the monster form, not to the role.
 	if not request.Transformed then
 		return "NOT_TRANSFORMED"
+	end
+
+	--[[
+		V06, §4.3. AFTER THE FORM, BEFORE THE COOLDOWN, and the position is the contract.
+
+		After `Transformed`, because a feed only exists inside the form and "you are not a monster" is
+		the more fundamental fact. Before the cooldown, because during a feed the cooldown reads a
+		STALE `LastRevertedAt` and answers OK — so a FEEDING killer reaching the cooldown check is
+		exactly the case this field was added to catch, and reporting ON_COOLDOWN for it would be
+		reporting the one thing that is not true.
+	]]
+	if request.Feeding then
+		return "FEEDING"
 	end
 
 	-- §4.3 step 5: FROM THE REVERT, not from the kill. Measured from the kill, an Aswang holding the
