@@ -1,0 +1,51 @@
+Static confirmations read directly from the shipped tree (not the plan's diff text), 2026-08-27.
+
+1) DepthMode, MonsterService.luau:560-587 (`applyExposed`):
+
+    local glow = Instance.new("Highlight")
+    ...
+    glow.DepthMode = Enum.HighlightDepthMode.Occluded
+
+   Matches Step 4.1 exactly. Confirms the glow is set to NOT render through walls, byte for byte
+   against the plan.
+
+2) The ramp formula, MonsterService.luau:504-515 (`refreshExposedGlow`):
+
+    local full = Config.Monster.ExposedGlowTransparencyFull
+    local weakened = Config.Monster.ExposedGlowTransparencyWeakened
+    local fraction = MonsterHealth.weakenedFraction(monster.Health, HEALTH_TUNING)
+    glow.FillTransparency = full + (weakened - full) * fraction
+
+   Matches Step 4.1 exactly. See config-and-math-check.txt for this formula evaluated with live
+   Config values via the real pure module.
+
+3) `npm run test:unit` (already reported to the coordinator as green): tests/monster-health.test.
+   luau, 243/243 checks, covers weakenedFraction/apply/isWeakened over the pure module in
+   isolation. This is the strongest evidence for the MATH, independent of anything in Studio.
+
+4) A real, already-identified defect independently re-confirmed while reading this file for other
+   reasons (coordinator states exploit-auditor found this first and it is being fixed —
+   reproduced here only as a file:line cross-check, not a new finding):
+
+   MonsterService.luau:1241-1243:
+
+       local function onPlayerRemoving(player: Player)
+           monsters[player.UserId] = nil
+       end
+
+   This drops the `monsters[userId]` entry — including its `ExposedGlow` Highlight reference —
+   without calling `clearExposed(player.UserId)` first. Contrast with the CORRECT pattern six
+   lines above it, MonsterService.luau:1228-1230 (`onPlayerAdded`'s `CharacterRemoving` handler),
+   which does call `clearExposed(player.UserId)`. Consequence traced from the code: a disconnecting
+   Exposed Aswang's Highlight stays parented to whatever the character becomes (a Husk per
+   RoundService's disconnect handling), and the pending expiry `task.delay` scheduled in
+   `applyExposed` (MonsterService.luau:583-596) will find `current == nil` on `monsters[userId]`
+   after this runs, and decline to destroy the glow (the guard at line 591 is
+   `if current == nil or current.ExposedGeneration ~= generation then return end`) — so neither
+   the immediate disconnect path nor the later timer ever destroys the Instance. A glowing husk
+   would persist for the rest of the round, visible to every remaining survivor, which is exactly
+   the C04/C14 failure shape this file's own header (MonsterService.luau:1161-1166) warns against
+   two hundred lines earlier for the phase-change path — the same class of bug the phase-change
+   path was written to avoid slipped back in on the disconnect path. Not verified live (no second
+   client to disconnect while Exposed); this is a static trace only, offered as corroboration of
+   the coordinator's report, not as new evidence.

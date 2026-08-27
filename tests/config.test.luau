@@ -161,6 +161,71 @@ check(
 	`KillCooldown={Config.Monster.KillCooldown}, StunDuration={Config.Salt.StunDuration}`
 )
 
+--[[
+	§6.5 INVARIANT 1 (V05, §4.6). THE SECOND WIN CONDITION, AND IT HAS NO SYMPTOM.
+
+	"Land three salt hits, then land the buntot pagi during a reveal window. They have four pouches,
+	so exactly one may miss." That sentence is four numbers in three Config blocks, and it was a
+	comment in two of them and an assertion in none until this chunk.
+
+	IT IS SATISFIED WITH ZERO MARGIN at the shipped values — 25 x 3 = 75 = 100 - 25 — which is what
+	makes it dangerous rather than decorative. Raise MaxHealth, lower WeakenedThreshold, soften
+	SaltDamage or cut a pouch and survivors can no longer reach `Weakened` after one miss. The game
+	does not get harder in any visible way; the Aswang simply stops being killable, and that reads as
+	a balance opinion rather than as a broken win condition.
+
+	THE `- 1` IS THE MISS. Removing it is the tempting simplification and it is the bug: it asserts
+	that survivors win only if every single throw connects.
+]]
+check(
+	"survivors can still weaken the Aswang after one missed throw",
+	Config.Items.SaltDamage * (Config.Items.SaltSpawnCount - 1)
+		>= Config.Monster.MaxHealth - Config.Monster.WeakenedThreshold,
+	`SaltDamage={Config.Items.SaltDamage}, SaltSpawnCount={Config.Items.SaltSpawnCount}, `
+		.. `MaxHealth={Config.Monster.MaxHealth}, WeakenedThreshold={Config.Monster.WeakenedThreshold}`
+)
+
+--[[
+	THE FEED IS A SETBACK, NOT A RESET (§4.6). "Every kill the Aswang makes heals away one salt hit"
+	— ONE. A FeedHeal above SaltDamage means each kill undoes more than a pouch, and since there are
+	four pouches and no recharge, the tug-of-war stops being a tug-of-war and becomes arithmetic the
+	survivors lose by construction.
+]]
+check(
+	"a feed heals away no more than one salt hit",
+	Config.Monster.FeedHeal <= Config.Items.SaltDamage,
+	`FeedHeal={Config.Monster.FeedHeal}, SaltDamage={Config.Items.SaltDamage}`
+)
+
+-- V05, §4.6. The glow is the ONLY presentation of health, so its direction is the mechanic. Lower
+-- transparency is brighter; inverting these two makes a dying Aswang FADE, which is exactly
+-- backwards, entirely silent, and findable only by playing it while counting salt hits.
+check(
+	"the Exposed glow brightens as the Aswang weakens",
+	Config.Monster.ExposedGlowTransparencyWeakened < Config.Monster.ExposedGlowTransparencyFull,
+	`Weakened={Config.Monster.ExposedGlowTransparencyWeakened}, `
+		.. `Full={Config.Monster.ExposedGlowTransparencyFull}`
+)
+
+-- A Highlight's FillTransparency is 0..1. Outside it the property clamps silently and the ramp
+-- flattens at one end, which looks like "the glow stopped changing" rather than like a bad number.
+check(
+	"both glow endpoints are legal transparencies",
+	Config.Monster.ExposedGlowTransparencyWeakened >= 0
+		and Config.Monster.ExposedGlowTransparencyFull <= 1,
+	`Weakened={Config.Monster.ExposedGlowTransparencyWeakened}, `
+		.. `Full={Config.Monster.ExposedGlowTransparencyFull}`
+)
+
+-- V05, §4.6. The ramp needs a span to interpolate across, and `Weakened` needs to be a state a
+-- healthy monster is not in. Equal values make every Aswang permanently weakened from the first
+-- frame of the round; an inverted pair makes it permanently weakened AND unfloorable.
+check(
+	"there is room between full health and weakened",
+	Config.Monster.WeakenedThreshold < Config.Monster.MaxHealth,
+	`WeakenedThreshold={Config.Monster.WeakenedThreshold}, MaxHealth={Config.Monster.MaxHealth}`
+)
+
 -- Spec §4.1: total cycle ≈ 7.5 min, and §2 demands "under 8 minutes, back in within 30 seconds".
 local cycle = Config.Round.Intermission
 	+ Config.Round.StartingDelay

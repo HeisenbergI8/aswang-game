@@ -16,6 +16,35 @@
 
 	WHAT THIS SERVICE DOES NOT SEND
 	-------------------------------
+
+	V05 ADDS A NUMBER AND SENDS NOTHING. The Aswang's health is a field on the server-only `monsters`
+	table and it has no remote, no attribute, no tag and no field on any payload. §6.2: "the Aswang's
+	health is server-only state, readable by others only while `Exposed`." The one channel it uses is
+	the brightness of a Highlight that EXISTS only during the Exposed window — so the permission and
+	the mechanism are the same fact, and there is no state in which the readout outlives the licence.
+
+	IT IS NOT ON THE HUMANOID, AND THAT IS THE WHOLE POINT. `Humanoid.Health` and `Humanoid.MaxHealth`
+	replicate. One character reading 75 while four read 100 is a permanent, map-wide, remote-free role
+	oracle — the same shape as C04's revert bug and C14's WalkSpeed brand, both of which shipped with
+	`verify` and `check:secrecy` green over them. See `.claude/lessons/absence-is-observable.md`: the
+	leak is a DIFFERENCE between players, not a piece of data.
+
+	THE FOUR SEAMS THE NEXT THREE CHUNKS CALL, so nobody has to guess which one to reach for:
+
+	  · `ApplySaltHit(player)` — V08. Revert, -SaltDamage floored at WeakenedThreshold, Exposed for
+	    SaltRevealDuration. The ONLY entry point for a salt hit; there is no bare `ForceRevert` any
+	    more, precisely so a caller cannot revert without damaging.
+	  · `HealFromFeed(userId) -> boolean` — V06, on a COMPLETED feed. Returns whether state existed,
+	    never the health. Does not restore camouflage; that is V07's half of §4.3's reward.
+	  · `IsExposed(userId) -> boolean` — V08's strike gate, half one.
+	  · `IsWeakened(userId) -> boolean` — V08's strike gate, half two. §4.6: the buntot pagi kills an
+	    Aswang that is BOTH. AND them with `RoundService.GetAswangUserId()` on the server and hand a
+	    single boolean to the pure module, exactly as `ItemService` does for `IsTransformed`.
+
+	NONE OF THE FOUR ENUMERATES, and none returns the health value. Every one takes a UserId the
+	caller already holds and answers false for a player with no monster state — which is every
+	survivor, every round, so none of them is usable as a probe.
+
 	`MonsterTransformed` carries a Character and a boolean. It does NOT carry a role: "this character
 	transformed" is a fact about the world; "this player is the Aswang" is an inference the client is
 	welcome to make and the server never states. The distinction becomes load-bearing at C14, where
@@ -59,11 +88,31 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
 local KillValidation = require(Shared.pure.KillValidation)
+local MonsterHealth = require(Shared.pure.MonsterHealth)
 local Remotes = require(Shared.Remotes)
 local TransformRules = require(Shared.pure.TransformRules)
 local Types = require(Shared.Types)
 
 local MonsterService = {}
+
+--[[
+	THE HEALTH TUNING (V05, §4.6), ASSEMBLED ONCE FROM TWO CONFIG BLOCKS.
+
+	`MaxHealth`, `WeakenedThreshold` and `FeedHeal` live under `Config.Monster`; `SaltDamage` lives
+	under `Config.Items`, which is §6.5's canonical item block and where V02 put the four salt
+	numbers. `pure/MonsterHealth` takes one table rather than reaching for either, so it stays a
+	function over plain numbers and `tests/monster-health.test.luau` can hand it a synthetic tuning.
+
+	READ THROUGH `Config.Items`, NOT THROUGH `Config.Salt`. The `Salt` block is a set of aliases V02
+	kept alive for five v1.3 readers (Config.luau:326-342) and it dies with the chunk that renames
+	its last one.
+]]
+local HEALTH_TUNING: MonsterHealth.Tuning = {
+	MaxHealth = Config.Monster.MaxHealth,
+	WeakenedThreshold = Config.Monster.WeakenedThreshold,
+	SaltDamage = Config.Items.SaltDamage,
+	FeedHeal = Config.Monster.FeedHeal,
+}
 
 -- One part's appearance as it was BEFORE the transform touched it. See restoreLook().
 type PartLook = {
@@ -91,6 +140,33 @@ type MonsterState = {
 	LastRevertedAt: number?, -- nil until the first revert of the round; drives the cooldown
 	BaseWalkSpeed: number?,
 	Generation: number, -- invalidates an in-flight forced revert; see revert()
+	--[[
+		THE ASWANG'S HEALTH (V05, §4.6). SERVER-ONLY, AND THIS FIELD IS THE ONLY COPY OF IT.
+
+		NOT `Humanoid.Health` AND NOT `Humanoid.MaxHealth`. Both are replicated properties: writing
+		this number onto the humanoid lets any client walk `workspace`, find the one character
+		reading 75 while four others read 100, and know the monster — permanently, for free, with no
+		remote to intercept and nothing for `check:secrecy` to see. That is the same shape as C04's
+		revert bug and C14's WalkSpeed brand, both of which shipped green (see ItemService's
+		`applyHit` header and `.claude/lessons/absence-is-observable.md`).
+
+		Not an attribute and not a tag either; both replicate to every client and there is no private
+		one.
+
+		SURVIVES A TRANSFORM CYCLE, DIES WITH THE ROUND. It is deliberately not reset by `revert()` —
+		§4.6's tug-of-war is a round-long resource, so three salt hits across three separate
+		transforms still weaken. `onPhaseChanged`'s existing `table.clear(monsters)` on the way out
+		of ACTIVE is the reset, and it is the only one.
+	]]
+	Health: number,
+	-- V05, §4.6. EXPOSED IS THE TRUTH; the Highlight below is its presentation. Two fields rather
+	-- than one because `IsExposed` is V08's strike gate and must not depend on whether an Instance
+	-- happened to survive a respawn. Every exit clears both, together, in `clearExposed`.
+	Exposed: boolean,
+	ExposedGlow: Highlight?,
+	-- The same `os.clock()` generation trick `revert()` uses, for the same reason: a second salt hit
+	-- landing during the first one's window must not have its expiry cut short by the first timer.
+	ExposedGeneration: number,
 }
 
 -- SERVER-ONLY. Keyed by UserId. Never replicated — the only thing that crosses is the broadcast.
@@ -121,6 +197,10 @@ local function stateFor(userId: number): MonsterState
 		LastRevertedAt = nil,
 		BaseWalkSpeed = nil,
 		Generation = 0,
+		Health = Config.Monster.MaxHealth,
+		Exposed = false,
+		ExposedGlow = nil,
+		ExposedGeneration = 0,
 	}
 
 	monsters[userId] = created
@@ -373,6 +453,165 @@ local function clearCorpses()
 	for _, corpse in folder:GetChildren() do
 		corpse:Destroy()
 	end
+end
+
+--------------------------------------------------------------------------------
+-- Health (V05, §4.6). The tug-of-war: salt takes it down, feeding pulls it back.
+--------------------------------------------------------------------------------
+
+--[[
+	THE GLOW'S BRIGHTNESS IS THE HEALTH READOUT (§4.6). "The intended presentation is diegetic and
+	needs no UI at all: the glow gets brighter as it weakens."
+
+	THIS IS THE ONE CHANNEL HEALTH IS ALLOWED TO USE, and it is legal for a reason that is structural
+	rather than permitted: §6.2 says health is "readable by others only while `Exposed`", and this
+	Highlight EXISTS only while Exposed. There is no arrangement in which it publishes health outside
+	the window, because outside the window there is no instance to read.
+
+	THE COLOURS STAY UNDER `Config.Salt` and the RAMP under `Config.Monster`, which is not an
+	oversight: salt paints the glow, health decides how bright it burns. See Config.luau's comment on
+	`ExposedGlowTransparency*`.
+
+	DECLARED ABOVE `applyHealthEvent` BECAUSE THAT FUNCTION CALLS IT. Lua resolves a `local function`
+	only from its declaration onward, so the reverse order made this a nil GLOBAL — a runtime error on
+	the first salt hit, which `analyze` caught and no test would have.
+]]
+local function refreshExposedGlow(monster: MonsterState)
+	local glow = monster.ExposedGlow
+
+	if glow == nil then
+		return
+	end
+
+	local full = Config.Monster.ExposedGlowTransparencyFull
+	local weakened = Config.Monster.ExposedGlowTransparencyWeakened
+	local fraction = MonsterHealth.weakenedFraction(monster.Health, HEALTH_TUNING)
+
+	glow.FillTransparency = full + (weakened - full) * fraction
+end
+
+--[[
+	APPLY ONE HEALTH EVENT TO A PLAYER'S SERVER STATE. Returns true if the state existed.
+
+	READ, DO NOT CONSTRUCT — `stateFor` here would re-insert a departed player's UserId every time a
+	stale timer fired, which is the exact bug `revert()`'s first line was written to avoid. Every
+	caller reaches this function only after the server has already established that this player is a
+	transformed Aswang, so the entry exists; a missing entry means the round moved on and the answer
+	is to do nothing.
+
+	IT RETURNS A BOOLEAN AND NEVER THE HEALTH. The value has exactly one home (see MonsterState) and
+	handing it back is how a second copy starts existing — in a payload, in a log line, in an
+	attribute somebody added to debug it. Callers that need a decision ask `IsWeakened`.
+
+	THE FLOOR IS NOT ENFORCED HERE. `MonsterHealth.apply` owns it, gated on
+	`lune run tests/monster-health.test.luau`, so there is one implementation of §4.6's most
+	consequential rule and it is the tested one.
+]]
+local function applyHealthEvent(userId: number, event: MonsterHealth.HealthEvent): boolean
+	local monster: MonsterState? = monsters[userId]
+
+	if monster == nil then
+		return false
+	end
+
+	monster.Health = MonsterHealth.apply(monster.Health, event, HEALTH_TUNING)
+
+	--[[
+		AND REPAINT THE GLOW, because the brightness IS the health readout and a stale one is a lie.
+
+		Every health change goes through here, so this is the one place that cannot be forgotten.
+		`ApplySaltHit` would work without it — it calls `applyExposed`, which repaints on the way in —
+		but V06's `HealFromFeed` will not: a feed completed inside a live Exposed window would restore
+		25 health and leave the glow reading the pre-feed value for the rest of the ten seconds.
+		Survivors would see a monster that looks one hit from death and is not.
+
+		`refreshExposedGlow` early-returns when there is no glow, so this costs a nil check on every
+		non-Exposed health change and nothing else.
+	]]
+	refreshExposedGlow(monster)
+
+	return true
+end
+
+--[[
+	END THE EXPOSED WINDOW. Idempotent, and safe to call for a player who was never exposed.
+
+	THE BOOLEAN AND THE INSTANCE ALWAYS DIE TOGETHER. A `clearExposed` that destroyed the glow and
+	left `Exposed = true` would leave V08 able to kill a monster nobody can see glowing; one that did
+	the reverse would leave a permanent mark on one character in the workspace, which is the C04/C14
+	failure exactly.
+]]
+local function clearExposed(userId: number)
+	local monster: MonsterState? = monsters[userId]
+
+	if monster == nil then
+		return
+	end
+
+	local glow = monster.ExposedGlow
+
+	monster.Exposed = false
+	monster.ExposedGlow = nil
+
+	if glow ~= nil then
+		glow:Destroy()
+	end
+end
+
+--[[
+	BEGIN THE EXPOSED WINDOW (§4.6): "a hit forces the revert, applies a visible glow for 10s".
+
+	Moved here from `ItemService.applyReveal` at V05 with its reasoning intact, because the
+	brightness is now a function of health. A Highlight AND NOT: an attribute (replicates, and
+	`check:secrecy` refuses role-named ones for exactly this reason), a CollectionService tag (same),
+	a name colour (`TeamColor` and `Team` both replicate and are the classic version of this
+	mistake), or a per-client effect (a "hidden" reveal is one a compromised client reads and an
+	honest one does not — the worst of both).
+
+	`DepthMode = Occluded` IS A DESIGN DECISION HIDING IN AN ENUM VALUE. `AlwaysOnTop` renders the
+	glow THROUGH WALLS, turning a ten-second reveal into a ten-second wallhack on the monster.
+
+	NOTHING HERE IS NAMED FOR A ROLE, and there is no role in this call chain to name: the decision
+	that this player was a transformed Aswang was made and discarded back in `ItemService`'s
+	`resolveThrow`.
+]]
+local function applyExposed(player: Player)
+	local monster: MonsterState? = monsters[player.UserId]
+	local character = player.Character
+
+	if monster == nil or character == nil then
+		return
+	end
+
+	clearExposed(player.UserId)
+
+	local glow = Instance.new("Highlight")
+	local generation = os.clock()
+
+	glow.Name = "SaltReveal"
+	glow.FillColor = rgb(Config.Salt.RevealGlowFillRgb)
+	glow.OutlineColor = rgb(Config.Salt.RevealGlowOutlineRgb)
+	glow.DepthMode = Enum.HighlightDepthMode.Occluded
+	glow.Parent = character
+
+	monster.Exposed = true
+	monster.ExposedGlow = glow
+	monster.ExposedGeneration = generation
+
+	refreshExposedGlow(monster)
+
+	task.delay(Config.Items.SaltRevealDuration, function()
+		local current: MonsterState? = monsters[player.UserId]
+
+		-- A NEW ENTRY OR A NEWER HIT BOTH DECLINE. `table.clear(monsters)` on the way out of ACTIVE
+		-- can drop this player's state entirely and `stateFor` can rebuild it next round with
+		-- `ExposedGeneration = 0`, which no live generation ever equals.
+		if current == nil or current.ExposedGeneration ~= generation then
+			return
+		end
+
+		clearExposed(player.UserId)
+	end)
 end
 
 --------------------------------------------------------------------------------
@@ -933,6 +1172,27 @@ local function onPhaseChanged(phase: Types.RoundPhase)
 		if player ~= nil then
 			revert(player)
 		end
+
+		--[[
+			AND EVERY EXPOSED WINDOW (V05, §4.6), BEFORE `table.clear` BELOW DROPS THE HANDLE.
+
+			`table.clear(monsters)` on its own would orphan the Highlight: the state that knows the
+			instance is gone, the instance is still parented to a living character, and nothing will
+			ever destroy it. A player hit at second 419 of a 420-second round would then glow in the
+			lobby permanently — where the glow is no longer an event anybody witnessed and is simply
+			a mark on one of the five people standing there.
+
+			CLEARED ON `ENDING` TOO, not just on INTERMISSION/IDLE. The split that keeps corpses
+			through ENDING (see above) is about scenery; this is about a mark on a player, and §4.8
+			calls the end screen "the screenshot people share".
+
+			This clear runs for a player still PRESENT but not yet reverted; it does NOT cover a
+			player who has already left, because `onPlayerRemoving` removed them from `monsters`
+			before this loop could see them. That exit is closed in `onPlayerRemoving` itself, which
+			calls `clearExposed` before nilling the entry — see the comment there for what nilling
+			alone leaves behind.
+		]]
+		clearExposed(userId)
 	end
 
 	table.clear(monsters)
@@ -963,9 +1223,29 @@ local function watchCharacter(player: Player, character: Model)
 	end)
 end
 
+--[[
+	THE GLOWING CORPSE, closed here rather than left to the ten-second timer. Moved from
+	`ItemService`'s `PlayerAdded` handler at V05, with its reasoning, because the Highlight moved.
+
+	`makeCorpse` DETACHES the victim's character and keeps it in the workspace for `CorpseDuration`.
+	A Highlight parented to that character goes with it — so a player revealed by salt and then
+	killed leaves a glowing body lying in the Barrio, which reads to every passer-by as "this corpse
+	was the monster". The reveal is supposed to be an event that expires, not a label on a body.
+
+	The Aswang cannot be killed, so the reachable paths are a reset or a fall while revealed. Cheap
+	to close and ugly if it ever shows up in a playtest video.
+
+	NOT FOLDED INTO `revert()`. A revert and an expiry are different events: §4.6 gives the glow ten
+	seconds and the revert is instant, so a revert that also cleared the glow would delete nine of
+	those seconds and with them the window the buntot pagi needs.
+]]
 local function onPlayerAdded(player: Player)
 	player.CharacterAdded:Connect(function(character: Model)
 		watchCharacter(player, character)
+	end)
+
+	player.CharacterRemoving:Connect(function()
+		clearExposed(player.UserId)
 	end)
 
 	-- RoundService turns CharacterAutoLoads off and loads explicitly (Step 1.4), so a character can
@@ -977,7 +1257,30 @@ local function onPlayerAdded(player: Player)
 	end
 end
 
+--[[
+	CLEAR THE GLOW BEFORE DROPPING THE HANDLE, and the order is the whole point.
+
+	V05 shipped this as a bare nil on the reasoning that "the entry goes and the health goes with it",
+	which is true of the NUMBER and false of the INSTANCE. `clearExposed` destroys the Highlight it
+	holds; nilling the entry only forgets it. An exploit audit traced what that leaves:
+	`RoundService.onPlayerRemoving` reparents the departing character into `workspace.Husks` as
+	`Husk_{userId}` WITH THE GLOW STILL ON IT, and MonsterService is index 29 in SERVICE_ORDER while
+	RoundService starts last — so this handler runs FIRST and the husk is built after the handle is
+	already gone. All four exits then miss it: the phase-change loop iterates `monsters`, which no
+	longer contains the UserId, and the ten-second timer reads a nil entry and declines.
+
+	The result is a labelled, glowing body naming the round's Aswang, standing in the barrio for the
+	whole of ENDING. Masked today only because an Aswang leaving ACTIVE aborts the round — a mask
+	owned by a different service, which V08's strike gate or any second source of exposure removes
+	without touching this file.
+
+	This is `.claude/lessons/absence-is-observable.md` in the direction the lesson does not spell out:
+	the leak is not the health value, it is one character in `workspace` carrying an instance no other
+	character has.
+]]
 local function onPlayerRemoving(player: Player)
+	clearExposed(player.UserId)
+
 	monsters[player.UserId] = nil
 end
 
@@ -1004,22 +1307,107 @@ function MonsterService.IsTransformed(userId: number): boolean
 end
 
 --[[
-	Salt forces a revert (§4.6, C14). A thin wrapper over the private `revert`, and thin ON PURPOSE.
+	IS THIS PLAYER AT OR BELOW `WeakenedThreshold`? (V05, §4.6) One half of V08's strike gate.
 
-	Everything C14 needs from a revert already happens in there: the generation bump that invalidates
-	the in-flight forced-revert timer, the Announced gate that stops a mid-windup revert broadcasting a
-	transform nobody saw, the LastRevertedAt stamp that charges the kill cooldown, and the look
-	restoration that resolves `AppliedTo` rather than `player.Character`. A second implementation in
-	ItemService would have to get all four right and would silently get at least one wrong — C04's own
-	audit found the revert restoring hardcoded defaults instead of captured state, which is precisely
-	the class of bug a duplicate path reintroduces.
+	§4.6: the buntot pagi "kills only an Aswang that is both Exposed (glowing from a salt hit) and
+	Weakened (at or below 25 health). Against anything else it does nothing." V08 ANDs this with
+	`IsExposed` and with `RoundService.GetAswangUserId()`, exactly as `ItemService` already ANDs
+	`IsTransformed` with the role before handing a single boolean to a pure module — so the role
+	never enters the pure layer at all.
+
+	A PLAYER WITH NO MONSTER STATE IS NOT WEAKENED, and that is the safe direction twice over: a
+	survivor was never salted, and an Aswang who has not transformed this round has full health. It
+	is also the one that cannot be used as a probe — `false` is what every one of the five players
+	returns until somebody lands a salt hit.
+
+	`Weakened` IS A PREDICATE, NOT A `MonsterState` MEMBER, and `Enums.luau:69-71` says why: "it is a
+	HEALTH PREDICATE — `health <= Config.Monster.WeakenedThreshold` — not a state, and duplicating it
+	as an enum member is how two sources of truth for one fact get out of step." Do not add
+	`Enums.MonsterState.Weakened`.
+]]
+function MonsterService.IsWeakened(userId: number): boolean
+	local monster: MonsterState? = monsters[userId]
+
+	if monster == nil then
+		return false
+	end
+
+	return MonsterHealth.isWeakened(monster.Health, HEALTH_TUNING)
+end
+
+--[[
+	FEEDING RESTORES HEALTH (V06, §4.3/§4.6). The seam, declared here and UNWIRED BY V05.
+
+	§4.6: "every kill the Aswang makes heals away one salt hit. That is the tug-of-war the whole
+	design turns on." V06 builds the five-second locked feed, validates the corpse, the distance and
+	the phase through `pure/FeedRules`, and calls this on completion. V05 owns the number; V06 owns
+	the ritual.
+
+	NOT A ROLE QUERY AND NOT AN ENUMERATION, on the same terms as `IsTransformed` above: the caller
+	must already hold a UserId it got from somewhere else, and a player with no monster state gets
+	`false` rather than an entry created for them.
+
+	CAMOUFLAGE IS NOT RESTORED HERE. §4.3 gives a completed feed two rewards — the heal and the
+	camouflage refresh — and V07 owns the second. Splitting them is deliberate: `MonsterService`
+	should not grow a charge it cannot yet spend.
+]]
+function MonsterService.HealFromFeed(userId: number): boolean
+	return applyHealthEvent(userId, "FEED")
+end
+
+--[[
+	A SALT HIT (§4.6, V05). Revert, damage, expose — in that order, and the order is the whole
+	correctness of this function.
+
+	IT SHIPPED WRONG ONCE, IN THE OTHER SERVICE, AND AN EXPLOIT AUDIT CAUGHT IT. `ItemService`'s
+	first version ran its stun before the revert, so `revert()` wrote `BaseWalkSpeed` (16) over the
+	stun's 0 in the same frame — the stun never happened — and four seconds later the stun restored
+	the captured TRANSFORMED speed (20) onto a player who was no longer transformed. `WalkSpeed` is
+	a replicated property, so any client could poll every character and find the single one reading
+	20: a permanent role brand, readable map-wide, with `check:secrecy` green over it. The full story
+	is in `ItemService.applyHit`'s header, and the invariant it wrote binds this function too: NO
+	PATH ADDED HERE MAY LEAVE A LIVING PLAYER'S HUMANOID PROPERTIES DIFFERENT FROM EVERY OTHER
+	LIVING PLAYER'S.
+
+	DAMAGE BEFORE EXPOSE, so the glow's first frame already reads the new health. Exposing first and
+	damaging after gives one frame at the old brightness, which is not a leak but is a lie.
+
+	THE REVERT IS `revert()` AND NOT A REIMPLEMENTATION. Everything the salt path needs already
+	happens in there: the generation bump that invalidates the in-flight forced-revert timer, the
+	`Announced` gate that stops a mid-windup revert broadcasting a transform nobody saw, the
+	`LastRevertedAt` stamp that charges the kill cooldown, and the look restoration that resolves
+	`AppliedTo` rather than `player.Character`. C04's audit found a second implementation getting the
+	last of those four wrong.
 
 	NO GUARD ON WHO CALLS THIS, deliberately: `revert` early-returns for a player who is not
-	transformed, so a mistaken call is a no-op rather than a state change. The validation that a hit
-	happened at all lives in ItemService, next to the request that claimed it.
+	transformed, `applyHealthEvent` returns false for a player with no state, and `applyExposed`
+	does nothing without one. A mistaken call is a no-op rather than a state change. The validation
+	that a hit happened at all lives in `ItemService`, next to the request that claimed it.
+
+	DELIBERATELY NOT A KILL AND NOT A `MarkKilled`: §4.6 is counterplay, not a win condition. Salt
+	never ends a round, which is why `MonsterHealth.apply` floors it at `WeakenedThreshold`.
 ]]
-function MonsterService.ForceRevert(player: Player)
+function MonsterService.ApplySaltHit(player: Player)
 	revert(player)
+	applyHealthEvent(player.UserId, "SALT")
+	applyExposed(player)
+end
+
+--[[
+	IS THIS PLAYER INSIDE THE EXPOSED WINDOW? (V05, §4.6) The other half of V08's strike gate.
+
+	SAFE TO EXPOSE FOR THE SAME REASON `IsTransformed` IS: being Exposed is ALREADY PUBLIC — there is
+	a Highlight on that character that every client with line of sight can see, which is the entire
+	point of §4.6's reveal. This function states nothing a player standing there cannot see, it never
+	enumerates, and the caller must already hold a UserId it got from somewhere else.
+
+	A PLAYER WITH NO MONSTER STATE IS NOT EXPOSED — false for every survivor, every round, so it is
+	useless as a probe.
+]]
+function MonsterService.IsExposed(userId: number): boolean
+	local monster: MonsterState? = monsters[userId]
+
+	return monster ~= nil and monster.Exposed
 end
 
 --[[

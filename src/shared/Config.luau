@@ -260,6 +260,25 @@ local Config = {
 		WeakenedThreshold = 25,
 
 		--[[
+			THE EXPOSED GLOW'S RAMP (§4.6) — "the glow gets brighter as it weakens", and this is the
+			whole presentation of the health system. §4.6 is explicit that there is no UI: "a health
+			value attached to a player is the reveal", so the number is never drawn, never sent, and
+			never attached to anything. It is READ OFF THE BRIGHTNESS by whoever is standing there,
+			during the ten seconds the monster is Exposed and not one second longer.
+
+			TRANSPARENCY, SO LOWER IS BRIGHTER. Full lerps to Weakened as `MonsterHealth
+			.weakenedFraction` goes 0 -> 1. `tests/config.test.luau` pins Weakened BELOW Full,
+			because inverting these two is a one-character edit that makes a dying monster fade —
+			exactly backwards, entirely silent, and only findable by playing it.
+
+			THE COLOURS ARE NOT HERE. `Salt.RevealGlowFillRgb`/`OutlineRgb` stay where they are: the
+			colour belongs to the item that paints the glow, the RAMP belongs to the health it reads.
+			Do not merge them — a tuner opening this block is tuning health, not salt.
+		]]
+		ExposedGlowTransparencyFull = 0.75,
+		ExposedGlowTransparencyWeakened = 0.25,
+
+		--[[
 			FEEDING (§4.3) — WHAT REPLACED THE KILL COOLDOWN, and the design's most deliberate window.
 
 			After a kill the Aswang must feed on the corpse, transformed and locked in place, for

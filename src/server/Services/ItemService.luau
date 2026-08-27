@@ -409,79 +409,17 @@ local function applyStun(player: Player)
 	end)
 end
 
--- Highlights this service created, keyed by UserId, with the same generation trick the stun uses.
-type RevealState = {
-	Instance: Highlight,
-	Generation: number,
-}
-
-local reveals: { [number]: RevealState } = {}
-
-local function clearReveal(userId: number)
-	local state = reveals[userId]
-
-	if state == nil then
-		return
-	end
-
-	reveals[userId] = nil
-	state.Instance:Destroy()
-end
-
---[[
-	THE REVEAL (§4.6, C14). A Highlight on a character, for RevealDuration, visible to everyone.
-
-	A Highlight AND NOT: an attribute (replicates, and `check:secrecy` refuses role-named ones for
-	exactly this reason), a CollectionService tag (same), a name colour (`TeamColor` and `Team` both
-	replicate and are the classic version of this mistake), or a per-client effect (a "hidden" reveal
-	is a reveal that a compromised client reads and an honest one does not — the worst of both).
-
-	It is parented to the CHARACTER, not to the player, and the state table holds the instance rather
-	than the character — so a respawn cannot leave an orphan behind and cannot brand a fresh body.
-
-	NOTHING HERE IS NAMED FOR A ROLE. The instance is `SaltReveal`, the colours are
-	`Config.Salt.RevealGlow*Rgb`, and neither `check:secrecy`'s SECRET regex nor a human reader finds a
-	role in this code — because there is not one. The server never learns of a role at this point in
-	the call chain either: `applyHit` receives a Player, and the decision that this Player was a
-	transformed Aswang was made and discarded back in `resolveThrow`.
-
-	`DepthMode = Occluded` is a design decision hiding in an enum value. `AlwaysOnTop` would render the
-	glow THROUGH WALLS, turning a ten-second reveal into a ten-second wallhack on the monster.
-]]
-local function applyReveal(target: Player)
-	local character = target.Character
-
-	if character == nil then
-		return
-	end
-
-	clearReveal(target.UserId)
-
-	local highlight = Instance.new("Highlight")
-	local generation = os.clock()
-
-	highlight.Name = "SaltReveal"
-	highlight.FillColor = rgb(Config.Salt.RevealGlowFillRgb)
-	highlight.OutlineColor = rgb(Config.Salt.RevealGlowOutlineRgb)
-	highlight.FillTransparency = 0.6 -- config-ok: the glow's own opacity, tuned by eye at C34
-	highlight.DepthMode = Enum.HighlightDepthMode.Occluded
-	highlight.Parent = character
-
-	reveals[target.UserId] = { Instance = highlight, Generation = generation }
-
-	task.delay(Config.Salt.RevealDuration, function()
-		local current = reveals[target.UserId]
-
-		if current == nil or current.Generation ~= generation then
-			return
-		end
-
-		clearReveal(target.UserId)
-	end)
-end
-
 --[[
 	A SALT HIT: revert FIRST, then stun, then reveal.
+
+	V05 MOVED THE REVERT AND THE REVEAL INTO `MonsterService.ApplySaltHit`, because §4.6's reveal now
+	carries the health readout — the glow brightens as the Aswang weakens — and health is server
+	state that has exactly one home. What stays here is the STUN, which is salt's alone.
+
+	THE ORDERING RULE SURVIVES THE MOVE UNCHANGED AND IS THE WHOLE CORRECTNESS OF THIS FUNCTION.
+	`ApplySaltHit` reverts first; `applyStun` therefore captures the HONEST post-revert speed. The
+	first version of this file ran the stun before the revert and produced a permanent, map-readable
+	role brand — the story is below and it is worth reading before reordering these two lines.
 
 	THE ORDER IS THE WHOLE CORRECTNESS OF THIS FUNCTION AND IT SHIPPED WRONG ONCE. The first version
 	ran `applyStun` before `ForceRevert`, on the reasoning that capturing before the revert preserved
@@ -508,20 +446,14 @@ end
 	ends a round.
 ]]
 local function applyHit(target: Player)
-	MonsterService.ForceRevert(target)
+	MonsterService.ApplySaltHit(target)
 	applyStun(target)
-	applyReveal(target)
 end
 
--- EVERY reveal and EVERY stun ends when the round does. Called from onPhaseChanged beside
--- clearPouches, and this is the exit that actually matters: without it a player hit at second 419 of a
--- 420-second round is still glowing in the lobby, where the glow is no longer an event that anybody
--- witnessed and is simply a mark on one of the eight people standing there.
+-- EVERY stun ends when the round does. Called from onPhaseChanged beside clearPouches. The REVEAL's
+-- half of this moved to `MonsterService.onPhaseChanged` at V05 along with the Highlight; the reason
+-- it exists is repeated there, because it is the exit that actually matters.
 local function clearAllEffects()
-	for userId in reveals do
-		clearReveal(userId)
-	end
-
 	for userId in stunned do
 		local player = Players:GetPlayerByUserId(userId)
 
@@ -708,30 +640,10 @@ function ItemService.Start()
 	Players.PlayerRemoving:Connect(function(player: Player)
 		carried[player.UserId] = nil
 
-		-- Both effect tables too, or a disconnect mid-stun leaves an entry pointing at a destroyed
-		-- character and a Highlight this service still believes it owns. `clearReveal` destroys the
-		-- instance it holds rather than looking it up through the character, so it works after the
-		-- character is gone; `stunned` is dropped directly because there is no humanoid left to restore.
-		clearReveal(player.UserId)
+		-- `stunned` is dropped directly because there is no humanoid left to restore. The reveal's
+		-- half of this is `MonsterService.onPlayerRemoving`, which since V05 calls `clearExposed`
+		-- BEFORE nilling the entry — nilling alone orphans the Highlight onto the husk.
 		stunned[player.UserId] = nil
-	end)
-
-	--[[
-		THE GLOWING CORPSE, closed here rather than left to the timer.
-
-		`MonsterService.makeCorpse` DETACHES the victim's character and keeps it in the workspace for
-		`CorpseDuration`. A Highlight parented to that character goes with it — so a player revealed by
-		salt and then killed leaves a glowing body lying in the Barrio, which reads to every passer-by
-		as "this corpse was the monster". The reveal is supposed to be an event that expires, not a
-		label on a body.
-
-		The Aswang cannot be killed, so the reachable paths are a reset or a fall while revealed. Cheap
-		to close and ugly if it ever shows up in a playtest video.
-	]]
-	Players.PlayerAdded:Connect(function(player: Player)
-		player.CharacterRemoving:Connect(function()
-			clearReveal(player.UserId)
-		end)
 	end)
 
 	--[[

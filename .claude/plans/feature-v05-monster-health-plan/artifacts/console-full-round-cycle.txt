@@ -1,0 +1,257 @@
+Source: mcp__Roblox_Studio__get_console_output, Studio instance ab384d6d-f33b-419a-bb40-4a49c27fa039
+(aswang.rbxl), captured live during Play mode, 2026-08-27.
+
+Config in effect (confirmed live, see config-values-live-studio.txt):
+  Round.Intermission=8, Duration=20, EndScreen=6, Debug.SoloTesting=true,
+  Debug.VerboseLogging=true, Debug.ForceAswangWhenSolo=true.
+
+Purpose: confirm a full round cycle runs with no error, and specifically that the phase-change
+state clear (`table.clear(monsters)` in MonsterService.onPhaseChanged) does not error against
+anything scheduled while a player was Exposed.
+
+Caveat up front: no real ApplySaltHit landed during this capture (see
+salt-self-target-blocked.txt), so the Exposed-specific expiry `task.delay` was never scheduled by
+the live service during these cycles. This capture proves general round-cycle stability across
+repeated ACTIVE/ENDING/INTERMISSION/STARTING transitions and repeated transform+revert, not the
+Exposed-glow expiry path specifically.
+
+Full raw console output, one continuous capture spanning 9 rounds (round #0 through round #9 in
+progress), transcribed verbatim:
+
+[ProfileStore]: Roblox API services unavailable - data will not be saved
+[Progression] DataStoreState is "NoAccess" — NOTHING WILL PERSIST. In Studio: Game Settings > Security > Enable Studio Access to API Services, and the place must be published.
+[Badges] 5 of 5 badge ids are unset (Welcome, FirstTask, FirstRound, FirstBlood, BalikBalik) — those badges will NOT award. Create them in the Creator Hub and put the ids in Config.Badges (C35).
+[Community] Config.Community.GroupId is 0 — the group join reward will refuse every claim. Create the Roblox group and set the id (C36).
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 17 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Progression] Demiurgos_18: CURRENT from v2 -> L1
+[Client] Ready. 10 controllers loaded.
+[AudioController] cue CUE_BED_LOBBY — bed
+[Client] Snapshot — INTERMISSION round #0 · you: LOBBY (6s left)
+[AudioController] cue CUE_FOOTSTEP — retargeted on Demiurgos_18
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #1 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +90 xp +40 coins (round) -> L1
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #1 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #1 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #2 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #2 · you: ALIVE (19s left)
+[TeachingService] cued 11461085874: CUE_FIRST_TRANSFORM_SEEN
+[Client] TRANSFORM witnessed (yours)
+[AudioController] cue CUE_TRANSFORM — at Demiurgos_18, 40 studs
+[AudioController] cue CUE_HEARTBEAT — on Demiurgos_18, 28 studs
+[Client] revert witnessed (yours)
+[AudioController] cue CUE_HEARTBEAT — stopped on Demiurgos_18
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +90 xp +40 coins (round) -> L2
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #2 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #2 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #3 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #3 · you: ALIVE (19s left)
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +90 xp +40 coins (round) -> L2
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #3 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #3 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[AudioController] cue CUE_WIND — ambient one-shot in INTERMISSION
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #4 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #4 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +90 xp +40 coins (round) -> L3
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #4 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #4 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #5 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #5 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +90 xp +40 coins (round) -> L3
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #5 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #5 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #6 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #6 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +90 xp +40 coins (round) -> L3
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #6 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #6 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[AudioController] cue CUE_WIND — ambient one-shot in INTERMISSION
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #7 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #7 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +90 xp +40 coins (round) -> L4
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #7 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #7 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #8 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #8 · you: ALIVE (19s left)
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +90 xp +40 coins (round) -> L4
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #8 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #8 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #9 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #9 · you: ALIVE (19s left)
+
+END OF CAPTURE. Zero errors, zero warnings, zero stack traces across all 9 round transitions
+(INTERMISSION -> STARTING -> ACTIVE -> ENDING -> INTERMISSION, repeated), one transform+revert
+cycle (round #2), and one manual SynthReveal Highlight left parented to the character throughout
+(see synthetic-glow-visual-check.txt) — that instance also survived every phase transition
+without generating an error, though it was never registered in `monsters` and so was never
+subject to MonsterService's own clear/expiry logic.
+
+NOT COVERED by this capture: the real `applyExposed` task.delay expiry path, because no real
+ApplySaltHit occurred (see salt-self-target-blocked.txt).

@@ -1,0 +1,40 @@
+Source: mcp__Roblox_Studio__execute_luau, datamodel_type=Edit and Server, Studio instance
+ab384d6d-f33b-419a-bb40-4a49c27fa039, 2026-08-27.
+
+1) Debug values confirmed live in the synced place (Edit datamodel, requiring
+   ReplicatedStorage.Shared.Config directly):
+
+   SoloTesting=true
+   VerboseLogging=true
+   ForceAswangWhenSolo=true
+   Intermission=8
+   Duration=20
+   EndScreen=6
+   SaltRevealDuration=10
+   MaxHealth=100
+   WeakenedThreshold=25
+   ExposedGlowTransparencyFull=0.75
+   ExposedGlowTransparencyWeakened=0.25
+
+   (SaltDamage lives at Config.Items.SaltDamage = 25, not Config.Monster.SaltDamage — confirmed
+   by reading Config.luau directly; Config.Monster.SaltDamage correctly returns nil, that was my
+   own query mistake, not a config defect.)
+
+2) Ramp math, computed by requiring the REAL shared pure module
+   (ReplicatedStorage.Shared.pure.MonsterHealth.weakenedFraction) live in Studio — not
+   hand-derived — with the exact Tuning table MonsterService.luau:110-114 builds
+   (HEALTH_TUNING from Config.Monster / Config.Items):
+
+   hits=1 health=75 fraction=0.333 transparency=0.583
+   hits=2 health=50 fraction=0.667 transparency=0.417
+   hits=3 health=25 fraction=1.000 transparency=0.250
+
+   transparency = Full + (Weakened - Full) * fraction, i.e. MonsterService.luau:504-515's
+   `refreshExposedGlow`, evaluated with the live Config values above. This confirms the pure-module
+   math (already 243/243 in tests/monster-health.test.luau) produces a monotonically decreasing
+   FillTransparency (i.e. an increasingly OPAQUE / brighter glow) across three hits, using the
+   values actually shipped in this tree, not the plan's example numbers.
+
+   This is a MATH check via the real pure module, not a control-flow check of MonsterService's
+   ApplySaltHit — see salt-self-target-blocked.txt for why the control-flow path itself could not
+   be driven through real gameplay this session.

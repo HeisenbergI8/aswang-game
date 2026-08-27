@@ -1,0 +1,71 @@
+SYNTHETIC TEST — explicitly NOT a run of MonsterService.ApplySaltHit / applyExposed. This is a
+manually constructed Highlight, built with the exact property values the shipped code uses, to
+answer one narrower question: at the FillTransparency values the real math produces (see
+config-and-math-check.txt), is the brightness delta actually visible on screen? It does not
+exercise ApplySaltHit's control flow, the generation-guarded task.delay, or the real Health
+decrement — see salt-self-target-blocked.txt for why that path could not be driven for real.
+
+Environment limitation, confirmed by grep/find across the filesystem and consistent with prior
+sessions' findings (.claude/plans/c26-verification/artifacts/q4-panel-properties.txt records the
+same thing): mcp__Roblox_Studio__screen_capture renders an image inline in the tool result for
+this session to view, but there is no MCP tool or filesystem path in this environment that
+persists those bytes to disk. Write only accepts text. So the screenshots below were directly
+viewed in-session (not fabricated, not skipped, not paraphrased from a description) but cannot be
+attached as image files in artifacts/ — this text file, with the property dump that produced each
+image and a description of what was seen, is the artifact.
+
+Setup (Server datamodel, live Play-mode session, round #2+, Demiurgos_18 = the forced solo
+Aswang):
+
+    local character = Workspace.Demiurgos_18
+    local glow = Instance.new("Highlight")
+    glow.Name = "SynthReveal"
+    glow.FillColor = rgb(Config.Salt.RevealGlowFillRgb)       -- same alias ApplyExposed reads
+    glow.OutlineColor = rgb(Config.Salt.RevealGlowOutlineRgb)
+    glow.DepthMode = Enum.HighlightDepthMode.Occluded         -- matches MonsterService.luau:571
+    glow.FillTransparency = <value under test>
+    glow.Parent = character
+
+Capture 1 — capture_id "v05_synth_hit1_t0583", FillTransparency = 0.583 (the real 1-hit value).
+Camera at (-6, 4, 27.9) looking at (-10.3, 3.5, 27.9), i.e. a close 3/4 view of the character's
+back during ACTIVE, HUD visible (TRANSFORM/KILL buttons, "ASWANG / ALIVE / salt ~0" panel).
+OBSERVED: a thin, clearly visible cyan-white OUTLINE around the character's silhouette (hair,
+shoulders, arms), and a faint whitish tint over the body fill — present but subtle, consistent
+with FillTransparency 0.583 (58% see-through).
+
+Capture 2 — capture_id "v05_synth_hit2_t0417_v2", FillTransparency = 0.417 (the real 2-hit
+value), same Highlight instance updated in place, captured a short time later (an intervening
+round had ended and restarted, moving into the ENDING "SUNRISE" end-screen overlay — timing drift
+from tool-call latency against a 20s round, not a deliberate re-setup). Camera at (-16, 5, 20)
+looking at (-10.3, 3.5, 27.9). OBSERVED: the character's whole silhouette reads distinctly
+brighter/whiter than Capture 1 — the fill is now a clearly visible pale wash across the body
+rather than a faint tint, even though the shot was taken through the dim vignette of the
+end-of-round overlay, which if anything suppressed rather than exaggerated the glow.
+
+Comparison: 0.583 -> 0.417 is a visible step brighter, consistent with the direction and rough
+magnitude the real 1-hit -> 2-hit transition would produce. The 3-hit value (0.25) was not
+separately screenshotted on the live character after this point because the round had already
+cycled again by the time of the next tool call and re-establishing the exact same camera framing
+mid-transition was not achieved before this report was prioritized (see coordinator note); the
+0.25 endpoint was, however, visually checked in a separate Edit-mode test (see below) with an
+inconclusive result attributable to Edit-mode rendering, not to the value itself.
+
+Edit-mode occlusion attempt — INCONCLUSIVE, reported rather than treated as a code finding.
+After stopping Play mode, a standalone Part+Highlight (Occluded, FillTransparency 0.25) was
+placed in the open plaza area and photographed from a clear line of sight and from behind a
+constructed wall. Neither capture showed any visible fill or outline at all — including the
+"clear line of sight" shot, which should have shown the glow if Edit-mode rendered Highlights the
+way Play mode does. Since Play-mode captures (above) clearly DID show Highlight rendering on the
+same kind of object, the simplest explanation is that this Studio session's Edit-mode viewport
+capture does not composite Highlight adornments the same way the live Play-mode render does,
+rather than any defect in DepthMode.Occluded. This attempt is therefore NOT used as evidence for
+or against the through-walls question either way. Both temporary Edit-mode test instances
+(V05_SynthTestPart, V05_SynthTestWall) were destroyed immediately after, confirmed by a
+follow-up execute_luau call whose return value listed both names as removed — no leftover objects
+in the saved place.
+
+For the through-walls question itself (`DepthMode = Occluded` vs `AlwaysOnTop`), the load-bearing
+evidence is static, not this visual attempt: MonsterService.luau:571 sets
+`glow.DepthMode = Enum.HighlightDepthMode.Occluded` in the shipped file (read directly, not from
+the plan diff), matching Step 4.1's requirement exactly. The coordinator separately reports that
+exploit-auditor already confirmed this at the code level.

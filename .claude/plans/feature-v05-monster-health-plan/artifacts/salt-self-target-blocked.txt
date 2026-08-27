@@ -1,0 +1,50 @@
+Why a real ApplySaltHit could not be driven through gameplay in a solo Studio session, checked by
+reading the source rather than assumed.
+
+src/server/Services/ItemService.luau:505-560, `resolveThrow`, iterates Players:GetPlayers() to
+find a throw target:
+
+    for _, candidate in Players:GetPlayers() do
+        ...
+        if candidate == thrower or candidateRoot == nil or not candidateRoot:IsA("BasePart") then
+            continue
+        end
+        ...
+
+(ItemService.luau:528, confirmed by direct read.) A thrower can never be their own target — the
+loop skips them unconditionally, with no Config or Debug flag that relaxes it. Combined with
+`Config.Debug.ForceAswangWhenSolo` forcing the ONE player present to be the Aswang, this produces
+a genuine dead end for solo verification of the salt-hit path specifically: the only player
+present cannot be thrown at, and there is no second Player object, no NPC, no dummy and no bot
+anywhere in this codebase to stand in for one (grepped `src/server` and `src/shared/Config.luau`
+for dummy/bot/npc/fakeplayer — one unrelated comment hit, no such mechanism exists).
+
+Two further options were considered and rejected:
+
+1. Calling `MonsterService.ApplySaltHit` directly via `execute_luau` on the Server datamodel.
+   Per this repo's documented Studio limitation (`.claude/agents/playtester.md`), `execute_luau`
+   `require()`s a FRESH, un-Init()'d copy of the module with its own closure-scoped `monsters`
+   table, separate from the live server script's. Calling the fresh copy's `ApplySaltHit` would
+   look up `monsters[userId]` in a table that was never populated (Init()/Start() never ran on
+   this copy), so `applyHealthEvent` and `applyExposed` would both silently no-op (both early-return
+   on `monster == nil`, confirmed by reading MonsterService.luau:479-483 and :560-565). It would
+   look like it ran and would do nothing that touches real game state.
+
+2. Calling `Init()`/`Start()` on a fresh required copy first, to populate its own `monsters` table.
+   Rejected: `Start()` almost certainly wires `OnServerEvent`/BindableEvent connections
+   (the file's own header describes a two-phase Init/Start lifecycle at
+   src/server/init.server.luau:5-13). Since Remote/Bindable Instances are shared across require
+   caches, running Start() on a second copy risks a SECOND, permanent set of connections on the
+   live session's real RemoteEvents for the rest of this Studio run — corrupting every future test
+   in the session, not just this one. Not attempted, on the grounds that the risk of silently
+   breaking the rest of the verification run outweighs the value of one salt-hit sample.
+
+No second Studio client was driven either, per the documented limitation that player count is a
+Studio UI action (Test > Clients and Servers) this agent cannot perform.
+
+CONCLUSION: the real `MonsterService.ApplySaltHit` control-flow path — the revert-damage-expose
+sequence, the Highlight's live creation off real Health, and the generation-guarded task.delay
+expiry — was NOT exercised through real gameplay this session. This is reported as a gap, not
+inferred as a pass. See synthetic-glow-visual-check.txt for the closest available secondary
+evidence (a manually constructed Highlight using the production code's exact property values,
+which is NOT the same as exercising ApplySaltHit).
