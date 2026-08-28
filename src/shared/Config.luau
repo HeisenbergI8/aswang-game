@@ -346,6 +346,79 @@ local Config = {
 		SmokeDuration = 4,
 		SmokeRadius = 18,
 
+		--[[
+			CAMOUFLAGE (V07, §4.3) — AND THE GATE IS NOT IN THIS BLOCK, DELIBERATELY.
+
+			§4.3's rule — "camouflage is locked until the Aswang has been publicly revealed" — has no
+			number and must never acquire one. A `CamouflageRequiresReveal = true` here would be a
+			one-character edit away from deleting the deduction layer, on a line a tuner would read as
+			a balance knob during V16. The gate lives in `pure/CamouflageRules.evaluate`, where it is
+			the first branch and where 100 grid cells assert it.
+
+			WHAT IS TUNABLE IS THE COST. One charge, spent on entry, restored only by a completed feed
+			(§4.3: "once revealed, the Aswang must kill to hide"). The count is here because V16 may
+			well find that one is too punishing — but the RESTORE PATH is not a number and does not
+			appear here either.
+		]]
+		CamouflageCharges = 1,
+		--[[
+			THERE ARE NO DISGUISE-LOOK NUMBERS HERE ANY MORE, AND THAT IS THE FIX (V07, §4.3).
+
+			An earlier version tinted and scaled the Aswang's own character toward a
+			`CamouflageTintRgb` / `CamouflageAnimalScale` pair declared right here. Both replicate —
+			`src/shared` is mapped wholesale into `ReplicatedStorage` — so one loop over `Players`
+			looking for a Humanoid at scale 0.55 named the monster outright, with no exploit beyond
+			reading Config. An exploit audit found it.
+
+			The disguise is now the ambient entity itself, which was always standing in the barrio and
+			needs no numbers to look like what it already is; the player's character is simply hidden.
+			Its appearance is `Config.Ambient`'s placeholder rig, one block per form, and V15 replaces
+			that with real models.
+		]]
+		-- The windup, mirroring `TransformTime`. A hide that is instant is a hide with no counterplay:
+		-- §4.3's whole design is that risky acts are VISIBLE while they happen. Shorter than
+		-- TransformTime (1.2) because the monster is already in monster form and already revealed —
+		-- there is nothing left to hide by being slow about it.
+		CamouflageEnterTime = 0.8,
+		-- How far a survivor must be from the Aswang for it to begin hiding. Watching a player become
+		-- a pig from four studs away is not a disguise; it is a magic trick with a witness. Compare
+		-- `KillRange = 8`: the monster must be further from everyone than it could kill them from.
+		CamouflageWitnessRadius = 12,
+
+		--[[
+			SMOKE'S TWO NEW NUMBERS (V07, §4.3). The other two are above.
+
+			A COOLDOWN RATHER THAN A CHARGE, and the spec sentence is the reason: "it has one smoke
+			ability" names the ability, not a per-round use. Wiring smoke to the feed the way
+			camouflage is wired would mean a salted Aswang that has not killed recently cannot escape
+			— the death sentence §4.3 built smoke to prevent.
+
+			SmokeCueRadius IS A NETWORK NUMBER, NOT A GAMEPLAY ONE, and it is the larger of the two on
+			purpose. `SmokeBurst` is sent only to players within this radius (V07 Phase 5) — never
+			FireAllClients, for `NoiseCue`'s reason: a broadcast carrying a position is a live index of
+			where the monster is, readable by any client, and strictly more than V13's tracker will
+			ever give the survivors. Bigger than SmokeRadius so that a player at the cloud's edge sees
+			it form rather than having it appear on top of them.
+
+			IF `SmokeCueRadius` IS EVER RAISED WELL PAST VISUAL RANGE, the exact position in
+			`Types.SmokeBurstPayload` must be quantised the way `NoiseCue`'s is. The payload states no
+			more than the world does only because everyone who receives it can watch the cloud form.
+		]]
+		SmokeCooldown = 45,
+		SmokeCueRadius = 40,
+		--[[
+			THE CLOUD'S LOOK (V07, §4.3/§5). Presentation, and §5's mobile particle budget is the
+			ceiling on it — one emitter, one burst, no light. `PerformanceController` already enforces
+			the light cap; a PointLight inside smoke is the cheapest-looking and most expensive thing
+			available, so there is none and these three numbers are the whole spend.
+
+			THE COUNT IS THE ONE TO WATCH ON A PHONE. §5 puts ~60% of players on one, and a burst is
+			the only moment in a round when this game emits particles in bulk.
+		]]
+		SmokeParticleCount = 60,
+		SmokeTransparency = 0.35,
+		SmokeDriftSpeed = 2,
+
 		-- §6.5 FILES THIS UNDER `Bodies`, AND V02 LEAVES IT HERE (V02). The name does not change, so a
 		-- reader finds it either way and no alias is warranted. Moving it reds analyze —
 		-- MonsterService reads it and Types cites it. It moves with the chunk that edits MonsterService.
@@ -547,6 +620,52 @@ local Config = {
 		-- quit inside a garlic-shielded house, or fell out of the map, must not make kill-everyone
 		-- unwinnable. A husk also cannot benefit from garlic — that rule is code, not a number.
 		HuskRelocateAfter = 60,
+	},
+
+	--[[
+		AMBIENT LIFE (V07, §5) — AND THE COUNT IS THE MECHANIC, NOT THE FLAVOUR.
+
+		§5: "3-4 each of cats, dogs, pigs and villager NPCs, wandering. If there is one pig in the
+		barrio, the disguise is meaningless. They need no AI worth the name — a wander loop and an
+		idle is enough. What matters is the *count*."
+
+		SO PerForm IS A BALANCE NUMBER WITH A SECRECY FLOOR UNDER IT, and `tests/config.test.luau`
+		pins it: below 2, a camouflaged Aswang is the ONLY entity of its form once the real one has
+		wandered off, and §4.5's "It's the cat!" stops being a guess. It is the same class of silent
+		invariant as `SaltDamage x (SaltSpawnCount - 1)` — nothing in the game tells you when it has
+		been tuned away.
+
+		THE CEILING IS §5'S MOBILE BUDGET. Four forms at four each is 16 wandering models; whoever
+		builds their appearance counts them against the part and light caps `PerformanceController`
+		already enforces, and V07's are parts with no lights and no particles.
+	]]
+	Ambient = {
+		PerForm = 4,
+		--[[
+			HOW FAR AN ENTITY WANDERS FROM THE POINT IT SPAWNED AT, and it is deliberately small.
+
+			A population that roams the whole barrio ends up clustered by chance, which defeats the
+			count: four pigs in the plaza and none anywhere else means the pig standing alone by the
+			chapel is the monster. Leashing each entity near its own spawn keeps the DISTRIBUTION as
+			stable as the count.
+		]]
+		WanderRadius = 24,
+		WanderSpeed = 4,
+		-- Seconds between retargets, and the pause an entity takes on arrival. §5's "a wander loop and
+		-- an idle is enough", in two numbers.
+		WanderInterval = 6,
+		IdleSeconds = 3,
+		--[[
+			THE FALLBACK SCATTER, used ONLY when the map provides no `AmbientSpawn`-tagged points.
+
+			The place file is gitignored, so `npm run build` produces code and an empty world — and a
+			population that exists only where a human placed markers cannot be exercised there at all.
+			These two numbers make the system self-starting: a ring around the origin, at a radius
+			wide enough that the entities are not stacked. It is scaffolding for the harness, not a
+			design; the map contract in `AmbientService`'s header is the real answer.
+		]]
+		FallbackScatterRadius = 60,
+		FallbackHeight = 3,
 	},
 
 	--[[
@@ -1277,6 +1396,26 @@ local Config = {
 				cancel back to back.
 			]]
 			RequestCancelSearch = { Capacity = 6, RefillPerSecond = 0.5 },
+			--[[
+				V07, §4.3. A DELIBERATE, RARE ACT, priced like `RequestTransform` above it rather than
+				like a search: the charge is the real limiter — one hide per completed feed — and this
+				budget exists for the refusals, which are the only thing a client can fire freely.
+
+				AND THE REFUSALS ARE THE INTERESTING HALF. An unrevealed Aswang gets CAMO_NOT_REVEALED
+				every time, forever, for free; a capacity of 3 at 0.2/s means it can ask about 12
+				times a minute. That is not a leak — it is telling a player a fact about themselves
+				they already have — but it is the shape that WOULD be one if a later verdict ever
+				depended on another player, so the budget is sized as though it did.
+			]]
+			RequestCamouflage = { Capacity = 3, RefillPerSecond = 0.2 },
+			--[[
+				V07. Tighter still, because this handler is the only one in the chunk that FIRES A
+				REMOTE TO OTHER PLAYERS: a granted burst sends `SmokeBurst` to everyone within
+				`SmokeCueRadius`. `Config.Monster.SmokeCooldown = 45` already means an honest client
+				fires this at most once every 45 seconds, so capacity 2 covers a double-tap and a
+				reconnect retry and nothing else.
+			]]
+			RequestSmoke = { Capacity = 2, RefillPerSecond = 0.1 },
 			RequestEquipCosmetic = { Capacity = 5, RefillPerSecond = 0.5 },
 			--[[
 				C34. Priced like the equip next door rather than tighter, even though it SPENDS: the

@@ -26,6 +26,19 @@ local SERVICE_ORDER = {
 	"CommunityService",
 	-- Gameplay
 	"RoleService",
+	--[[
+		V07. BEFORE `MonsterService`, which requires it for `ClaimSlot`/`ReleaseSlot`.
+
+		ORDER MATTERS IN ONE DIRECTION ONLY, and it is satisfied with a lot of room to spare:
+		`AmbientService.Start` must have spawned the population before any `ClaimSlot` can succeed,
+		and a claim cannot happen before a round is ACTIVE — many seconds after every `Start` in this
+		list has run. The require edge is the real constraint, not the timing.
+
+		IT SUBSCRIBES TO NO PHASE. Ambient life is barrio scenery and wanders in the lobby too; a
+		population that appeared when a round started would be a round-state readout in the geometry,
+		readable by any client.
+	]]
+	"AmbientService",
 	"MonsterService",
 	--[[
 		V04. BEFORE its two callers (ItemService, SearchService) and, like every gameplay service

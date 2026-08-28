@@ -999,6 +999,78 @@ check(
 		.. `{Config.Trial.PlayerBaselineWalkSpeed * Config.Monster.TransformedSpeedMult}`
 )
 
+--[[
+	V07, §4.3/§5. THE DISGUISE NEEDS A CROWD TO HIDE IN.
+
+	`Ambient.PerForm` must be at least 2. At 1, the moment the Aswang claims the only cat, there is
+	exactly one cat in the barrio and it is the monster — §4.5's "It's the cat!" stops being a guess
+	and becomes a lookup. This is the camouflage system's equivalent of invariant 1: tune the number
+	and a win condition changes with nothing in the game to report it. §5 asks for 3-4; the floor
+	pinned here is the point below which the mechanic is not merely weak but INVERTED.
+]]
+check(
+	"Ambient.PerForm >= 2 — a lone entity of a form IS the monster",
+	Config.Ambient.PerForm >= 2,
+	`PerForm={Config.Ambient.PerForm}`
+)
+
+--[[
+	V07, §4.3. THE HIDE MUST NOT BE FASTER THAN THE WITNESS RADIUS IS WIDE.
+
+	`CamouflageWitnessRadius` must exceed `Monster.KillRange`. A monster that may hide from further
+	away than it may kill from still has to break contact first; the other way round, it can kill a
+	survivor and hide before the survivor's partner — standing at kill range, watching — has anything
+	to report. The corpse-as-bait window §4.3 built the feed for depends on the killer being findable.
+]]
+check(
+	"CamouflageWitnessRadius > KillRange",
+	Config.Monster.CamouflageWitnessRadius > Config.Monster.KillRange,
+	`witness={Config.Monster.CamouflageWitnessRadius}, kill={Config.Monster.KillRange}`
+)
+
+--[[
+	V07, §4.3. THE ESCAPE MUST NOT OUTLAST THE REVEAL IT IS ESCAPING FROM.
+
+	`SmokeDuration` must be SHORTER than `Items.SaltRevealDuration`. Smoke exists so a salted Aswang
+	can disengage, not so it can wait out the glow inside a cloud: if the smoke outlasts the reveal,
+	the survivors' counterplay is spent and they never see the thing they paid an item to expose.
+	Compare §6.5 invariant 6, which pins the reveal above the stun for the mirror-image reason.
+]]
+check(
+	"SmokeDuration < SaltRevealDuration — smoke covers a retreat, it does not erase the reveal",
+	Config.Monster.SmokeDuration < Config.Items.SaltRevealDuration,
+	`smoke={Config.Monster.SmokeDuration}, reveal={Config.Items.SaltRevealDuration}`
+)
+
+--[[
+	V07, §4.3. THE HIDE MUST STAY INTERRUPTIBLE.
+
+	`CamouflageEnterTime` must be greater than zero. At zero the windup vanishes and camouflage becomes
+	instantaneous — which is not a weaker mechanic but a DIFFERENT one: §4.3's rule that risky acts are
+	visible while they happen stops holding, and the survivor who walks in during the hide has nothing
+	to walk in on. This number shipped once already as a declared-but-never-read Config value, so the
+	behaviour existed only in a comment; this check is what stops that happening silently again.
+]]
+check(
+	"CamouflageEnterTime > 0 — an instant hide has no counterplay",
+	Config.Monster.CamouflageEnterTime > 0,
+	`enter={Config.Monster.CamouflageEnterTime}`
+)
+
+--[[
+	V07, §4.3. AND THE CUE MUST REACH BEYOND THE CLOUD IT ANNOUNCES.
+
+	`SmokeCueRadius` must exceed `SmokeRadius`, or a player standing at the cloud's edge would have it
+	appear on top of them rather than watching it form. It is also the assumption `Remotes.luau` leans
+	on when it sends an EXACT position: everyone who receives the payload can see the thing it
+	describes. Raise the cue radius well past visual range and that reasoning expires.
+]]
+check(
+	"SmokeCueRadius > SmokeRadius — you see the cloud form, it does not appear on you",
+	Config.Monster.SmokeCueRadius > Config.Monster.SmokeRadius,
+	`cue={Config.Monster.SmokeCueRadius}, cloud={Config.Monster.SmokeRadius}`
+)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end

@@ -162,6 +162,54 @@ local EVENTS_DOWN = {
 		inverted into a presence, and `check:secrecy` would be green over it.
 	]]
 	"FeedUpdate",
+	--[[
+		V07, §4.3. FireClient to the ONE player whose disguise it is. Never FireAllClients — there is
+		no broadcast form of this payload and adding one would be a redesign, not an optimisation.
+
+		WHAT A SECOND CLIENT LEARNS FROM THIS REMOTE: nothing, because it never receives it. The
+		public half of camouflage needs no remote at all — a player avatar is gone and a pig is
+		standing where it was, and both of those replicate as geometry. That is the whole of what the
+		barrio is told, and §4.3 is content with it: the monster is already revealed by the time it
+		can do this, so there is no secret left for the geometry to give away.
+
+		THE PAYLOAD CARRIES NO CHARGE COUNT. `Types.CamouflageUpdatePayload` is a verdict and an
+		optional form. The charge is a boolean on the server-only `monsters` table and it has no
+		field, no attribute and no tag anywhere — a client that knew its own charge could not leak it
+		(it is the Aswang's own business), but the field would be the obvious place for a later
+		broadcast to grow one, and there is no reason to build the socket.
+
+		AND NO REVEAL FLAG. `HasBeenRevealed` never crosses in any form. A `CAMO_NOT_REVEALED` verdict
+		does reach the requester, and that is safe on `RoleAssigned`'s reasoning: it is fired to a
+		single player, about that player, telling them a fact they already have — they know whether
+		they have been salted, because they were standing inside the glow.
+	]]
+	"CamouflageUpdate",
+	--[[
+		V07, §4.3. FireClient to every player the SERVER decides is within `Config.Monster
+		.SmokeCueRadius` of the burst — NEVER FireAllClients. `Types.SmokeBurstPayload` is the payload.
+
+		THE BROADCAST FORM IS THE WHOLE RISK AND IT IS REFUSED, for `NoiseCue`'s reason exactly. A
+		FireAllClients carrying a position hands every client the monster's live location the instant
+		it tries to escape — readable from a compromised client with no exploit beyond listening, and
+		strictly more than V13's 90s-to-30s tracker will ever give the survivors. The distance test
+		happens on the server and a player out of radius receives NOTHING.
+
+		THE POSITION IS EXACT RATHER THAN QUANTISED, AND THAT IS A DELIBERATE DIFFERENCE FROM
+		`NoiseCue`. Noise is heard at 60 studs — far beyond what a listener can see — so its position
+		is quantised to a grid because the payload would otherwise state more than the world does.
+		Smoke's send radius is 40 and the cloud itself is 18: everyone who receives this is close
+		enough to WATCH the cloud form, so an exact centre states nothing they will not see rendered a
+		frame later. If `SmokeCueRadius` is ever raised well past visual range, this reasoning expires
+		and the position must be quantised — that dependency is stated in Config beside the number.
+
+		THE PAYLOAD HAS NO PLAYER FIELD OF ANY KIND. No UserId, no Character, no name. A cloud is a
+		fact about a place; "the Aswang is inside it" is an inference a client is welcome to make from
+		looking, and the server never states it. This matters more than it looks: smoke is fired only
+		by the Aswang, so a UserId here would be a role broadcast with a position attached — the
+		single worst payload in the game — and `check:secrecy` matches `killer\w*` and the enumerated
+		role tokens, not a field called `Source`.
+	]]
+	"SmokeBurst",
 }
 
 -- Client -> Server (the client asks; the server decides)
@@ -269,6 +317,36 @@ local EVENTS_UP = {
 		remainder of one hold. That is why its budget is the more generous of the two.
 	]]
 	"RequestCancelSearch",
+	--[[
+		V07, §4.3. NO ARGUMENTS, and the absent argument is the security design.
+
+		THE FORM IS NOT NAMED BY THE CLIENT. The server picks it from whatever `AmbientRoster.claim`
+		can actually supply, from the population it owns — the rule `SearchService` already applies to
+		containers: "the server resolves what a player is standing at from that player's own character
+		position, and the client names nothing."
+
+		A `RequestCamouflage(form)` would have been strictly worse in the way that matters. It needs a
+		verdict for "there is no cat left", which is the roster query the server was already going to
+		make; and it hands a compromised client a PROBE — ask for each of the four forms in turn, read
+		the verdicts, and learn the live ambient population without walking anywhere. That is a map of
+		which corners of the barrio have been depopulated, which is exactly the information a hunting
+		survivor pays attention for.
+	]]
+	"RequestCamouflage",
+	--[[
+		V07, §4.3. Also argument-free. The burst happens at the requester's OWN character position,
+		which the server reads; a position argument would be a "put a cloud anywhere" primitive, and
+		the first thing to do with it is drop one on a survivor's face across the map.
+
+		THERE IS NO `RequestExitCamouflage`, AND THAT IS THE THIRD REMOTE THIS CHUNK DID NOT ADD.
+		Stepping out of the disguise is `RequestTransform`, which already exists, is already budgeted
+		and already means "become the monster" — a camouflaged Aswang firing it exits the form and
+		transforms, which is the only reason it would ever want out. A dedicated exit remote would be
+		a second entry point into the same state change, and `RequestSearch`/`RequestCancelSearch`'s
+		header is right that two messages for one state are how a client and a server come to
+		disagree about it.
+	]]
+	"RequestSmoke",
 }
 
 local Remotes = {}

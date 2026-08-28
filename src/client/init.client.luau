@@ -62,6 +62,16 @@ local CONTROLLER_ORDER = {
 		is — OnboardingController knows nothing about feeding, so the arrow cannot become a cycle.
 	]]
 	"FeedController",
+	--[[
+		V07. AFTER OnboardingController for the same real dependency as the two above — it REQUIRES it
+		for `ShowLine`, one-way, and OnboardingController knows nothing about camouflage or smoke so
+		the arrow cannot become a cycle.
+
+		AND BEFORE InputController, which is the rule everything in this list follows: it listens for
+		`CamouflageUpdate` and `SmokeBurst`, and `SmokeBurst` can arrive the instant any Aswang in the
+		round presses G — which may be before this player has pressed anything at all.
+	]]
+	"SmokeController",
 	"TrialController",
 	"InputController",
 }

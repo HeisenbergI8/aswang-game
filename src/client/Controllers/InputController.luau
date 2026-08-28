@@ -45,6 +45,9 @@ local TRANSFORM_ACTION = "AswangTransform"
 local KILL_ACTION = "AswangKill"
 local THROW_ACTION = "SaltThrow"
 local SEARCH_ACTION = "SearchContainer"
+-- V07. C and G were both unclaimed; the four bound today are T, F, Q and E.
+local CAMOUFLAGE_ACTION = "AswangCamouflage"
+local SMOKE_ACTION = "AswangSmoke"
 
 --[[
 	A plain function for the same reason `performKill` below is one: C18's HUD button must invoke THIS,
@@ -68,6 +71,65 @@ local function performTransform(): boolean
 	Remotes.Get("RequestTransform"):FireServer()
 
 	return true
+end
+
+--[[
+	V07, §4.3. BOUND FOR EVERY PLAYER, EVERY ROUND — `performTransform`'s rule, for its reason.
+
+	A BUTTON THAT ONLY THE ASWANG CAN SEE IS THE REVEAL, on the monster's own screen, where a stream
+	or a screen recording makes it permanent. The bind is unconditional and the role check is local
+	and silent, exactly as the transform's is; the server refuses a survivor independently (Step 5.1)
+	and tells them nothing, so the two agree without the client having to be trusted.
+
+	NO LOCAL COOLDOWN, DELIBERATELY. `SmokeCooldown` and the camouflage charge both live on the
+	server. A client-side timer here would mask a server refusal and let the two disagree about
+	whether an ability was available — and the client's copy would be the one the player believes.
+]]
+local function performCamouflage(): boolean
+	if UIController.GetMyRole() ~= Enums.Role.Aswang then
+		return false
+	end
+
+	-- No arguments. The server picks the form from the population it owns; see `Remotes.luau` for why
+	-- a client-named form would be a probe for the live ambient roster.
+	Remotes.Get("RequestCamouflage"):FireServer()
+
+	return true
+end
+
+local function performSmoke(): boolean
+	if UIController.GetMyRole() ~= Enums.Role.Aswang then
+		return false
+	end
+
+	-- No arguments. The burst happens at the requester's own position, read server-side.
+	Remotes.Get("RequestSmoke"):FireServer()
+
+	return true
+end
+
+local function onCamouflageAction(
+	_actionName: string,
+	inputState: Enum.UserInputState
+): Enum.ContextActionResult
+	if inputState ~= Enum.UserInputState.Begin then
+		return Enum.ContextActionResult.Pass
+	end
+
+	return if performCamouflage()
+		then Enum.ContextActionResult.Sink
+		else Enum.ContextActionResult.Pass
+end
+
+local function onSmokeAction(
+	_actionName: string,
+	inputState: Enum.UserInputState
+): Enum.ContextActionResult
+	if inputState ~= Enum.UserInputState.Begin then
+		return Enum.ContextActionResult.Pass
+	end
+
+	return if performSmoke() then Enum.ContextActionResult.Sink else Enum.ContextActionResult.Pass
 end
 
 local function onTransformAction(
@@ -347,6 +409,17 @@ function InputController.Start()
 		CancelSearch = function()
 			performCancelSearch()
 		end,
+		--[[
+			V07. REGISTERED FOR THE TOUCH PAD LIKE EVERY OTHER VERB, so mobile runs this file's
+			functions rather than its own copies. §5 puts ~60% of players on a phone, so a verb that
+			exists only on a keyboard is a verb the majority of Aswangs never get.
+		]]
+		Camouflage = function()
+			performCamouflage()
+		end,
+		Smoke = function()
+			performSmoke()
+		end,
 	})
 
 	ContextActionService:BindAction(TRANSFORM_ACTION, onTransformAction, false, Enum.KeyCode.T)
@@ -392,6 +465,11 @@ function InputController.Start()
 		later would simply look broken.
 	]]
 	ContextActionService:BindAction(SEARCH_ACTION, onSearchAction, false, Enum.KeyCode.E)
+
+	-- V07, §4.3. Bound for everyone; the role check is inside the two perform functions and the
+	-- server refuses a survivor independently.
+	ContextActionService:BindAction(CAMOUFLAGE_ACTION, onCamouflageAction, false, Enum.KeyCode.C)
+	ContextActionService:BindAction(SMOKE_ACTION, onSmokeAction, false, Enum.KeyCode.G)
 end
 
 return InputController

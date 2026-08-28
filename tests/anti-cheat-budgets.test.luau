@@ -55,6 +55,11 @@ local UP_REMOTES = {
 	-- entirely rather than leaving it unlimited.
 	"RequestSearch",
 	"RequestCancelSearch",
+	-- V07. Both argument-free: the server picks the form from the population it owns, and the burst
+	-- happens at the requester's own character position. `RequestCamouflage` is the tighter of the
+	-- two — see Config for why a refused hide is cheap and a hide firehose is not.
+	"RequestCamouflage",
+	"RequestSmoke",
 }
 
 local failures = 0

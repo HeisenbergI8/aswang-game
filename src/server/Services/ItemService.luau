@@ -564,6 +564,26 @@ local function resolveThrow(
 		end
 
 		if verdict == "OK" then
+			--[[
+				AND SMOKE BREAKS THE THROW, THE SAME WAY IT BREAKS A KILL (V07, §4.3).
+
+				THE OTHER HALF OF THE SYMMETRY. `MonsterService.hasLineOfSight` already refuses a kill
+				through a cloud; without this line the cloud would stop the monster killing but not
+				the survivors throwing, which turns the Aswang's escape tool into a gift to the people
+				chasing it. `CamouflageRules.smokeBlocks` is symmetric in its two points, so there is
+				no version of this that is asymmetric by accident.
+
+				COLLAPSED INTO THE EXISTING `MISS`, AND A `MISS_SMOKE` WOULD BE A ROLE ORACLE.
+				`pure/SaltThrow` reports one MISS for every failure reason precisely because a throw
+				is a request a SURVIVOR makes about ANOTHER PLAYER — a split verdict lets a client
+				stand in front of each player in turn and read the monster off the refusal shape. A
+				smoke-specific value would be worse than most: it is produced only when the Aswang has
+				planted a cloud, delivered to a survivor, naming a direction.
+			]]
+			if MonsterService.SmokeBlocks(origin, candidateRoot.Position) then
+				continue
+			end
+
 			local distance = (candidateRoot.Position - origin).Magnitude
 
 			if distance < bestDistance then

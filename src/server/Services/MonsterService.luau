@@ -96,9 +96,11 @@
 ]]
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local AmbientService = require(script.Parent.AmbientService)
 local AntiCheatService = require(script.Parent.AntiCheatService)
 local RoleService = require(script.Parent.RoleService)
 local RoundService = require(script.Parent.RoundService)
@@ -107,6 +109,7 @@ local TeachingService = require(script.Parent.TeachingService)
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
+local CamouflageRules = require(Shared.pure.CamouflageRules)
 local FeedRules = require(Shared.pure.FeedRules)
 local KillValidation = require(Shared.pure.KillValidation)
 local MonsterHealth = require(Shared.pure.MonsterHealth)
@@ -164,6 +167,23 @@ type PartLook = {
 	Part: BasePart,
 	Color: Color3,
 	Material: Enum.Material,
+}
+
+--[[
+	V07, §4.3. WHAT CAMOUFLAGE CAPTURES, AND WHY IT IS NOT `PartLook`.
+
+	Hiding the character is a SEPARATE capture from the transform's, deliberately. `PartLook` is
+	`captureLook`'s struct and `restoreLook` is its only reader; widening it so camouflage could ride
+	along would put two features on one restore path, and C04's map-wide branding bug is what that
+	costs when the two disagree about what "original" means. One capture, one owner, one restore.
+
+	IT WALKS DESCENDANTS RATHER THAN DIRECT CHILDREN, which `captureLook` does not — so accessory
+	handles are hidden too. A disguise that leaves the player's hat floating over a cat is not a
+	disguise, and an exploit audit named exactly that.
+]]
+type HiddenPart = {
+	Part: BasePart,
+	Transparency: number,
 }
 
 type MonsterState = {
@@ -255,14 +275,103 @@ type MonsterState = {
 	]]
 	FeedBaseJumpPower: number?,
 	FeedBaseJumpHeight: number?,
+	--[[
+		CAMOUFLAGE AND THE REVEAL GATE (V07, §4.3). SERVER-ONLY, LIKE EVERY OTHER FIELD HERE, and
+		`HasBeenRevealed` is the single most dangerous boolean in this table.
+
+		A FIELD PLUS TWO FLAGS, which is the shape `Enums.luau:62-72` deferred to "the chunk that
+		builds the state machine" and V06's header deferred again to V07. This is that chunk, and the
+		answer matches what V06 did for `Feeding`: `Camouflaged` is the state, `CamouflageForm` is
+		which of the four it wears, and the enum is derived on demand by `monsterStateOf` rather than
+		stored. One boolean per fact, no second source of truth.
+
+		`HasBeenRevealed` IS THE GATE AND IT IS ONE-WAY. False on a fresh record — which is what makes
+		camouflage impossible by DEFAULT rather than by remembering to refuse it — and set true by
+		exactly one caller, `ApplySaltHit`, through `CamouflageRules.revealedAfter`. It is never
+		cleared mid-round; the reset is `onPhaseChanged`'s `table.clear(monsters)` on the way out of
+		ACTIVE, exactly as it is for `Health`.
+
+		WHY IT IS NOT `Exposed`. Exposed expires after `Items.SaltRevealDuration` and this does not.
+		The glow is a ten-second window; having been salted is a fact about the round. Reusing
+		`Exposed` as the gate would mean camouflage re-locks itself ten seconds after every hit, which
+		reads as a bug and is a total inversion of §4.3's pressure loop.
+
+		`HasCamouflageCharge` STARTS TRUE and is spent on entry, restored ONLY by a completed feed —
+		`CamouflageRules.chargeAfter` is the only function that moves it. Starting true costs nothing
+		while `HasBeenRevealed` is false, because the gate is checked first and unconditionally.
+
+		NEITHER FIELD HAS AN ATTRIBUTE, A TAG OR A PAYLOAD FIELD ANYWHERE. `CamouflageUpdatePayload`
+		carries a verdict and a form and nothing else; see its header in `Types.luau`.
+	]]
+	HasBeenRevealed: boolean,
+	HasCamouflageCharge: boolean,
+	Camouflaged: boolean,
+	CamouflageForm: Types.CamouflageForm?,
+	--[[
+		THE CLAIMED AMBIENT SLOT, held so every exit path can hand it back.
+
+		AN INDEX, NOT A MODEL — the opposite of `FeedBody`, and deliberately so. `AmbientService` owns
+		the Instances and `AmbientRoster` deals in indices; a Model reference here would be a second
+		handle on an object this file does not own, and the release path would have two ways to
+		disagree about which slot is free.
+	]]
+	AmbientSlot: number?,
+	--[[
+		V07, §4.3. THE HIDDEN CHARACTER'S CAPTURED STATE.
+
+		Camouflage hides the PLAYER and shows the ambient entity — the inverse of the first
+		implementation, which hid the entity and showed a re-skinned player. See `AmbientService`'s
+		header for the measured reason. So these two fields hold what has to be put back: every
+		descendant BasePart's Transparency, and the Humanoid's name-display setting.
+
+		CAPTURED, NEVER DEFAULTED. C04 restored hardcoded defaults instead of captured state and
+		branded the ex-Aswang for the rest of the round; `Transparency = 0` on revert is that same
+		mistake for anyone whose avatar legitimately has a translucent part.
+	]]
+	CamouflageHiddenParts: { HiddenPart }?,
+	CamouflageNameDisplay: Enum.HumanoidDisplayDistanceType?,
+	-- `os.clock()` of the last granted burst, or nil until the first one this round. Read by
+	-- `CamouflageRules.evaluateSmoke`, which takes it as a field so the cooldown stays testable.
+	LastSmokeBurstAt: number?,
 }
 
 -- SERVER-ONLY. Keyed by UserId. Never replicated — the only thing that crosses is the broadcast.
 local monsters: { [number]: MonsterState } = {}
 
+--[[
+	THE LIVE SMOKE FIELD (V07, §4.3). SERVER-ONLY, and it is the MECHANIC rather than the effect.
+
+	"Breaks line of sight" has to mean something the server enforces, or it is a decoration a client
+	can switch off. So a burst is three numbers and a deadline here, `pure/CamouflageRules.smokeBlocks`
+	answers whether a given segment passes through one, and the two places in this game that ask a
+	line-of-sight question — `hasLineOfSight` for a kill, `ItemService`'s throw resolution — consult
+	it. A player who deletes the emitter, drops to minimum graphics, or never receives the payload
+	plays under identical rules.
+
+	A LIST RATHER THAN ONE ENTRY, even though `SmokeCooldown` means one Aswang can have only one live
+	at a time. Bursts outlive the requester's state — a monster that dies inside its own cloud leaves
+	it standing for the remainder of `SmokeDuration`, which is correct: the cloud is a thing in the
+	world, not a property of a player.
+
+	NO PLAYER FIELD, HERE EITHER. The table holds no UserId and no character. Nothing needs one — the
+	cooldown lives on the monster record with the rest of that player's state — and its absence means
+	there is no field for a later payload to grow one from.
+]]
+type SmokeBurst = {
+	Centre: Vector3,
+	Radius: number,
+	ExpiresAt: number,
+}
+
+local smokeBursts: { SmokeBurst } = {}
+
 local transformedRemote = Remotes.Get("MonsterTransformed")
 local killedRemote = Remotes.Get("PlayerKilled")
 local feedRemote = Remotes.Get("FeedUpdate")
+-- V07. Both FireClient-only: one to the disguise's owner, one to whoever is close enough to see the
+-- cloud. Neither has a FireAllClients call site anywhere in this file, deliberately.
+local camouflageRemote = Remotes.Get("CamouflageUpdate")
+local smokeRemote = Remotes.Get("SmokeBurst")
 
 -- One parent for every corpse, so the raycast can exclude them wholesale and a phase change can clear
 -- them with a single Destroy. Created on Start, never destroyed.
@@ -295,6 +404,22 @@ local function stateFor(userId: number): MonsterState
 		FeedEndsAt = nil,
 		FeedBaseJumpPower = nil,
 		FeedBaseJumpHeight = nil,
+		--[[
+			V07, §4.3. `HasBeenRevealed = false` IS THE GATE'S DEFAULT AND THE WHOLE CHUNK RESTS ON
+			THIS LINE. A fresh record cannot camouflage, so camouflage is impossible until something
+			explicitly opens it — and exactly one caller does (`ApplySaltHit`). Delete that caller and
+			the ability is provably unreachable rather than accidentally unavailable.
+		]]
+		HasBeenRevealed = false,
+		-- True from the start, which costs nothing: the gate above is checked first and
+		-- unconditionally, so a charge on an unrevealed monster is a number nobody can spend.
+		HasCamouflageCharge = true,
+		Camouflaged = false,
+		CamouflageForm = nil,
+		AmbientSlot = nil,
+		CamouflageHiddenParts = nil,
+		CamouflageNameDisplay = nil,
+		LastSmokeBurstAt = nil,
 	}
 
 	monsters[userId] = created
@@ -324,6 +449,30 @@ end
 	monster would report FEEDING forever and the backstop would never fire.
 ]]
 local function monsterStateOf(monster: MonsterState): Types.MonsterState
+	--[[
+		CAMOUFLAGED FIRST, ABOVE FEEDING AND ABOVE TRANSFORMED (V07, §4.3). ORDER IS THE CONTRACT.
+
+		A camouflaged Aswang is still `Transformed` underneath — camouflage is an appearance layer over
+		the monster form, not a revert — so checking `Transformed` first would report TRANSFORMED for a
+		monster standing in the barrio as a pig. `FeedRules.evaluate` would then grant it a feed, and
+		`CamouflageRules.evaluate` would never see ALREADY_CAMOUFLAGED, so a second hide would claim a
+		second slot and the first one would leak for the rest of the round.
+
+		FEEDING AND CAMOUFLAGED ARE MUTUALLY EXCLUSIVE BY CONSTRUCTION, not by this ordering: the
+		rules module refuses a hide while FEEDING, and `beginFeed` is reached only from `commitKill`,
+		which needs a kill, which needs monster form. The order here decides what is REPORTED if they
+		ever both become true, and reporting CAMOUFLAGED is the safer of the two — it refuses the feed
+		rather than granting a hide.
+
+		BOTH FLAGS, NEVER `Camouflaged` ALONE — V06's rule for `Feeding`, load-bearing for the same
+		reason: written as `if Camouflaged then`, a camouflaged monster whose transform was reverted
+		by a path nobody thought of would report CAMOUFLAGED forever, and every backstop that reads
+		"the form went away" would stop firing.
+	]]
+	if monster.Camouflaged and monster.Transformed then
+		return Enums.MonsterState.Camouflaged
+	end
+
 	if monster.Feeding and monster.Transformed then
 		return Enums.MonsterState.Feeding
 	end
@@ -744,6 +893,253 @@ end
 --------------------------------------------------------------------------------
 -- Transform and revert
 --------------------------------------------------------------------------------
+-- Camouflage and smoke (V07, §4.3).
+--------------------------------------------------------------------------------
+
+--[[
+	THE PURE MODULE'S VERDICT, MAPPED ONTO THE ONE THAT CROSSES THE WIRE.
+
+	TWO UNIONS RATHER THAN ONE, AND THE PREFIX IS WHY. `CamouflageRules.Verdict` and
+	`Types.CamouflageVerdict` contain the same distinctions but not the same strings, so under
+	`--!strict` neither can be passed to the other's handler by accident. `Types.luau` records the
+	same reasoning for `FeedVerdict`. The two the server owns — CAMO_EXITED and CAMO_WITNESSED — have
+	no counterpart here because the pure module never sees a position or a state change.
+]]
+local function camouflageVerdictFor(verdict: CamouflageRules.Verdict): Types.CamouflageVerdict
+	if verdict == "OK" then
+		return "CAMO_OK"
+	elseif verdict == "NOT_REVEALED" then
+		return "CAMO_NOT_REVEALED"
+	elseif verdict == "WRONG_PHASE" then
+		return "CAMO_WRONG_PHASE"
+	elseif verdict == "NO_CHARGE" then
+		return "CAMO_NO_CHARGE"
+	elseif verdict == "ALREADY_CAMOUFLAGED" then
+		return "CAMO_ALREADY"
+	elseif verdict == "NOT_TRANSFORMED" then
+		return "CAMO_NOT_TRANSFORMED"
+	end
+
+	return "CAMO_NO_SLOT"
+end
+
+--[[
+	TO THE ONE PLAYER WHOSE DISGUISE IT IS. `FireClient`, never `FireAllClients`.
+
+	`Remotes.luau`'s `CamouflageUpdate` entry carries the full argument; the short version is that the
+	public half of camouflage needs no remote at all, because an avatar vanishing and a pig appearing
+	both replicate as geometry.
+]]
+local function sendCamouflageUpdate(
+	player: Player,
+	verdict: Types.CamouflageVerdict,
+	form: Types.CamouflageForm?
+)
+	local payload: Types.CamouflageUpdatePayload = {
+		Verdict = verdict,
+		Form = form,
+	}
+
+	camouflageRemote:FireClient(player, payload)
+end
+
+--------------------------------------------------------------------------------
+-- Camouflage (V07, §4.3). Enter and exit.
+--------------------------------------------------------------------------------
+
+--[[
+	HIDE THE PLAYER. (V07, §4.3) The disguise is the ambient entity; this is the half that gets out of
+	its way.
+
+	THIS IS THE INVERSION THAT FIXES THE V07 CRITICAL. The first implementation hid the ENTITY (moved
+	it to `ServerStorage`) and re-skinned the player to look like it. Measured in Studio, that removed
+	an instance from `workspace.AmbientLife` on every client and handed any listener the monster's
+	exact position through `ChildRemoved`. Now the entity never moves in the tree and the player is
+	what stops being drawn — so the barrio's visible population is identical whether or not anyone is
+	hidden, and there is no event to subscribe to.
+
+	NO TINT AND NO SCALE ANY MORE. The old version recoloured and shrank the character toward
+	`Config.Monster.CamouflageTintRgb` / `CamouflageAnimalScale`, both of which replicate — one loop
+	over `Players` looking for a Humanoid at scale 0.55 named the Aswang outright. An invisible
+	character has no such value to read, so deleting that code removed a second finding rather than
+	patching it.
+
+	DESCENDANTS, NOT CHILDREN, so accessory handles go too. `captureLook` walks direct children only
+	and that is correct for ITS job; leaving a hat and hair at full size floating over a cat is not.
+
+	AND THE NAMETAG. `Humanoid.DisplayDistanceType = None` — without it the disguised cat has the
+	player's username printed over it for everyone, which is the loudest possible tell and costs one
+	line to remove.
+]]
+local function hideCharacter(state: MonsterState, character: Model, humanoid: Humanoid)
+	local hidden: { HiddenPart } = {}
+
+	for _, descendant in character:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			table.insert(hidden, { Part = descendant, Transparency = descendant.Transparency })
+			descendant.Transparency = 1
+		end
+	end
+
+	state.CamouflageHiddenParts = hidden
+	state.CamouflageNameDisplay = humanoid.DisplayDistanceType
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+end
+
+--[[
+	PUT THE PLAYER BACK. Restores exactly what `hideCharacter` captured and nothing else.
+
+	TOTAL, AND SAFE ON A DESTROYED CHARACTER. Death and leaving both reach this, and a part whose
+	Parent has gone still answers a property write harmlessly — but the capture list is cleared either
+	way, so a second call cannot restore a stale value onto a respawned body.
+]]
+local function showCharacter(state: MonsterState, humanoid: Humanoid?)
+	local hidden = state.CamouflageHiddenParts
+
+	if hidden ~= nil then
+		for _, entry in hidden do
+			if entry.Part.Parent ~= nil then
+				entry.Part.Transparency = entry.Transparency
+			end
+		end
+	end
+
+	local display = state.CamouflageNameDisplay
+
+	if humanoid ~= nil and display ~= nil then
+		humanoid.DisplayDistanceType = display
+	end
+
+	state.CamouflageHiddenParts = nil
+	state.CamouflageNameDisplay = nil
+end
+
+--[[
+	BECOME THE CAT. (V07, §4.3) One caller: Phase 5's `RequestCamouflage` handler, on a request
+	`CamouflageRules.evaluate` has already granted.
+
+	THE ORDER IS: CLAIM, THEN SPEND, THEN CHANGE THE LOOK. A claim that fails must cost nothing — the
+	rules module answers NO_SLOT and the charge is still there — so the claim happens first and the
+	spend happens only once a slot index is in hand. Reversed, an Aswang in a barrio with no cats left
+	would lose its charge to a hide that never happened, and would have to kill again to get it back
+	for reasons invisible from inside the game.
+
+	THE MONSTER STAYS TRANSFORMED UNDERNEATH. `Transformed` is not cleared: camouflage is a second
+	appearance layer over the monster form, not a revert. That is why `monsterStateOf` checks
+	`Camouflaged` BEFORE `Transformed`, and why stepping out returns to the monster rather than to the
+	player.
+
+	NO BROADCAST. `MonsterTransformed` is not fired and no new down-remote is either. §4.3's public
+	half is that a player avatar is gone and an animal is standing there, and both replicate as
+	geometry. A broadcast would be the server STATING what the world already shows — the difference
+	between `MonsterTransformed` (a moment nobody may miss) and this (a thing you either saw or did
+	not).
+]]
+local function enterCamouflage(player: Player, form: Types.CamouflageForm): boolean
+	local monster = monsters[player.UserId]
+	local character = player.Character
+
+	if monster == nil or character == nil then
+		return false
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+	if humanoid == nil then
+		return false
+	end
+
+	local slotIndex = AmbientService.ClaimSlot(form)
+
+	if slotIndex == nil then
+		return false
+	end
+
+	monster.AmbientSlot = slotIndex
+	monster.Camouflaged = true
+	monster.CamouflageForm = form
+	monster.HasCamouflageCharge =
+		CamouflageRules.chargeAfter(monster.HasCamouflageCharge, "CAMOUFLAGE_ENTERED")
+
+	--[[
+		HIDE THE PLAYER, DO NOT RE-SKIN THEM. The ambient entity is already standing in the barrio
+		looking like a cat; the disguise is achieved by getting the player's own body out of the way
+		and walking that entity around instead (`camouflageTick` -> `AmbientService.PuppetSlot`).
+
+		NO `captureLook` CALL HERE, AND THAT IS DELIBERATE. The transform's capture belongs to the
+		transform; camouflage captures its own Transparency list in `hideCharacter` and restores it in
+		`showCharacter`. Two features sharing one restore path is C04's bug waiting to happen, and the
+		old version of this function reached into `captureLook`/`Applied` to do exactly that.
+
+		THE CHARACTER DOES NOT MOVE. The old version pivoted the player to the entity's position; now
+		the entity comes to the player, so there is no teleport, nothing to rubber-band against client
+		network ownership, and no dependence on a Roblox behaviour this plan never verified.
+	]]
+	hideCharacter(monster, character, humanoid)
+
+	return true
+end
+
+--[[
+	STOP BEING THE CAT. (V07, §4.3) FIVE CALLERS, which is why it is idempotent and total: a transform
+	request, a salt hit, death, leaving, and the round ending. At least two of them can fire for the
+	same player in the same frame — `ApplySaltHit` walks `endFeed` -> `revert`, on a path
+	`onPhaseChanged` may also be walking.
+
+	THE SLOT GOES BACK FIRST, so the entity stops being driven before anything else can fail. It is no
+	longer a head-count question — nothing was ever removed — but a slot left claimed is an entity
+	frozen wherever the monster abandoned it, permanently excluded from the wander loop, which is a
+	visible oddity accumulating one per occurrence.
+
+	THE CHARGE DOES NOT COME BACK. `CamouflageRules.chargeAfter` answers CAMOUFLAGE_EXITED with the
+	current value, and the grid asserts it: stepping out of a cat is not a feed.
+]]
+local function exitCamouflage(player: Player)
+	local monster = monsters[player.UserId]
+
+	if monster == nil or not monster.Camouflaged then
+		return
+	end
+
+	AmbientService.ReleaseSlot(monster.AmbientSlot)
+
+	monster.AmbientSlot = nil
+	monster.Camouflaged = false
+	monster.CamouflageForm = nil
+
+	--[[
+		BACK TO THE MONSTER, NOT TO THE PLAYER. `Transformed` was never cleared, so the correct
+		restore is the transform's full look — reverting to the player's own appearance here would
+		hand a still-transformed Aswang an ordinary-looking body, which is a free permanent disguise
+		and a far worse bug than the one this branch prevents.
+
+		A PLAYER WHOSE CHARACTER DIED OR RESPAWNED MID-HIDE gets the state cleared and no look
+		written. `AppliedTo` is the character the look went ON, never `player.Character`, for the
+		reason `revert` documents at length.
+	]]
+	--[[
+		THEN PUT THE PLAYER BACK, and this touches ONLY what `hideCharacter` captured.
+
+		NO `applyFullLook` AND NO `restoreLook` HERE. Camouflage never changed a colour, a material or
+		a scale — it only set Transparency — so the transform's look is still on the character exactly
+		as it was, and re-applying it would be a second writer on `revert`'s restore path. Whether the
+		monster is still transformed is therefore not this function's business at all, which is why
+		the branch that used to ask has gone.
+
+		`AppliedTo` RATHER THAN `player.Character`: the body the disguise went ON, for the reason
+		`revert` documents at length — after a respawn the live character is a fresh one that was
+		never hidden.
+	]]
+	local character = monster.AppliedTo or player.Character
+
+	if character == nil then
+		return
+	end
+
+	showCharacter(monster, character:FindFirstChildOfClass("Humanoid"))
+end
+
+--------------------------------------------------------------------------------
 
 local function revert(player: Player)
 	-- READ, do not construct. `stateFor` here would re-insert a departed player's UserId every time a
@@ -755,6 +1151,20 @@ local function revert(player: Player)
 	end
 
 	monster.Transformed = false
+	--[[
+		AND THE DISGUISE GOES WITH THE FORM (V07, §4.3). THE FIFTH AND LAST EXIT.
+
+		AFTER `Transformed = false`, deliberately. `exitCamouflage` re-applies the monster look when
+		the monster is still transformed; called before this line it would paint the full monster look
+		onto a character that the next twenty lines are about to restore to the player. Called here it
+		does the one thing that actually has to happen — hands the ambient slot back — and leaves the
+		look entirely to this function.
+
+		THIS IS THE EXIT `RequestTransform` USES. There is no `RequestExitCamouflage`: §4.3's only
+		reason to leave the disguise is to become the monster again, so a camouflaged Aswang firing
+		the transform remote lands here through `validateAndTransform`. One remote, one state change.
+	]]
+	exitCamouflage(player)
 	monster.LastRevertedAt = os.clock()
 	-- Any forced-revert timer still in flight for the PREVIOUS transform now belongs to a stale
 	-- generation and will decline to act. Without this, a salt-forced revert at C14 followed by a
@@ -1005,7 +1415,462 @@ end
 	`Enum.RaycastFilterType.Exclude` is wrong for this engine version is that EVERY kill is refused,
 	which is loud rather than silent.
 ]]
+--[[
+	DROP EXPIRED BURSTS AND ASK WHETHER ANY LIVE ONE CROSSES THIS SEGMENT. (V07, §4.3)
+
+	SWEPT LAZILY, INSIDE THE READER, rather than by a seventh `task.spawn` tick. There is at most one
+	live burst per Aswang and the readers already run per-kill and per-throw, so a dedicated timer
+	would be a thread that exists to delete one table entry a minute. Back-to-front so `table.remove`
+	does not skip the element after the one it removes.
+
+	THE ADAPTER IS THE ONLY ROBLOX-SHAPED PART. `vec()` already converts a Vector3 into the plain
+	`{X,Y,Z}` the pure modules take — it exists for `KillValidation` and does exactly this job — so
+	the geometry itself stays in `CamouflageRules.smokeBlocks`, where the test can enumerate it.
+]]
+--[[
+	IS ANYONE CLOSE ENOUGH TO WATCH THIS HAPPEN? (V07, §4.3)
+
+	THE SERVER'S CHECK, NOT THE PURE MODULE'S, and the split is the same one `FeedRules` makes with
+	the leash: `CamouflageWitnessRadius` needs the positions of other characters, which is a DataModel
+	read, and the pure module deals only in the four inputs §4.3 names.
+
+	WHY THE RULE EXISTS: watching a player become a pig from four studs away is not a disguise, it is
+	a magic trick with a witness. `CamouflageWitnessRadius` is pinned above `KillRange` in
+	`tests/config.test.luau` so the monster must be further from everyone than it could kill them
+	from — otherwise it could kill a survivor and vanish before that survivor's partner, standing at
+	kill range watching, had anything to report.
+
+	THE REQUESTER IS SKIPPED AND THE DEAD ARE NOT COUNTED. A husk or a corpse has no live root in
+	`Players`, so a monster hiding beside the body it just made is unwitnessed — which is right, and
+	is exactly the corpse-as-bait play §4.3 built the feed for.
+]]
+local function isUnwitnessed(player: Player): boolean
+	local character = player.Character
+	local root = if character ~= nil then rootOf(character) else nil
+
+	if root == nil then
+		return false
+	end
+
+	for _, other in Players:GetPlayers() do
+		if other == player then
+			continue
+		end
+
+		local otherCharacter = other.Character
+		local otherRoot = if otherCharacter ~= nil then rootOf(otherCharacter) else nil
+
+		if
+			otherRoot ~= nil
+			and (otherRoot.Position - root.Position).Magnitude
+				<= Config.Monster.CamouflageWitnessRadius
+		then
+			return false
+		end
+	end
+
+	return true
+end
+
+local function smokeBlocksSegment(from: Vector3, to: Vector3): boolean
+	local now = os.clock()
+
+	for index = #smokeBursts, 1, -1 do
+		local burst = smokeBursts[index]
+
+		if now >= burst.ExpiresAt then
+			table.remove(smokeBursts, index)
+			continue
+		end
+
+		if CamouflageRules.smokeBlocks(vec(from), vec(to), vec(burst.Centre), burst.Radius) then
+			return true
+		end
+	end
+
+	return false
+end
+
+--[[
+	TELL THE PEOPLE WHO CAN SEE IT (V07, §4.3), AND NOBODY ELSE.
+
+	THE AUDIENCE IS ONE EXPRESSION, deliberately rather than tidily — `announceTransform`'s header
+	records why. When someone later wants to narrow or widen this, a change to the audience is a
+	change to the whole send, visible as such in a diff, rather than two adjacent loops that drift.
+
+	NEVER `FireAllClients`. `NoiseCue`'s pattern, for `NoiseCue`'s reason: a broadcast carrying a
+	position hands every client a live index of where the monster is the instant it tries to escape —
+	readable from a compromised client with no exploit beyond listening, and strictly more than V13's
+	90s-to-30s tracker will ever give the survivors. The distance test happens HERE, on the server;
+	there is no client-side filter and there must not be one.
+
+	THE POSITION IS EXACT RATHER THAN QUANTISED, unlike `NoiseCue`'s. Noise carries 60 studs, far past
+	what a listener can see, so its position is quantised because the payload would otherwise state
+	more than the world does. Smoke's send radius is 40 and the cloud is 18: everyone who receives
+	this is close enough to WATCH it form, so an exact centre states nothing they will not see
+	rendered a frame later. IF `SmokeCueRadius` IS EVER RAISED WELL PAST VISUAL RANGE, THIS REASONING
+	EXPIRES and the position must be quantised to `Config.Noise.CueGridStuds`.
+
+	NO PLAYER FIELD. `Types.SmokeBurstPayload` is a position, a duration and a radius. Smoke is fired
+	only by the Aswang, so a UserId here would be a role broadcast with a location attached — the
+	single worst payload this game could produce, and `check:secrecy` matches `killer\w*` and the
+	enumerated role tokens rather than a field called `Source`.
+
+	THE REQUESTER IS IN THE AUDIENCE by the same distance test as everyone else, not by a special
+	case. It is standing at the centre so it passes trivially — and writing it as a special case would
+	be the first line of a version of this that treats the Aswang differently, which is the shape
+	`.claude/lessons/absence-is-observable.md` is about.
+]]
+--[[
+	CAN THIS PLAYER ACTUALLY SEE THE BURST? (V07, §4.3) THE FIX FOR THE SMOKE-CUE LEAK.
+
+	The first version selected the audience on straight-line distance ALONE, and an exploit audit was
+	right about what that costs. Only the Aswang can fire smoke, so RECEIVING this payload is the
+	statement "an Aswang is at this exact coordinate". A survivor thirty-nine studs away behind a wall
+	renders nothing — an occluded emitter draws nothing — but a compromised client logs the position
+	and narrows the field to whoever is standing there. That is the shape `revert`'s header already
+	names: a "hidden" reveal a compromised client reads and an honest one does not, which is the worst
+	of both.
+
+	SO THE COMMENT'S CLAIM IS NOW ENFORCED RATHER THAN ASSERTED. `Remotes.luau` justifies sending an
+	exact, unquantised position on the grounds that "everyone who receives this is close enough to
+	WATCH the cloud form". That was true of an honest client with line of sight and false of the
+	audience the code actually selected. With this test the two agree, and the exact position stays
+	honest because every receiver can see the thing it describes.
+
+	NOT `hasLineOfSight`, DELIBERATELY. That function now consults `smokeBlocksSegment`, so a live
+	cloud would block the cue announcing itself — and worse, the FIRST burst would suppress its own
+	message. This is a plain geometry raycast with the same exclusions and none of the smoke logic.
+
+	BOTH CHARACTERS ARE EXCLUDED. The ray starts inside the Aswang's own body, so without excluding
+	it every cast would stop at zero distance and nobody would ever be told.
+]]
+local function canSeeBurst(centre: Vector3, witnessRoot: BasePart, source: Model?): boolean
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+
+	local filter: { Instance } = { witnessRoot.Parent :: Instance }
+
+	if source ~= nil then
+		table.insert(filter, source)
+	end
+
+	-- Bodies are not cover, exactly as the kill path already rules.
+	local folder = corpses
+
+	if folder ~= nil then
+		table.insert(filter, folder)
+	end
+
+	local husks = RoundService.GetHusksFolder()
+
+	if husks ~= nil then
+		table.insert(filter, husks)
+	end
+
+	params.FilterDescendantsInstances = filter
+
+	local offset = witnessRoot.Position - centre
+
+	-- A zero-length cast is the requester standing at the centre. Trivially visible.
+	if offset.Magnitude <= 0 then
+		return true
+	end
+
+	return workspace:Raycast(centre, offset, params) == nil
+end
+
+local function sendSmokeBurst(centre: Vector3, source: Model?)
+	local payload: Types.SmokeBurstPayload = {
+		Position = centre,
+		Duration = Config.Monster.SmokeDuration,
+		Radius = Config.Monster.SmokeRadius,
+	}
+
+	for _, witness in Players:GetPlayers() do
+		local character = witness.Character
+		local root = if character ~= nil then rootOf(character) else nil
+
+		if
+			root ~= nil
+			and (root.Position - centre).Magnitude <= Config.Monster.SmokeCueRadius
+			and canSeeBurst(centre, root, source)
+		then
+			smokeRemote:FireClient(witness, payload)
+		end
+	end
+end
+
+--[[
+	MAY THIS PLAYER HIDE, AND IF SO, AS WHAT? (V07, §4.3)
+
+	THE ROLE CHECK IS FIRST AND IT IS `RoleService`'S ANSWER, NOT AN INFERENCE FROM `monsters`. A
+	player with no monster state is not the Aswang, but the converse is what matters: `stateFor` is
+	called from several paths and an entry existing is not a role.
+
+	A NON-ASWANG IS TOLD NOTHING AT ALL — no `CamouflageUpdate`, not even a refusal. That is the one
+	place this differs from `validateAndTransform`'s shape, and it is deliberate: any verdict on the
+	wire for a player who is not the monster is a free role oracle for anyone willing to spam a
+	remote. An Aswang gets its real verdict, because every value in `CamouflageVerdict` concerns the
+	receiver's own business.
+]]
+local function validateAndCamouflage(player: Player)
+	if not RoleService.IsAswang(player) then
+		return
+	end
+
+	local monster = monsters[player.UserId]
+
+	if monster == nil then
+		return
+	end
+
+	--[[
+		ALREADY HIDING MEANS "STOP", AND IT IS RESOLVED BEFORE THE RULES MODULE IS ASKED.
+
+		`CamouflageRules.evaluate` would answer ALREADY_CAMOUFLAGED, correctly — it is a refusal to
+		START a second hide, which is what that function is about. Exiting is a different verb and it
+		is unconditional: a monster that could not get out of a cat because the phase changed
+		underneath it would be stuck as scenery for the rest of the round.
+	]]
+	if monster.Camouflaged then
+		exitCamouflage(player)
+		sendCamouflageUpdate(player, "CAMO_EXITED", nil)
+		return
+	end
+
+	--[[
+		ANNOTATED AT THE ASSIGNMENT. Without the annotation the value arrives inferred as plain
+		`string` and every downstream use of it rejects — the same widening
+		`.claude/lessons/pure-module-unions-widen-in-lists.md` describes, reaching this file through
+		`AmbientRoster.Roster`'s element type. Declaring the local re-imposes the union here, once,
+		instead of at each of the three places it is used.
+	]]
+	local form: Types.CamouflageForm? = AmbientService.PickAvailableForm()
+
+	-- Annotated for the reason `form` is, one screen up: the union widens on the way out otherwise.
+	local verdict: CamouflageRules.Verdict = CamouflageRules.evaluate({
+		HasBeenRevealed = monster.HasBeenRevealed,
+		HasCharge = monster.HasCamouflageCharge,
+		MonsterState = monsterStateOf(monster),
+		Phase = RoundService.GetPhase(),
+		SlotAvailable = form ~= nil,
+	})
+
+	--[[
+		TWO CHECKS RATHER THAN ONE `or`, AND NOT FOR STYLE. A compound refinement — `verdict ~= "OK"
+		or form == nil` — does not narrow `form` past the branch: it comes out as plain `string` and
+		the literal union rejects it. Split, the second `if` narrows properly.
+
+		The verdict is reported from the first branch either way, because NO_SLOT is precisely what
+		the rules module answers when `SlotAvailable` was false.
+	]]
+	if verdict ~= "OK" then
+		-- V07. The transform path logs its refusals and this did not, which made a whole Studio
+		-- session unreadable: the only camouflage line in Output was the rate limiter's.
+		if Config.Debug.VerboseLogging then
+			print(`[MonsterService] Refused camouflage for {player.Name}: {verdict}`)
+		end
+
+		sendCamouflageUpdate(player, camouflageVerdictFor(verdict), nil)
+		return
+	end
+
+	if form == nil then
+		sendCamouflageUpdate(player, "CAMO_NO_SLOT", nil)
+		return
+	end
+
+	--[[
+		THE WITNESS CHECK IS LAST, AFTER THE RULES MODULE HAS SAID YES. It is the only refusal that
+		walks `Players` and measures distances, so it runs once per otherwise-legal request rather
+		than on every spammed one — `hasLineOfSight`'s placement in the kill path, for its reason.
+	]]
+	if not isUnwitnessed(player) then
+		if Config.Debug.VerboseLogging then
+			print(`[MonsterService] Refused camouflage for {player.Name}: WITNESSED`)
+		end
+
+		sendCamouflageUpdate(player, "CAMO_WITNESSED", nil)
+		return
+	end
+
+	--[[
+		THE WINDUP (V07, §4.3). `Config.Monster.CamouflageEnterTime`, and it is the counterplay.
+
+		§4.3's whole design is that risky acts are VISIBLE while they happen, and Config's own comment
+		beside this number says so: "a hide that is instant is a hide with no counterplay". The number
+		shipped and the behaviour did not — an audit found it declared and never read — so for a while
+		this game had the sentence without the mechanic. During these 0.8s the Aswang is still fully
+		visible, still its own body, and still killable and saltable.
+
+		NOTHING HAS BEEN SPENT YET, WHICH IS WHAT MAKES AN INTERRUPTION A REAL VICTORY. The charge is
+		spent and the slot claimed inside `enterCamouflage`, below and after the wait, so a hide
+		broken here costs the monster the attempt and nothing else — there is no unwind path to get
+		wrong, and no way for an interrupted windup to leak a claimed slot.
+
+		THE GENERATION IS `revert`'s, NOT A NEW ONE. Every path that invalidates a hide in flight —
+		a salt hit, death, the round ending, a forced revert — funnels through `revert`, which bumps
+		`monster.Generation`. Capturing it here and comparing after the wait means all four abort this
+		for free, and a second counter would be a second thing to remember to bump.
+
+		AND THE WHOLE VERDICT IS RE-ASKED, not just the generation. The phase can end, the charge can
+		be spent by a path nobody has written yet, and the roster can be exhausted by another claim.
+		Re-running `evaluate` is cheap and is the only way this cannot grant on stale inputs.
+	]]
+	local generation = monster.Generation
+
+	task.wait(Config.Monster.CamouflageEnterTime)
+
+	if monsters[player.UserId] ~= monster or monster.Generation ~= generation then
+		if Config.Debug.VerboseLogging then
+			print(`[MonsterService] Camouflage windup interrupted for {player.Name}`)
+		end
+
+		return
+	end
+
+	local stillForm: Types.CamouflageForm? = AmbientService.PickAvailableForm()
+
+	local recheck: CamouflageRules.Verdict = CamouflageRules.evaluate({
+		HasBeenRevealed = monster.HasBeenRevealed,
+		HasCharge = monster.HasCamouflageCharge,
+		MonsterState = monsterStateOf(monster),
+		Phase = RoundService.GetPhase(),
+		SlotAvailable = stillForm ~= nil,
+	})
+
+	--[[
+		SPLIT, NOT ONE COMPOUND `or` — a combined condition does not narrow `stillForm` past the
+		branch and it comes out as plain `string`, which the literal union then rejects. The same
+		widening cost several rounds earlier in this chunk; see `AmbientService`'s FORM_IDS header.
+	]]
+	if recheck ~= "OK" then
+		if Config.Debug.VerboseLogging then
+			print(
+				`[MonsterService] Camouflage windup failed revalidation for {player.Name}: {recheck}`
+			)
+		end
+
+		return
+	end
+
+	if stillForm == nil then
+		return
+	end
+
+	--[[
+		THE WITNESS CHECK RUNS AGAIN, and this is the half that makes the windup worth having. Someone
+		can WALK INTO RANGE during those 0.8 seconds — that is the counterplay §4.3 asks for, and
+		checking only before the wait would make the window decorative.
+	]]
+	if not isUnwitnessed(player) then
+		if Config.Debug.VerboseLogging then
+			print(`[MonsterService] Camouflage windup witnessed for {player.Name}`)
+		end
+
+		sendCamouflageUpdate(player, "CAMO_WITNESSED", nil)
+		return
+	end
+
+	--[[
+		CAPTURED BEFORE THE BRANCH. Luau's nil-refinement on `form` does not survive into the `if`
+		body below, so `form` reads as plain `string` there and the payload's optional-union field
+		rejects it. Binding it here is the same fix `AmbientService.Start` needed for the same reason.
+	]]
+	local wearing: Types.CamouflageForm = stillForm
+
+	if enterCamouflage(player, wearing) then
+		if Config.Debug.VerboseLogging then
+			print(`[MonsterService] {player.Name} camouflaged as {wearing}`)
+		end
+
+		sendCamouflageUpdate(player, "CAMO_OK", wearing)
+	end
+end
+
+--[[
+	MAY THIS PLAYER DROP A CLOUD? (V07, §4.3)
+
+	SAME GATE AS CAMOUFLAGE, AND THAT IS A DECISION RATHER THAN A SPEC READING. §4.3 frames smoke
+	entirely as the answer to a salt hit — "taking a salt hit forces a revert and leaves the Aswang
+	glowing… to stop that from being a death sentence, it has one smoke ability" — so the gate costs
+	the mechanic nothing: you are revealed exactly when you want it. What it buys is that an
+	unrevealed Aswang cannot plant a cloud on its own head in the middle of a group, and that both
+	abilities in this chunk live behind one flag with one setter. A V16 balance question.
+
+	NO VERDICT REACHES A NON-ASWANG, for `validateAndCamouflage`'s reason. Smoke has no down-remote
+	for refusals at all — the only thing it ever sends is the burst itself, to the people who can see
+	it — so a refused request is silent by construction rather than by care.
+]]
+local function validateAndSmoke(player: Player)
+	if not RoleService.IsAswang(player) then
+		return
+	end
+
+	local monster = monsters[player.UserId]
+
+	if monster == nil then
+		return
+	end
+
+	local character = player.Character
+	local root = if character ~= nil then rootOf(character) else nil
+
+	if root == nil then
+		return
+	end
+
+	local now = os.clock()
+
+	local verdict: CamouflageRules.SmokeVerdict = CamouflageRules.evaluateSmoke({
+		HasBeenRevealed = monster.HasBeenRevealed,
+		Phase = RoundService.GetPhase(),
+		Now = now,
+		LastBurstAt = monster.LastSmokeBurstAt,
+		Cooldown = Config.Monster.SmokeCooldown,
+	})
+
+	if verdict ~= "OK" then
+		return
+	end
+
+	monster.LastSmokeBurstAt = now
+
+	--[[
+		THE CLOUD IS RECORDED BEFORE IT IS DRAWN. `smokeBursts` is what `hasLineOfSight` and
+		`ItemService` consult; the `FireClient` below is presentation. Written in this order so that
+		there is no frame in which a client has been told about a cloud the server does not yet
+		enforce.
+	]]
+	table.insert(smokeBursts, {
+		Centre = root.Position,
+		Radius = Config.Monster.SmokeRadius,
+		ExpiresAt = now + Config.Monster.SmokeDuration,
+	})
+
+	sendSmokeBurst(root.Position, character)
+end
+
 local function hasLineOfSight(killerRoot: BasePart, targetRoot: BasePart): boolean
+	--[[
+		SMOKE BREAKS IT, AND THIS IS WHERE "BREAKS LINE OF SIGHT" BECOMES A RULE (V07, §4.3).
+
+		ASKED BEFORE THE RAYCAST, because it is cheap arithmetic over at most one live burst and the
+		raycast is not — and because the answer does not depend on geometry the map author controls.
+
+		THE SAME FUNCTION FOR BOTH DIRECTIONS, WHICH IS THE PROPERTY WORTH KEEPING. A cloud that
+		stopped the monster killing but not the survivors throwing would make smoke a gift to the
+		survivors; the reverse would make it a free kill button. `smokeBlocks` is symmetric in its two
+		points, so there is no version of this that is asymmetric by accident.
+
+		IT DOES NOT CARE WHO PLANTED IT. The monster is blinded by its own cloud, which is §4.3's
+		design — smoke "covers a disengage", and a disengage is not a kill.
+	]]
+	if smokeBlocksSegment(killerRoot.Position, targetRoot.Position) then
+		return false
+	end
+
 	local params = RaycastParams.new()
 
 	--[[
@@ -1781,6 +2646,22 @@ local function onPhaseChanged(phase: Types.RoundPhase)
 		]]
 		endFeed(userId, "FEED_INTERRUPTED")
 
+		--[[
+			AND EVERY LIVE DISGUISE (V07, §4.3), BEFORE THE REVERT AND BEFORE `table.clear`.
+
+			`table.clear` below drops the handle, and with it `AmbientSlot` — the only record that a
+			pig somewhere in the barrio is parked in ServerStorage with the monster standing in its
+			place. Nothing else knows the entity exists, so a slot missed here is claimed for the rest
+			of the SERVER's life, not merely the round: the population shrinks by one every time a
+			round ends on a camouflaged Aswang, silently, until the disguise stops working.
+
+			That is `clearExposed`'s argument two lines down, with a worse object at the end of it —
+			an orphaned Highlight is visible, and an unclaimed slot is arithmetic nobody can see.
+		]]
+		if player ~= nil then
+			exitCamouflage(player)
+		end
+
 		if player ~= nil then
 			revert(player)
 		end
@@ -1831,6 +2712,15 @@ local function watchCharacter(player: Player, character: Model)
 	end
 
 	humanoid.Died:Connect(function()
+		--[[
+			V07: AND THE DISGUISE, FIRST. A monster that dies wearing a pig must hand the slot back
+			before anything else runs — `revert` below will not, because it knows nothing about the
+			ambient roster, and the character is about to stop existing.
+
+			The ordering matches `ApplySaltHit`: out of the cat, then out of the feed, then out of the
+			monster. Each step leaves the next one looking at the state its comments were written for.
+		]]
+		exitCamouflage(player)
 		-- V06: a feeding Aswang that dies stops feeding, and gets its Humanoid back to the honest
 		-- baseline before anything else looks at it. Today only a fall or a reset reaches here — a
 		-- killed Aswang aborts the round — but V08's buntot pagi strike is a second way, and this is
@@ -1912,6 +2802,18 @@ local function onPlayerRemoving(player: Player)
 		`SearchService.releaseHold`'s nil case.
 	]]
 	endFeed(player.UserId, nil)
+
+	--[[
+		AND THE DISGUISE, BEFORE THE ENTRY GOES (V07, §4.3). THE ONE EXIT `onPhaseChanged` CANNOT
+		COVER, because this handler removes the UserId from `monsters` and the phase loop iterates
+		exactly that table — by the time the round ends there is nothing left to find.
+
+		A slot leaked here is permanent and cumulative in the way described in the phase-change loop:
+		the parked entity sits in ServerStorage with nothing holding its index. `ReleaseSlot` is total
+		and idempotent precisely so it is safe to call from inside a `PlayerRemoving` handler, where
+		one cleanup that throws takes the rest of the handler with it.
+	]]
+	exitCamouflage(player)
 
 	clearExposed(player.UserId)
 
@@ -2023,7 +2925,22 @@ end
 ]]
 function MonsterService.ApplySaltHit(player: Player)
 	--[[
-		THE FEED DIES FIRST (V06, §4.3). "Salt it mid-meal and it loses the heal and the camouflage
+		THE DISGUISE DIES FIRST (V07, §4.3/§4.6). BEFORE `endFeed`, BEFORE `revert`.
+
+		Salt forces a revert, and a revert out of the MONSTER form while the CAT form stayed on would
+		leave a player-shaped nothing wearing a cat: `revert` restores from `OriginalParts`, which
+		`applyCamouflageLook` overwrote on top of. Exiting first means `revert` finds the character in
+		exactly the state it expects — transformed, un-camouflaged — which is the state every one of
+		its comments was written about.
+
+		AND IT IS THE COUNTERPLAY. A survivor who lands salt on a suspicious pig gets a monster, in
+		the open, glowing. That is §4.6's reveal doing its job on §4.3's disguise, and it is the
+		single most satisfying thing this chunk can produce.
+	]]
+	exitCamouflage(player)
+
+	--[[
+		THE FEED DIES NEXT (V06, §4.3). "Salt it mid-meal and it loses the heal and the camouflage
 		refresh, and has to leave the body."
 
 		BEFORE `revert`, NOT AFTER, AND NOT LEFT TO THE TICK. `endFeed` is what withholds both rewards
@@ -2043,6 +2960,58 @@ function MonsterService.ApplySaltHit(player: Player)
 	revert(player)
 	applyHealthEvent(player.UserId, "SALT")
 	applyExposed(player)
+
+	--[[
+		AND THE GATE OPENS HERE — THE ONLY PLACE IN THE REPO IT EVER DOES. (V07, §4.3)
+
+		"`hasBeenRevealed` is the gate and it is set by the first salt hit, never by anything else.
+		'Someone saw it transform' is not knowable server-side; a salt hit is a fact the server
+		already owns."
+
+		WHY THIS LINE IS STRUCTURAL AND NOT A CONVENTION. V06 made this function "the ONLY entry point
+		for a salt hit; there is no bare `ForceRevert` any more, precisely so a caller cannot revert
+		without damaging". V07 inherits that property and extends it: THERE IS NO WAY TO SALT A
+		MONSTER WITHOUT REVEALING IT, AND NO WAY TO REVEAL ONE WITHOUT SALTING IT. The flag and the
+		damage are set three lines apart, inside the one function every salt hit in the game passes
+		through.
+
+		THROUGH THE TRANSITION TABLE, NOT `= true`. `CamouflageRules.revealedAfter` is where "only
+		SALT_HIT reveals" is written down and where 16 grid cells assert it. Assigning the boolean
+		directly here would work identically today and would put the rule in two places, which is how
+		the second one stops being true.
+
+		AFTER `applyExposed`, NOT BEFORE. Nothing in the four lines above reads this field, so the
+		order is not load-bearing today — but it states the causality, and it means that if any of
+		them ever throws, the monster is not left revealed by a salt hit that did not fully land. The
+		failure falls towards the survivors having to throw again, never towards a free camouflage.
+
+		IT IS NEVER UNSET. `revert` does not clear it and neither does the Exposed window expiring;
+		§4.3's reveal is a fact about the round, not a ten-second state. The reset is
+		`onPhaseChanged`'s `table.clear(monsters)` on the way out of ACTIVE.
+
+		READ, DO NOT CONSTRUCT. `stateFor` here would re-insert a departed player's UserId — `revert()`
+		above documents the same trap. A player with no monster state cannot have been salted.
+	]]
+	local monster: MonsterState? = monsters[player.UserId]
+
+	if monster ~= nil then
+		monster.HasBeenRevealed = CamouflageRules.revealedAfter(monster.HasBeenRevealed, "SALT_HIT")
+	end
+end
+
+--[[
+	IS THIS SEGMENT INSIDE A LIVE SMOKE CLOUD? (V07, §4.3) V07'S SEAM FOR `ItemService`.
+
+	SAFE TO EXPOSE FOR `IsExposed`'S REASON: a smoke cloud is ALREADY PUBLIC — there is a visible
+	burst standing in the world that every client with line of sight can see, which is the entire
+	point of it. This function states nothing a player standing there cannot see, it never enumerates,
+	and it takes two positions the caller already holds.
+
+	IT NAMES NO PLAYER IN EITHER DIRECTION. It does not say whose cloud, and it does not ask who is
+	throwing. A boolean about a line segment is not a fact about a person.
+]]
+function MonsterService.SmokeBlocks(from: Vector3, to: Vector3): boolean
+	return smokeBlocksSegment(from, to)
 end
 
 --[[
@@ -2098,6 +3067,48 @@ function MonsterService.Start()
 	corpses = folder
 
 	--[[
+		THE CHARGE COMES BACK (V07, §4.3). THE FIRST AND ONLY SUBSCRIBER TO `FeedCompleted`.
+
+		§4.3: "Camouflage is spent on use and only a feed restores it. Once revealed, the Aswang must
+		kill to hide." That sentence is the best pressure loop in the design — a revealed monster that
+		wants to disappear again has to make a corpse and stand on it, in the open, for five seconds,
+		at a place the survivors already know about.
+
+		THIS EVENT AND NOT A CALL INSIDE `completeFeed`, even though this service owns both ends. The
+		event is the seam V06 built and documented for V07; a direct call would work identically today
+		and would make the next listener — V09's, V13's — the one that has to decide whether to use
+		the event or copy the call. One joint, one shape.
+
+		WHY NOBODY HAS TO REMEMBER TO WITHHOLD IT ON AN INTERRUPTION. `completeFeed` is the only firer
+		of `FeedCompleted`, and `endFeed` — which all six interruption paths go through — does not
+		fire it at all. §4.3's "interrupting a feed is a real victory" is therefore structural: there
+		is no code that could grant the refresh on a salted feed, rather than code that carefully
+		does not.
+
+		THROUGH `CamouflageRules.chargeAfter`, for `ApplySaltHit`'s reason: the transition is asserted
+		over all eight events, so "an interrupted feed restores nothing" is a tested fact rather than
+		an absence someone has to notice.
+
+		IT DOES NOT CHECK `HasBeenRevealed`. §4.3 gives a completed feed its two rewards
+		unconditionally; the gate is on SPENDING the charge, not on holding one. An unrevealed Aswang
+		that feeds restores a charge it already had and still cannot use — which is exactly right, and
+		a reveal check here would mean a monster salted AFTER a feed found itself with no charge for
+		reasons no player could reconstruct.
+
+		READ, DO NOT CONSTRUCT: `stateFor` would re-insert a departed player.
+	]]
+	MonsterService.FeedCompleted.Event:Connect(function(player: Player)
+		local monster: MonsterState? = monsters[player.UserId]
+
+		if monster == nil then
+			return
+		end
+
+		monster.HasCamouflageCharge =
+			CamouflageRules.chargeAfter(monster.HasCamouflageCharge, "FEED_COMPLETED")
+	end)
+
+	--[[
 		THE RATE LIMIT LIVES HERE, INLINE, and not inside validateAndTransform — deliberately.
 
 		`check-ratelimit.mjs` matches `AntiCheat\w*[.:](Allow|Check|Consume|RateLimit|Permit)` within
@@ -2116,6 +3127,35 @@ function MonsterService.Start()
 		end
 
 		validateAndTransform(player)
+	end)
+
+	--[[
+		V07, §4.3. Same shape as the handler above, for the same reason: `check-ratelimit.mjs` matches
+		the Consume call within 1200 characters of the connect site, so the guard is inline and first.
+		Consume BEFORE any state is read — a handler that validates first has already done the
+		expensive work by the time it refuses, which is what makes a remote worth spamming.
+
+		NO ARGUMENTS FROM THE CLIENT, so there is no `typeof` guard here and nothing to validate about
+		the payload. The form is the SERVER's choice — see `Remotes.luau` for why a client-named form
+		would be a probe for the live ambient population.
+	]]
+	Remotes.Get("RequestCamouflage").OnServerEvent:Connect(function(player: Player)
+		if not AntiCheatService.Consume(player, "RequestCamouflage") then
+			return
+		end
+
+		validateAndCamouflage(player)
+	end)
+
+	-- V07. Same shape and same reason. No arguments — the burst happens at the requester's own
+	-- position, and a position argument would be a "drop a cloud anywhere" primitive whose first use
+	-- is dropping one on a survivor's face across the map.
+	Remotes.Get("RequestSmoke").OnServerEvent:Connect(function(player: Player)
+		if not AntiCheatService.Consume(player, "RequestSmoke") then
+			return
+		end
+
+		validateAndSmoke(player)
 	end)
 
 	-- Same shape as the handler above, for the same reason: `check-ratelimit.mjs` matches the Consume
@@ -2158,6 +3198,38 @@ function MonsterService.Start()
 		while true do
 			feedTick()
 			task.wait(0.25) -- config-ok: scheduler tick, not a balance knob
+		end
+	end)
+
+	--[[
+		WALK THE DISGUISE (V07, §4.3). ON HEARTBEAT, NOT ON THE 0.25s FEED CADENCE.
+
+		The entity has to track the monster every frame. At four updates a second it would visibly lag
+		a walking player by up to a fifth of a second and then snap — and "the cat that stutters" is
+		precisely the free tell this whole redesign exists to avoid. The feed's cadence is fine for a
+		leash check and wrong for a thing being rendered.
+
+		CHEAP BY CONSTRUCTION. `monsters` is empty outside a round and holds one entry inside one, and
+		the body runs only for an entry that is actually camouflaged, so the common case is a table
+		scan of one and a comparison.
+
+		THE ENTITY IS DRIVEN TO THE CHARACTER, NEVER THE REVERSE. That direction is the fix for the
+		Critical: the player keeps network ownership of their own body and nothing teleports, so there
+		is no `PivotTo`-against-ownership behaviour to verify and no rubber-banding to explain.
+	]]
+	RunService.Heartbeat:Connect(function()
+		for userId, monster in monsters do
+			if not monster.Camouflaged then
+				continue
+			end
+
+			local player = Players:GetPlayerByUserId(userId)
+			local character = if player ~= nil then player.Character else nil
+			local root = if character ~= nil then rootOf(character) else nil
+
+			if root ~= nil then
+				AmbientService.PuppetSlot(monster.AmbientSlot, root.CFrame)
+			end
 		end
 	end)
 

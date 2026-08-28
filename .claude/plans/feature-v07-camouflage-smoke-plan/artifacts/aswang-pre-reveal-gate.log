@@ -1,0 +1,91 @@
+V07 verification — the pre-reveal gate, driven as the (forced) Aswang
+Date: 2026-08-28 (second session, after coordinator set Config.Debug.ForceAswangWhenSolo = true)
+Studio: aswang.rbxl (Play mode, solo)
+
+=== Precondition: confirm the Config value is live in the DataModel, not just on disk ===
+execute_luau, Server datamodel, before relying on anything below:
+
+  local Config = require(game.ReplicatedStorage.Shared.Config)
+  return string.format(
+      "SoloTesting=%s ForceAswangWhenSolo=%s VerboseLogging=%s Intermission=%s Duration=%s EndScreen=%s",
+      ...)
+
+=> "SoloTesting=true ForceAswangWhenSolo=true VerboseLogging=true Intermission=8 Duration=20 EndScreen=6"
+
+Console confirms the same, from RoleService itself on the very first role draw of the session:
+  [RoleService] DEBUG — Aswang FORCED to Demiurgos_18 (roster 1 <= MinPlayers 3). Never ship with this set.
+
+This line repeats once per round for the rest of the session (5 rounds observed), confirming the
+value stayed live and this client was drawn as Aswang every round, not just the first.
+
+=== Recorders (fresh for this Play session — separate process from the earlier run) ===
+Server, on RequestCamouflage/RequestSmoke.OnServerEvent: counts fires and prints argument count.
+Client, on CamouflageUpdate/SmokeBurst.OnClientEvent: stores every payload received and prints the
+verdict/burst.
+
+=== Round #4 — Transform, then Camouflage while unrevealed ===
+Input: keyPress T, wait 200ms, keyPress C (single batched call, to land both within the 20s ACTIVE
+window before the round auto-reverts the monster).
+
+screen_capture immediately after the input batch shows:
+  - HUD panel: "ASWANG", "ALIVE", "salt ~0" (role confirmed transformed, not just drawn)
+  - Character has the glowing transform effect (red/orange head glow) — visually transformed
+  - On-screen line, exactly: "They have to see you first."
+  - TRANSFORM (T) and KILL (F) touch-equivalent buttons visible, confirming this is the Aswang HUD
+  - Round timer: "UNTIL SUNRISE 0:00" (this was the very end of the round's active window — the
+    revert happens right after, but the refusal and the line rendered while still transformed)
+
+Console, this round:
+  [V07-PROBE] RequestCamouflage fired by Demiurgos_18, argCount=0
+  [V07-PROBE-CLIENT] CamouflageUpdate received: CAMO_NOT_REVEALED
+  ... TRANSFORM witnessed (yours) / CUE_TRANSFORM / CUE_HEARTBEAT started ...
+
+execute_luau (Server), taken in the same few hundred ms as the screenshot, before the round's
+ENDING/revert could run:
+  AmbientLife count=16 camoFires=3 smokeFires=0 playerCharacterInWorkspace=true
+
+(camoFires=3 because two earlier rounds' late C presses — sent while the request landed after the
+round had already moved to ENDING and reverted the monster — also reached the server and also
+produced CAMO_NOT_REVEALED, since HasBeenRevealed is false regardless of Transformed/phase. Those
+earlier rounds are consistent with this one; the round #4 capture is the clean, fully-transformed
+case the coordinator asked for.)
+
+=== Round #3 (earlier in the same session) — first clean verdict, before the round-4 screenshot ===
+Console:
+  [V07-PROBE] RequestCamouflage fired by Demiurgos_18, argCount=0
+  [V07-PROBE-CLIENT] CamouflageUpdate received: CAMO_NOT_REVEALED
+
+Confirms the verdict is stable and reproducible across separate requests, not a one-off.
+
+=== Round #5 — Transform, then Smoke while unrevealed ===
+Input: keyPress T, wait 200ms, keyPress G.
+
+Console:
+  [V07-PROBE] RequestSmoke fired by Demiurgos_18, argCount=0
+  (no [V07-PROBE-CLIENT] SmokeBurst line — see below)
+
+Client readback:
+  execute_luau (Client): #(_G.__v07_smoke_bursts) => 0
+
+This matches src/server/Services/MonsterService.luau's validateAndSmoke (read at
+MonsterService.luau:1603-1650): when CamouflageRules.evaluateSmoke(...) returns anything other than
+"OK", the function just `return`s — no reply of any kind is sent, unlike RequestCamouflage which
+always answers with a CamouflageUpdate verdict. So the correct signature of "refused, unrevealed" for
+smoke is: the up-remote fires (argCount=0, confirmed), and NOTHING comes back — no SmokeBurst, no
+verdict, no cloud instance. That is exactly what was observed.
+
+search_game_tree (Server, keywords "smoke,Smoke,cloud,Cloud") after this round found no gameplay
+instance under either name anywhere in the DataModel — only Roblox's own engine/stats items
+(OpenCloudService, RenderBreakdown.Cloud, a ScriptDebugger named SmokeControllerDebugger — Studio's
+own debugger UI, unrelated) and the two Remotes objects (ReplicatedStorage.Remotes.SmokeBurst,
+.RequestSmoke). No smoke particle/cloud part was ever created, consistent with the burst list on the
+server never having an entry.
+
+=== Summary of the two negatives the coordinator asked to be the "actual point" ===
+- workspace.AmbientLife held 16 models before, during, and after every refused Camouflage press
+  across 5 rounds. It never moved.
+- The player's own Character remained parented to workspace (playerCharacterInWorkspace=true) at the
+  moment closest to the refusal that could be captured. The avatar never disappeared.
+
+Both negatives held under a Transformed, forced-Aswang, unrevealed camouflage attempt, and under an
+unrevealed smoke attempt. §4.3's gate did its job in every trial.

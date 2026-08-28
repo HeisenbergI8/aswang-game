@@ -1,0 +1,45 @@
+V07 verification — RequestCamouflage / RequestSmoke stay silent for a non-Aswang client
+Date: 2026-08-28
+Studio: aswang.rbxl (Play mode, solo, drawn as SURVIVOR — see ambient-population-console.log for why)
+
+Purpose: prove the negative half of Step 5.1/6.3's design ("bound for everyone; the role check is
+inside the two perform functions" — InputController.luau:88-109). A survivor pressing C or G must
+produce NO remote traffic at all, because InputController.performCamouflage/performSmoke gate on
+`UIController.GetMyRole() ~= Enums.Role.Aswang` and return false before calling FireServer.
+
+=== Recorder attached, Server datamodel, execute_luau ===
+Code:
+  local Remotes = require(game.ReplicatedStorage.Shared.Remotes)
+  local cam = Remotes.Get("RequestCamouflage")
+  local smoke = Remotes.Get("RequestSmoke")
+  _G.__v07_camo_fires = 0
+  _G.__v07_smoke_fires = 0
+  cam.OnServerEvent:Connect(function(player, ...)
+      _G.__v07_camo_fires += 1
+      print(("[V07-PROBE] RequestCamouflage fired by %s, argCount=%d"):format(player.Name, select("#", ...)))
+  end)
+  smoke.OnServerEvent:Connect(function(player, ...)
+      _G.__v07_smoke_fires += 1
+      print(("[V07-PROBE] RequestSmoke fired by %s, argCount=%d"):format(player.Name, select("#", ...)))
+  end)
+Result: "recorder attached"
+
+=== user_keyboard_input, Client datamodel ===
+keyPress C, wait 300ms, keyPress G, wait 300ms
+
+=== Readback, Server datamodel, execute_luau ===
+return string.format("camoFires=%d smokeFires=%d", _G.__v07_camo_fires or -1, _G.__v07_smoke_fires or -1)
+=> "camoFires=0 smokeFires=0"
+
+=== Console output after the key presses ===
+No "[V07-PROBE] ..." lines appear anywhere in the console (see ambient-population-console.log for
+the full transcript spanning this window — the probe lines are simply absent from it).
+
+Conclusion: as a Survivor, pressing C and G produced zero calls to either OnServerEvent. This
+confirms InputController's local role gate is working as documented — the up-remotes never leave
+the client for a non-Aswang, matching the plan's "no verdict on the wire for a player who is not the
+monster" design (Step 5.1).
+
+This does NOT test the positive path (an Aswang pressing C/G) or the server-side reveal gate in
+CamouflageRules/MonsterService. See ../verification.md, "Not Verified", for why that could not be
+reached in this session.

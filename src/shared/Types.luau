@@ -628,6 +628,62 @@ export type FeedUpdatePayload = {
 }
 
 --[[
+	V07, §4.3. The verdict union the SERVER reports for a camouflage request.
+
+	Mirrored from `pure/CamouflageRules.Verdict` plus the two the server owns rather than the rules
+	module: `CAMO_EXITED` (a state change, never a refusal) and `CAMO_WITNESSED` (a survivor inside
+	`Config.Monster.CamouflageWitnessRadius`, which is a distance the pure module never sees).
+
+	THE VALUES ARE PREFIXED AND NOT SHARED WITH `FeedVerdict` OR THE PURE MODULE'S UNION. Two unions
+	that happen to contain the same strings are one refactor away from being passed to each other's
+	handler, and under `--!strict` a shared union would typecheck that mistake.
+]]
+export type CamouflageVerdict =
+	"CAMO_OK"
+	| "CAMO_EXITED"
+	| "CAMO_NOT_REVEALED"
+	| "CAMO_WRONG_PHASE"
+	| "CAMO_NO_CHARGE"
+	| "CAMO_ALREADY"
+	| "CAMO_NOT_TRANSFORMED"
+	| "CAMO_NO_SLOT"
+	| "CAMO_WITNESSED"
+
+--[[
+	V07, §4.3. What the Aswang's own client is told about its disguise, and nothing else is.
+
+	NO CHARGE COUNT AND NO REVEAL FLAG — see `Remotes.luau`'s `CamouflageUpdate` entry for the full
+	argument. A verdict and an optional form, fired to one player about themselves.
+
+	`Form` IS OPTIONAL BECAUSE A REFUSAL HAS NONE. It is populated on CAMO_OK and on the exit message,
+	so the client can say "You are a pig" and later "You are yourself"; every other verdict carries
+	nil.
+]]
+export type CamouflageUpdatePayload = {
+	Verdict: CamouflageVerdict,
+	Form: CamouflageForm?,
+}
+
+--[[
+	V07, §4.3. A cloud, at a place, for a while — and the ABSENT FIELDS are the design.
+
+	No UserId, no Character, no name, no role. Smoke is fired only by the Aswang, so a player field
+	here would be a role broadcast with a position attached. See `Remotes.luau`'s `SmokeBurst` entry
+	for why the position itself is safe: everyone who receives this payload is inside
+	`Config.Monster.SmokeCueRadius` and can watch the cloud form.
+
+	`Duration` AND `Radius` ARE SENT RATHER THAN READ FROM CONFIG BY THE CLIENT, even though Config
+	replicates. The server is the authority on how long ITS burst lasts, and a client that computed
+	the lifetime from Config would draw a stale cloud for four seconds after a Config change that the
+	server had already applied. One fewer place where the two can disagree.
+]]
+export type SmokeBurstPayload = {
+	Position: Vector3,
+	Duration: number,
+	Radius: number,
+}
+
+--[[
 	V04, §4.4. THE FOUR NOISY ACTIONS.
 
 	Only two of them have an emitter in V04, and that is a statement about the GAME rather than about

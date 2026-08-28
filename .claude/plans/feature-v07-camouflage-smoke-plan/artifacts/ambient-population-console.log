@@ -1,0 +1,147 @@
+V07 verification — ambient population exists and wanders
+Date: 2026-08-28
+Studio: aswang.rbxl (Play mode, solo, SoloTesting=true, ForceAswangWhenSolo=false)
+
+=== search_game_tree, Edit mode, BEFORE Play, keywords "AmbientSpawn,AmbientLife" ===
+No instances found matching keywords 'AmbientSpawn,AmbientLife'
+
+This confirms the plan's stated precondition: the map has no AmbientSpawn-tagged parts yet, so
+AmbientService.Start must use its fallback ring, not map-authored spawn points.
+
+=== search_game_tree, Server datamodel, Play mode, path Workspace.AmbientLife, max_depth 2 ===
+16 Model children, exactly matching the plan's naming scheme (Config.Ambient.PerForm * 4 = 16):
+
+Workspace.AmbientLife.Ambient_CAT_1        (+ .Body Part)
+Workspace.AmbientLife.Ambient_CAT_2        (+ .Body Part)
+Workspace.AmbientLife.Ambient_CAT_3        (+ .Body Part)
+Workspace.AmbientLife.Ambient_CAT_4        (+ .Body Part)
+Workspace.AmbientLife.Ambient_DOG_5        (+ .Body Part)
+Workspace.AmbientLife.Ambient_DOG_6        (+ .Body Part)
+Workspace.AmbientLife.Ambient_DOG_7        (+ .Body Part)
+Workspace.AmbientLife.Ambient_DOG_8        (+ .Body Part)
+Workspace.AmbientLife.Ambient_PIG_9        (+ .Body Part)
+Workspace.AmbientLife.Ambient_PIG_10       (+ .Body Part)
+Workspace.AmbientLife.Ambient_PIG_11       (+ .Body Part)
+Workspace.AmbientLife.Ambient_PIG_12       (+ .Body Part)
+Workspace.AmbientLife.Ambient_VILLAGER_13  (+ .Body Part)
+Workspace.AmbientLife.Ambient_VILLAGER_14  (+ .Body Part)
+Workspace.AmbientLife.Ambient_VILLAGER_15  (+ .Body Part)
+Workspace.AmbientLife.Ambient_VILLAGER_16  (+ .Body Part)
+
+execute_luau (Server): #game.Workspace.AmbientLife:GetChildren() => 16
+(re-checked ~90s later, mid round #4: still 16)
+
+=== Wander proof: Ambient_CAT_1.Body CFrame.Position, two reads ~90s apart ===
+Read 1 (round #1, ACTIVE, shortly after Start()):
+  CFrame.Position = "60.777984619140625, 3, 18.831039428710938"
+Read 2 (round #3-4 boundary, ~90s of wall clock later):
+  CFrame.Position = "51.61268615722656, 3, 17.565099716186523"
+
+Position changed (~9.4 studs on the X/Z plane) with no player input driving it — the Heartbeat
+wander loop is running. Ambient_DOG_5.Body read at the same second: "-19.006919860839844, 3,
+54.15626907348633" (recorded once, no second read taken).
+
+=== Full console output, boot through round #4 STARTING ===
+[ProfileStore]: Roblox API services unavailable - data will not be saved
+[Progression] DataStoreState is "NoAccess" — NOTHING WILL PERSIST. In Studio: Game Settings > Security > Enable Studio Access to API Services, and the place must be published.
+[Badges] 5 of 5 badge ids are unset (Welcome, FirstTask, FirstRound, FirstBlood, BalikBalik) — those badges will NOT award. Create them in the Creator Hub and put the ids in Config.Badges (C35).
+[Community] Config.Community.GroupId is 0 — the group join reward will refuse every claim. Create the Roblox group and set the id (C36).
+[RoundService] -> INTERMISSION (8s)
+[Bootstrap] Ready. 18 services loaded.
+[Bootstrap] SoloTesting is ENABLED — do not ship with this on.
+[Progression] Demiurgos_18: CURRENT from v2 -> L1
+[Client] Ready. 12 controllers loaded.
+[AudioController] cue CUE_BED_LOBBY — bed
+[Client] Snapshot — INTERMISSION round #0 · you: LOBBY (7s left)
+[AudioController] cue CUE_FOOTSTEP — retargeted on Demiurgos_18
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #1 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #1 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L1
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #1 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #1 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #2 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #2 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[AudioController] cue CUE_DOGS — ambient one-shot in ACTIVE
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L1
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #2 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #2 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #3 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #3 · you: ALIVE (19s left)
+[AudioController] cue CUE_SUNRISE — dawn
+[RoundService] -> ENDING (6s)
+[QuickChat] verdicts this round:
+[Progression] Demiurgos_18 +50 xp +25 coins (round) -> L2
+[Client] Phase -> ENDING (6s)
+[Client] Snapshot — ENDING round #3 · you: ALIVE (5s left)
+[AudioController] cue CUE_BED_DAWN — bed
+[RoundService] -> INTERMISSION (8s)
+[Client] Phase -> INTERMISSION (8s)
+[Client] Snapshot — INTERMISSION round #3 · you: LOBBY (7s left)
+[AudioController] cue CUE_BED_LOBBY — bed
+[RoleService] Drew 1 roles.
+[RoundService] -> STARTING (4s)
+[SearchService] Container pool OK — 15 containers.
+[SearchService] Seeded 7 item(s) across 15 containers.
+[ItemService] Salt pool OK — 6 spawn points.
+[ItemService] 4 pouch(es) placed of 4 wanted.
+[Client] Phase -> STARTING (4s)
+[Client] Snapshot — STARTING round #4 · you: ALIVE (3s left)
+[AudioController] cue CUE_BED_NIGHT — bed
+[RoundService] -> ACTIVE (20s)
+[Client] Phase -> ROUND LIVE (20s)
+[Client] Snapshot — ACTIVE round #4 · you: ALIVE (19s left)
+
+Note: "RoleService Drew 1 roles" fires every round, and every round the client snapshot shows
+"you: ALIVE" with the SURVIVOR HUD panel (see screen_capture, not saved to disk — no file-writing
+path from that tool was available to this session; described under Not Verified). At no point across
+four full round cycles did this client become the Aswang. Config.Debug.ForceAswangWhenSolo is false
+(pinned by check:debug), and RoleService.luau:178-185 gates the forced-Aswang branch on
+`SoloTesting and ForceAswangWhenSolo and #candidates <= MinPlayers` — with the flag false, a lone
+player is drawn as Survivor by construction (comment at Config.luau:1472-1476 confirms this is the
+documented behaviour, not a bug).
