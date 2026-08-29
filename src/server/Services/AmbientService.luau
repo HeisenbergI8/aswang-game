@@ -76,6 +76,7 @@
 	────────────────────────────────────────────────────────────────────────────────────────────────
 ]]
 
+local AssetService = game:GetService("AssetService")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -141,26 +142,55 @@ local wanderConnection: RBXScriptConnection? = nil
 	NO LIGHT AND NO PARTICLE EMITTER, deliberately: §5's mobile budget is about exactly those two and
 	`PerformanceController` enforces the light cap. Sixteen anchored parts spend neither.
 ]]
-local FORM_LOOKS: { [Types.CamouflageForm]: { Size: Vector3, Colour: Color3 } } = {
-	CAT = {
-		Size = Vector3.new(1.4, 1.2, 2.6), -- config-ok: placeholder rig proportions, not balance
-		Colour = Color3.fromRGB(64, 60, 58), -- config-ok: placeholder rig colour, not balance
-	},
-	DOG = {
-		Size = Vector3.new(1.8, 1.9, 3.2), -- config-ok: placeholder rig proportions, not balance
-		Colour = Color3.fromRGB(122, 94, 62), -- config-ok: placeholder rig colour, not balance
-	},
-	PIG = {
-		Size = Vector3.new(2.0, 1.8, 3.4), -- config-ok: placeholder rig proportions, not balance
-		Colour = Color3.fromRGB(198, 148, 148), -- config-ok: placeholder rig colour, not balance
-	},
-	VILLAGER = {
-		-- The tall one, and that is the whole of what these four silhouettes must convey: §4.5's
-		-- deduction is "which cat", never "is that a cat".
-		Size = Vector3.new(2.0, 5.0, 1.2), -- config-ok: placeholder rig proportions, not balance
-		Colour = Color3.fromRGB(96, 108, 128), -- config-ok: placeholder rig colour, not balance
-	},
-}
+--[[
+	THE FOUR AMBIENT FORMS, AS GENERATED MESHES RATHER THAN COLOURED BLOCKS.
+
+	These were four `SmoothPlastic` boxes — the "moving box" a player sees drifting across the plaza.
+	`Mesh` and `Texture` are Studio-minted asset ids from `generate_mesh`; `Size` is the bounding box
+	each is scaled to and stays what it always was, because §4.5's deduction is "WHICH cat", never "is
+	that a cat", and the four silhouettes have to stay tellable apart at distance.
+
+	UPGRADING THESE UPGRADES THE DISGUISE FOR FREE, and that is a property of the design rather than a
+	coincidence. `MonsterService.enterCamouflage` does NOT re-skin the player — it hides their body and
+	puppets one of these entities through `PuppetSlot`. So the Aswang wearing a cat is literally one of
+	these rigs. There is no second appearance path that could drift from this one, which is exactly the
+	kind of divergence that would hand survivors a free tell.
+
+	A FAILED MESH LOAD FALLS BACK TO THE BOX rather than erroring. An ambient population that fails to
+	spawn is a camouflage mechanic with no slots in it — `ClaimSlot` returns nil and the Aswang simply
+	cannot hide — so a degraded look is strictly better than a missing entity.
+]]
+local FORM_LOOKS: {
+	[Types.CamouflageForm]: { Size: Vector3, Colour: Color3, Mesh: string, Texture: string },
+} =
+	{
+		CAT = {
+			Size = Vector3.new(1.4, 1.2, 2.6), -- config-ok: rig proportions, not balance
+			Colour = Color3.fromRGB(64, 60, 58), -- config-ok: fallback rig colour, not balance
+			Mesh = "rbxassetid://98654944459292", -- config-ok: generated mesh asset, not balance
+			Texture = "rbxassetid://111446154045426", -- config-ok: generated texture asset, not balance
+		},
+		DOG = {
+			Size = Vector3.new(1.8, 1.9, 3.2), -- config-ok: rig proportions, not balance
+			Colour = Color3.fromRGB(122, 94, 62), -- config-ok: fallback rig colour, not balance
+			Mesh = "rbxassetid://131182319795370", -- config-ok: generated mesh asset, not balance
+			Texture = "rbxassetid://108587618947011", -- config-ok: generated texture asset, not balance
+		},
+		PIG = {
+			Size = Vector3.new(2.0, 1.8, 3.4), -- config-ok: rig proportions, not balance
+			Colour = Color3.fromRGB(198, 148, 148), -- config-ok: fallback rig colour, not balance
+			Mesh = "rbxassetid://108719451589587", -- config-ok: generated mesh asset, not balance
+			Texture = "rbxassetid://125798003654731", -- config-ok: generated texture asset, not balance
+		},
+		VILLAGER = {
+			-- The tall one, and that is the whole of what these four silhouettes must convey: §4.5's
+			-- deduction is "which cat", never "is that a cat".
+			Size = Vector3.new(2.0, 5.0, 1.2), -- config-ok: rig proportions, not balance
+			Colour = Color3.fromRGB(96, 108, 128), -- config-ok: fallback rig colour, not balance
+			Mesh = "rbxassetid://131254025115965", -- config-ok: generated mesh asset, not balance
+			Texture = "rbxassetid://81445534883746", -- config-ok: generated texture asset, not balance
+		},
+	}
 
 --[[
 	WHERE THE POPULATION STANDS. Tagged points if the map has them; a ring if it does not.
@@ -213,11 +243,34 @@ local function buildEntity(form: Types.CamouflageForm, index: number, at: CFrame
 	local model = Instance.new("Model")
 	model.Name = `Ambient_{form}_{index}`
 
-	local body = Instance.new("Part")
+	--[[
+		A MESH IF IT LOADS, A BOX IF IT DOES NOT. `CreateMeshPartAsync` yields and can fail — the asset
+		may be moderated, or the place rolled back past the upload — and a nil entity here is worse
+		than an ugly one: it removes a camouflage slot, and `ClaimSlot` returning nil means the Aswang
+		cannot hide at all. So the box survives as the fallback rather than being deleted.
+	]]
+	local body: BasePart
+
+	local ok, meshPart = pcall(function()
+		return AssetService:CreateMeshPartAsync(look.Mesh)
+	end)
+
+	if ok and meshPart ~= nil then
+		body = meshPart :: MeshPart
+		(body :: MeshPart).TextureID = look.Texture
+	else
+		warn(
+			`[AmbientService] {form} mesh {look.Mesh} failed to load — falling back to a plain body. `
+				.. `The slot still exists, so camouflage still works; it just looks wrong.`
+		)
+
+		body = Instance.new("Part")
+		body.Color = look.Colour
+		body.Material = Enum.Material.SmoothPlastic
+	end
+
 	body.Name = "Body"
 	body.Size = look.Size
-	body.Color = look.Colour
-	body.Material = Enum.Material.SmoothPlastic
 	body.Anchored = true
 	body.CanCollide = false
 	body.CanQuery = false

@@ -120,10 +120,11 @@ end
 --[[
 	EVERYTHING THE SERVICES WILL LOOK FOR, GATHERED THE WAY THEY GATHER IT.
 
-	This was `anchors:GetChildren()` and that was a real hole, found in audit: the `EscapeGate` is
-	parented under `Arko`, not under `Anchors`, so it was in neither the reachability check nor the
-	loop check. A corridor that sealed off the gate — the one part survivors must reach to win — would
-	have printed `ok` on every line.
+	This was `anchors:GetChildren()` and that was a real hole, found in audit: v1.3's escape-gate part
+	was parented under `Arko`, not under `Anchors`, so it was in neither the reachability check nor the
+	loop check. A corridor that sealed off the one part survivors had to reach to win would have printed
+	`ok` on every line. That part is gone with V01, but the lesson is why this reads tags, not folders —
+	and it is why the v2.0 tags below were caught missing rather than assumed present.
 
 	Reading CollectionService instead of a folder closes it permanently, and for the same reason the
 	generator prints its receipt from tags rather than from its own tables: the folder is where I put
@@ -135,18 +136,30 @@ end
 
 	A first version of this check pathed straight to each tagged part's centre, and that is wrong in
 	both directions. The pads are non-collidable so a path to their centre succeeds and tells you
-	little; the `EscapeGate` is a SOLID part, so a path into the middle of it fails no matter where it
-	sits — it reported the gate unreachable on a map where walking up to it works fine.
+	little; v1.3's gate leaf was a SOLID part, so a path into the middle of it failed no matter where it
+	sat — it reported the gate unreachable on a map where walking up to it worked fine. Every v2.0 tag
+	below is a non-collidable pad, so it is the first failure mode that applies now, not the second.
 
 	What the services ask is whether the player's HumanoidRootPart is within a range of the part's
 	position. So that is what gets tested: is there a spot a character can WALK TO, from which the
 	server's own distance check would pass. Nothing else is a reachability claim about this game.
 ]]
+--[[
+	V2.0. THIS TABLE WAS STALE AND ITS STALENESS WAS A FALSE GREEN RATHER THAN A CRASH.
+
+	Two of the four tags here — the round's task points and its fetch sources — no longer exist. A
+	`GetTagged` on a dead tag returns an empty list, so this script would have walked almost nothing
+	and reported a healthy crossing time over it. Every phase of the realism plan cites this file as
+	proof the layout still holds, so a silent empty set here would have propagated a false green
+	through the whole pass. `tests/barrio-measure.test.luau` now holds it to the live tag set.
+
+	`TaskPoint` stays and its range does not matter: the only parts still carrying it are the Solo
+	Trial's two, and they are skipped below as unreachable by design.
+]]
 local RANGE_BY_TAG: { [string]: number } = {
-	TaskPoint = 9, -- Config.Tasks.PresenceRangeStuds
-	FetchSource = 9, -- picked up by the same presence rule
+	SearchContainer = 10, -- Config.Search.RangeStuds — stand and HOLD, not walk-over
 	SaltSpawn = 6, -- Config.Salt.PickupRangeStuds
-	EscapeGate = 6, -- Config.Tasks.GateRangeStuds
+	AmbientSpawn = 6, -- no server range rule; sited ground must still be walkable
 }
 
 -- Where a character's HumanoidRootPart sits above the floor. Every range check in the game is a 3D
@@ -159,7 +172,7 @@ local function tagged(): { { Part: BasePart, Range: number } }
 	for tag, range in RANGE_BY_TAG do
 		for _, instance in CollectionService:GetTagged(tag) do
 			--[[
-				`TrialOnly` IS SKIPPED HERE FOR THE SAME REASON `TaskService.discoverPool` SKIPS IT,
+				`TrialOnly` IS SKIPPED HERE BECAUSE THE TRIAL CORNER IS SEALED BY DESIGN,
 				and leaving it out made this script cry wolf on every run since C21.
 
 				The Solo Trial's two practice points carry the ordinary `TaskPoint` tag and live in a
@@ -343,14 +356,13 @@ local CORRIDORS = {
 --[[
 	THE LOOP TEST CHECKS EVERY TAGGED PART, NOT ONLY THE TASK POINTS.
 
-	It used to filter to names beginning `Task_`, which made the printed line — "leaves every task point
-	reachable" — literally true and quietly narrower than what a reader skimming for "no dead ends"
-	takes from it. A corridor that cut off a `SaltSpawn`, a `FetchSource` or the `EscapeGate` while
-	leaving all twelve task points connected still printed `ok`.
+	It used to filter to names beginning `Task_`, which made the printed line literally true and quietly
+	narrower than what a reader skimming for "no dead ends" takes from it. A corridor that cut off a
+	salt spawn while leaving the round's objectives connected still printed `ok`.
 
-	Each of those is a way to lose the round: no salt in reach is §4.6's counterplay missing, an
-	unreachable source demotes a FETCH task, and an unreachable gate means survivors cannot win at all.
-	They belong in the same check as the task points, and the wording now says what is actually tested.
+	In v2.0 the stakes are higher, not lower. A corridor that seals off a `SearchContainer` removes one
+	of fifteen chances to find the three items §4.9 requires; one that seals off a `SaltSpawn` removes
+	§4.6's counterplay outright. Both belong in this check, and the wording now says what is tested.
 ]]
 for _, corridor in CORRIDORS do
 	local blocker = Instance.new("Part")
