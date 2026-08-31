@@ -121,67 +121,109 @@ check(
 	`TransformTime={Config.Monster.TransformTime}`
 )
 
--- Spec §4.6: salt is thrown from outside kill range, or it is not counterplay — it is a suicide button.
+--[[
+	Spec §4.6: salt is thrown from outside kill range, or it is not counterplay — it is a suicide
+	button. §6.5 invariant 3.
+
+	V08 RE-POINTED THIS OFF THE ALIAS TABLE. It used to read `Config.Salt.ThrowRange`, and it is an
+	INVARIANT wearing alias clothing rather than one of the alias GUARDS that table carried — so when
+	`Config.Salt` was deleted this had to survive rather than go with it. Deleting an invariant while
+	deleting a table is the silent way to lose a §6.5 guarantee.
+]]
 check(
 	"salt reaches further than the Aswang kills",
-	Config.Salt.ThrowRange > Config.Monster.KillRange,
-	`ThrowRange={Config.Salt.ThrowRange}, KillRange={Config.Monster.KillRange}`
+	Config.Items.SaltThrowRange > Config.Monster.KillRange,
+	`SaltThrowRange={Config.Items.SaltThrowRange}, KillRange={Config.Monster.KillRange}`
 )
 
 -- Spec §4.6: the reveal must outlast the stun, or the Aswang is revealed only while it cannot move —
--- information nobody can act on.
+-- information nobody can act on. §6.5 invariant 6. V08 re-pointed it off the alias table for the
+-- same reason as the check above.
 check(
 	"the salt reveal outlasts the stun",
-	Config.Salt.RevealDuration > Config.Salt.StunDuration,
-	`RevealDuration={Config.Salt.RevealDuration}, StunDuration={Config.Salt.StunDuration}`
+	Config.Items.SaltRevealDuration > Config.Items.SaltStunDuration,
+	`SaltRevealDuration={Config.Items.SaltRevealDuration}, `
+		.. `SaltStunDuration={Config.Items.SaltStunDuration}`
 )
 
 --[[
-	V02: THE FOUR SALT ALIASES STILL POINT AT `Config.Items`.
+	V02'S SEVEN SALT ALIASES ARE GONE, AND SO IS THE TABLE THEY GUARDED.
 
-	§6.5 renames these four to `Items.Salt*`, but five live modules read the old names, so V02 made
-	`Config.Items` canonical and left `Config.Salt`'s four as REFERENCES into it rather than copies.
-	Nothing mechanically stops a tuning session from replacing a reference with a literal: it
-	typechecks, `check:config` exempts `Config.luau` itself (check-config.mjs:36), and `analyze` and
-	`lint` both stay green while the two numbers silently diverge — with `Items` reading as canonical
-	while five modules quietly use the stale copy.
+	`Config.Salt` was a shrinking alias table whose four spec-renamed keys pointed into `Config.Items`,
+	and these checks existed because nothing mechanically stops a tuning session replacing a reference
+	with a literal — it typechecks, `check:config` exempts `Config.luau` itself, and `analyze` and
+	`lint` stay green while the two numbers silently diverge.
 
-	These four checks are that guard, and they are the condition attached to choosing the alias branch
-	over a hard rename. DELETE EACH ONE with the alias it guards, in whichever chunk renames its last
-	reader; a check against a field that no longer exists is a loud Lune error, which is correct.
+	V08 renamed the last reader of every one of them, so the table was deleted and its guards went
+	with it, exactly as V02's instruction said they should ("DELETE EACH ONE with the alias it
+	guards"). What did NOT go with it: the two §6.5 invariants that happened to read through the
+	alias. Those are re-pointed at `Config.Items` above.
+]]
+
+--------------------------------------------------------------------------------
+-- V08 — the item slot, the drop, and the two-number agreements behind them.
+--------------------------------------------------------------------------------
+
+--[[
+	V08. THE DROP CANNOT LAND INSIDE ITS OWN PICKUP RADIUS.
+
+	A silent invariant of exactly the kind §6.5 collects. Drop an item within `DropPickupRangeStuds`
+	of where you are standing and the pickup pass takes it straight back — the item never reaches the
+	floor, the slot never empties, and the player sees a drop button that does nothing. No error, no
+	warning, and the only symptom is a control that appears broken.
 ]]
 check(
-	"Config.Salt.SpawnCount is still an alias of Items.SaltSpawnCount",
-	Config.Salt.SpawnCount == Config.Items.SaltSpawnCount,
-	`Salt.SpawnCount={Config.Salt.SpawnCount}, Items.SaltSpawnCount={Config.Items.SaltSpawnCount}`
+	"a dropped item lands outside the radius that would re-take it",
+	Config.Items.DropForwardStuds >= Config.Items.DropPickupRangeStuds,
+	`DropForwardStuds={Config.Items.DropForwardStuds}, `
+		.. `DropPickupRangeStuds={Config.Items.DropPickupRangeStuds}`
 )
 
+--[[
+	V08. A DROPPED ITEM IS NOT SWEPT UP FROM A CONTAINER.
+
+	`Search.RangeStuds` (10) is how far you may stand from a container and still search it. If the
+	drop pickup radius reached that far, a player at a container would collect whatever was on the
+	floor beside it without moving — and the one-slot choice §4.6 is built on becomes "hold both,
+	one frame apart".
+]]
 check(
-	"Config.Salt.StunDuration is still an alias of Items.SaltStunDuration",
-	Config.Salt.StunDuration == Config.Items.SaltStunDuration,
-	`Salt.StunDuration={Config.Salt.StunDuration}, Items.SaltStunDuration={Config.Items.SaltStunDuration}`
+	"the drop pickup radius is tighter than the search radius",
+	Config.Items.DropPickupRangeStuds < Config.Search.RangeStuds,
+	`DropPickupRangeStuds={Config.Items.DropPickupRangeStuds}, `
+		.. `SearchRangeStuds={Config.Search.RangeStuds}`
 )
 
+-- V08. `pure/ItemCarry` fails closed on a limit that is not positive-and-finite, so a typo here is
+-- a game in which nobody can carry anything. One is the design (§4.6); this pins the range.
 check(
-	"Config.Salt.RevealDuration is still an alias of Items.SaltRevealDuration",
-	Config.Salt.RevealDuration == Config.Items.SaltRevealDuration,
-	`Salt.RevealDuration={Config.Salt.RevealDuration}, Items.SaltRevealDuration={Config.Items.SaltRevealDuration}`
+	"the carry limit is a positive finite number",
+	Config.Items.CarryLimit > 0 and Config.Items.CarryLimit < math.huge,
+	`CarryLimit={Config.Items.CarryLimit}`
 )
 
+--[[
+	V08. THE THROW CONE STAYS A CONE. At 90 degrees the half-angle makes a hemisphere and past 90 a
+	throw hits what is behind the thrower, which is not a throw. `pure/ItemThrow.inCone` re-checks
+	this bound because it is called with numbers rather than with Config; this pins the number the
+	game actually ships.
+]]
 check(
-	"Config.Salt.ThrowRange is still an alias of Items.SaltThrowRange",
-	Config.Salt.ThrowRange == Config.Items.SaltThrowRange,
-	`Salt.ThrowRange={Config.Salt.ThrowRange}, Items.SaltThrowRange={Config.Items.SaltThrowRange}`
+	"the throw cone is a half-angle under 90 degrees",
+	Config.Items.ThrowConeDegrees > 0 and Config.Items.ThrowConeDegrees < 90,
+	`ThrowConeDegrees={Config.Items.ThrowConeDegrees}`
 )
 
--- Spec §4.6, C13: four pouches cannot be placed at three points. This is the relation that turns a
--- map defect into a startable round with less salt than the design assumes, and the only symptom
--- otherwise is "salt feels rarer than it should" six playtests later.
-check(
-	"there are at least as many salt spawn points as pouches",
-	Config.Salt.PouchPoolSize >= Config.Salt.SpawnCount,
-	`PouchPoolSize={Config.Salt.PouchPoolSize}, SpawnCount={Config.Salt.SpawnCount}`
-)
+--[[
+	V08 DELETED "there are at least as many salt spawn points as pouches" WITH THE POOL IT GUARDED.
+
+	C13 placed four pouches at `SaltSpawn` points and this pinned the map against the count. V08
+	deleted that second salt economy: items come from V03's containers, seeded by `SearchService`
+	from `Config.Items.*SpawnCount`, and there are no spawn points left to be short of.
+
+	THE EQUIVALENT GUARD FOR THE NEW WORLD IS `Config.Search.ContainerCount` AGAINST THE SEVEN ITEMS,
+	and it already exists in this file where the container numbers are pinned — see the Search block.
+]]
 
 --[[
 	Spec §4.6: "Recharge: none in MVP. Once used, it's gone. SCARCITY MAKES IT A DECISION."
@@ -192,16 +234,8 @@ check(
 ]]
 check(
 	"salt is scarcer than the roster",
-	Config.Salt.SpawnCount < Config.Round.MaxPlayers,
-	`SpawnCount={Config.Salt.SpawnCount}, MaxPlayers={Config.Round.MaxPlayers}`
-)
-
--- Spec §4.6, C14: a half-angle of 90 degrees is a hemisphere and anything above it hits what is
--- BEHIND the thrower. Zero is a raycast, which §5's mobile audience cannot aim.
-check(
-	"the throw cone is a cone",
-	Config.Salt.ThrowConeDegrees > 0 and Config.Salt.ThrowConeDegrees < 90,
-	`ThrowConeDegrees={Config.Salt.ThrowConeDegrees}`
+	Config.Items.SaltSpawnCount < Config.Round.MaxPlayers,
+	`SaltSpawnCount={Config.Items.SaltSpawnCount}, MaxPlayers={Config.Round.MaxPlayers}`
 )
 
 --[[
@@ -215,8 +249,8 @@ check(
 ]]
 check(
 	"the kill cooldown outlasts the salt stun",
-	Config.Monster.KillCooldown > Config.Salt.StunDuration,
-	`KillCooldown={Config.Monster.KillCooldown}, StunDuration={Config.Salt.StunDuration}`
+	Config.Monster.KillCooldown > Config.Items.SaltStunDuration,
+	`KillCooldown={Config.Monster.KillCooldown}, SaltStunDuration={Config.Items.SaltStunDuration}`
 )
 
 --[[
@@ -1011,6 +1045,23 @@ check(
 check(
 	"Ambient.PerForm >= 2 — a lone entity of a form IS the monster",
 	Config.Ambient.PerForm >= 2,
+	`PerForm={Config.Ambient.PerForm}`
+)
+
+--[[
+	AND THE CEILING, WHICH ONLY BECAME BREAKABLE WHEN THE FORM COUNT STOPPED BEING FOUR.
+
+	§5 says "3-4 each" and the floor above says "at least 2". Nothing said "at most 4" — under four
+	forms nobody would raise it, because 4 x 4 was already the largest ambient population anyone had
+	costed. At six forms, `PerForm = 5` is 30 wandering rigs on a phone, which §5's mobile budget
+	refuses and which no error message would ever mention.
+
+	PINNED AGAINST THE SPEC SENTENCE RATHER THAN AGAINST A ROUND NUMBER, so the failure message can
+	point at the thing being violated.
+]]
+check(
+	"Ambient.PerForm <= 4 — §5 asks for '3-4 each' and 60% of players are on a phone",
+	Config.Ambient.PerForm <= 4,
 	`PerForm={Config.Ambient.PerForm}`
 )
 

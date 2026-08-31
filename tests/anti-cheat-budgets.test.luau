@@ -55,6 +55,11 @@ local UP_REMOTES = {
 	-- entirely rather than leaving it unlimited.
 	"RequestSearch",
 	"RequestCancelSearch",
+	-- V08. Argument-free for the sharpest reason in this list: with `Items.CarryLimit = 1` the server
+	-- already knows what you are holding, and a `RequestDropItem(itemType)` would be a handler that
+	-- spawns an item the CLIENT named — with exactly one buntot pagi per round and that item being
+	-- the second win condition. See the declaration in `Remotes.luau`.
+	"RequestDropItem",
 	-- V07. Both argument-free: the server picks the form from the population it owns, and the burst
 	-- happens at the requester's own character position. `RequestCamouflage` is the tighter of the
 	-- two — see Config for why a refused hide is cheap and a hide firehose is not.
@@ -124,7 +129,22 @@ check(
 -- but it must at least cover it, plus a retry.
 check(
 	"salt throws burst at least as far as the carry limit",
-	Config.AntiCheat.Budgets.RequestThrowSalt.Capacity >= Config.Salt.CarryLimit
+	Config.AntiCheat.Budgets.RequestThrowSalt.Capacity >= Config.Items.CarryLimit
+)
+
+--[[
+	V08. A PLAYER MAY DROP AT LEAST AS OFTEN AS THEY MAY PICK UP.
+
+	With `Items.CarryLimit = 1`, swapping items is drop-then-pickup, and a player working a row of
+	containers does that once per container. A drop budget tighter than the carry limit would make
+	the swap fail on exactly the play §4.6's one-slot rule exists to create — and it would present as
+	lag rather than as a refusal, because the handler returns nothing on any path.
+]]
+check(
+	"the drop budget covers a swap",
+	Config.AntiCheat.Budgets.RequestDropItem.Capacity >= Config.Items.CarryLimit,
+	`DropCapacity={Config.AntiCheat.Budgets.RequestDropItem.Capacity}, `
+		.. `CarryLimit={Config.Items.CarryLimit}`
 )
 
 --------------------------------------------------------------------------------

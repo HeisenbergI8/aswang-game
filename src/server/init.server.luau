@@ -51,6 +51,21 @@ local SERVICE_ORDER = {
 		cycle.
 	]]
 	"NoiseService",
+	--[[
+		V08. BEFORE `RoundService`, AND THAT HALF IS LOAD-BEARING FOR A REASON NEITHER FILE STATED
+		UNTIL AN EXPLOIT AUDIT FOUND IT.
+
+		Both services connect `Players.PlayerRemoving`. `RoundService`'s handler sets
+		`player.Character = nil` and reparents the body into `workspace.Husks`; `ItemService`'s
+		handler spills the carried item, and its `spillItem` reads `player.Character` to find where
+		the body is. Connections fire in registration order, so ItemService's must be registered
+		first — which it is, only because of this line's position in this list.
+
+		INVERT THE ORDER AND EVERY DISCONNECT-WHILE-CARRYING DELETES THE ITEM, including the round's
+		only buntot pagi, silently. `spillItem` now `warn`s on a missing character rather than
+		returning quietly, so the failure would at least announce itself — but the ordering is the
+		actual fix and this comment is what stops it being "tidied".
+	]]
 	"ItemService",
 	--[[
 		V03. AFTER ItemService and BEFORE RoundService, and only the second half is load-bearing.

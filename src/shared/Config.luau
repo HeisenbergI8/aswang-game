@@ -9,19 +9,23 @@
 ]]
 
 --[[
-	§6.5's ITEM BLOCK, HOISTED INTO A LOCAL SO `Config.Salt` CAN ALIAS IT (V02).
+	§6.5's ITEM BLOCK. THE ONE HOME FOR EVERY ITEM NUMBER IN THE GAME.
 
-	This is the file's only local, and it exists to keep ONE number in ONE place across a rename. §6.5
-	renames four v1.3 salt tunables (`Salt.SpawnCount` -> `Items.SaltSpawnCount`, and three siblings).
-	Five live modules still read the old names — ItemService, TrialService, UIController,
-	InputController and shared/pure/SaltCarry — and a missing Config key is a HARD analyzer error, not
-	a warning:
+	IT IS STILL A LOCAL, AND V08 IS WHY THAT STOPPED BEING TEMPORARY. V02 hoisted it so the dying
+	`Config.Salt` table could alias into it during the rename; V08 renamed the last reader and deleted
+	that table, so the aliasing is over. The local survives because `Config.Monster` and
+	`Config.Search` both need to read item numbers to state their own invariants, and a local is how
+	one table refers to another inside a single returned literal.
+
+	THE RENAME IS COMPLETE. §6.5's four v1.3 salt tunables (`Salt.SpawnCount` -> `Items.SaltSpawnCount`
+	and three siblings) now have exactly one spelling, and so do `CarryLimit`, `ThrowConeDegrees` and
+	the item colours. There is no second place to tune, and no alias to accidentally overwrite with a
+	literal.
+
+	A MISSING CONFIG KEY IS A HARD ANALYZER ERROR, NOT A WARNING, which is what made the staged rename
+	safe and is worth keeping in mind before moving anything out of here:
 
 		TypeError: Key 'SpawnCount' not found in table '{| CarryLimit: number |}'
-
-	V02 is a vocabulary chunk that may not touch services, so `Items` below is CANONICAL and the four
-	matching fields of `Config.Salt` are ALIASES pointing at it. Tune here. `Config.Salt` shrinks to
-	nothing as each consumer is renamed, and disappears with the last one.
 ]]
 local Items = {
 	--[[
@@ -83,6 +87,79 @@ local Items = {
 		It kills only an Aswang that is BOTH Exposed and below Monster.WeakenedThreshold (§4.6).
 	]]
 	BuntotPagiSpawnCount = 1,
+
+	--[[
+		V08. THE SLOT. One item at a time, whichever of the three it is (§4.6).
+
+		MOVED FROM `Config.Salt.CarryLimit` UNCHANGED, and it is now the number that makes the whole
+		item economy a series of decisions rather than a shopping trip. Seven items are seeded across
+		fifteen containers (§4.4); with a limit of one, a survivor who finds the buntot pagi and then
+		finds salt has to CHOOSE, in the open, while the thing that wants to kill them is somewhere.
+
+		IT IS ONE NUMBER FOR ALL THREE ITEMS, deliberately. A per-item limit ("you may hold one salt
+		AND one bawang") is two numbers, four states and a UI problem, and it deletes the choice
+		above. `pure/ItemCarry` compares an occupancy against this, so raising it is a real change
+		rather than a typo — and `Types.ClientRoundSnapshot.YourCarriedItem` would become a list,
+		which that field's comment names as a contract change to argue in a plan.
+	]]
+	CarryLimit = 1,
+
+	--[[
+		The half-angle, in degrees, of the cone a throw sweeps (C14, moved from `Config.Salt` at V08).
+
+		IT IS A CONE RATHER THAN A RAYCAST ON PURPOSE. A ray demands the accuracy of a shooter from a
+		player on a phone (§5: ~60% of players), and §4.6 is buying counterplay, not aim. It is also
+		why the throw cannot be a probe: widening it does not make salt tell you MORE, because a miss
+		and a hit on a survivor are the same silent outcome.
+
+		`tests/config.test.luau` pins it under 90. At 90 the cone is a hemisphere and past 90 you hit
+		what is behind you, which is not a throw. `pure/ItemThrow.inCone` re-checks the same bound
+		because it is called with numbers rather than with Config.
+	]]
+	ThrowConeDegrees = 20,
+
+	--[[
+		V08. HOW FAR IN FRONT OF THE DROPPER A DROPPED ITEM LANDS, and how close you must be to take
+		one back off the ground.
+
+		A DROPPED ITEM IS NOT A CONTAINER. Containers are searched — six seconds, noisy, refusable
+		(§4.4). A thing lying on the floor is picked up by walking over it, because you already paid
+		the search that produced it and §4.4's anti-frustration rule says items belong to the world.
+		So this is a footprint radius, and it is the ONLY pickup radius left in the game once the
+		pouch tick is deleted.
+
+		DELIBERATELY SMALLER THAN `Search.RangeStuds` (10). A drop radius at arm's-length-plus-slack
+		would let a player standing at a container also sweep up whatever is on the floor beside it,
+		which turns "choose what to carry" into "carry both, one frame apart".
+
+		AND THE DROP DISTANCE IS AT LEAST THE PICKUP RADIUS, or an item drops inside the radius of
+		the player who dropped it and is instantly re-taken. `tests/config.test.luau` pins that
+		relationship; it is the kind of two-number agreement §6.5 exists for, and nothing in the game
+		would tell you it had broken — the drop would simply appear not to work.
+	]]
+	DropPickupRangeStuds = 6,
+	DropForwardStuds = 6,
+
+	--[[
+		V08. C22's SCRIPTED TRIAL POUCH, and it is here rather than under `Trial` because it is an
+		item radius and this is the item block.
+
+		THE TRIAL KEEPS A PICKUP RADIUS THAT THE LIVE GAME NO LONGER HAS. §9.1 asks that a player
+		"learn to throw salt", and the trial hands them a pouch directly — it runs at IDLE against a
+		scripted rig, with no round, no containers and no search. Teaching the search would be
+		teaching V03's mechanic inside V08's tutorial; C22 deliberately teaches ONE thing.
+	]]
+	TrialPickupRangeStuds = 6,
+
+	--[[
+		V08. The three items' placeholder colours, RGB TRIPLES, NEVER Color3 — same reason as
+		`Config.Monster`'s palette. V15 replaces these with real models; until then a tester has to be
+		able to tell the win condition from a pouch at ten paces, and from Step 4.3 onward all three
+		can be lying on the ground at once.
+	]]
+	SaltRgb = { 240, 238, 225 },
+	BawangRgb = { 236, 222, 180 },
+	BuntotPagiRgb = { 120, 96, 72 },
 }
 
 --[[
@@ -285,12 +362,25 @@ local Config = {
 			because inverting these two is a one-character edit that makes a dying monster fade —
 			exactly backwards, entirely silent, and only findable by playing it.
 
-			THE COLOURS ARE NOT HERE. `Salt.RevealGlowFillRgb`/`OutlineRgb` stay where they are: the
-			colour belongs to the item that paints the glow, the RAMP belongs to the health it reads.
-			Do not merge them — a tuner opening this block is tuning health, not salt.
+			THE COLOURS ARE HERE AS OF V08, AND THEY DID NOT USED TO BE. Until V08 this comment said
+			the opposite — `Salt.RevealGlowFillRgb`/`OutlineRgb` "stay where they are", on the
+			argument that the colour belongs to the item that paints the glow while the ramp belongs
+			to the health it reads. That split stopped being available when V08 deleted `Config.Salt`
+			entirely (§6.5 renames its four spec keys; the rest had to go somewhere).
+
+			GIVEN A CHOICE OF TWO HOMES, THE RAMP WON. The glow is a Highlight on the MONSTER, not on
+			the item — salt paints it, but health is what it reports, and `MonsterService.applyExposed`
+			reads all four of these numbers in one breath. A tuner opening this block is tuning the
+			Exposed glow, and now has every number that glow uses. The item's OWN colours live in
+			`Items.SaltRgb`/`BawangRgb`/`BuntotPagiRgb`, which is where a dropped pouch gets painted.
 		]]
 		ExposedGlowTransparencyFull = 0.75,
 		ExposedGlowTransparencyWeakened = 0.25,
+
+		-- RGB TRIPLES, NEVER Color3, matching the rest of this palette. The Exposed Highlight's two
+		-- colours; the ramp above sets its transparency, these set its hue.
+		ExposedGlowFillRgb = { 255, 250, 235 },
+		ExposedGlowOutlineRgb = { 190, 235, 255 },
 
 		--[[
 			FEEDING (§4.3) — WHAT REPLACED THE KILL COOLDOWN, and the design's most deliberate window.
@@ -423,6 +513,15 @@ local Config = {
 		-- reader finds it either way and no alias is warranted. Moving it reds analyze —
 		-- MonsterService reads it and Types cites it. It moves with the chunk that edits MonsterService.
 		CorpseDuration = 45,
+		--[[
+			THE FALLBACK FOOT OFFSET (Phase 2), used only when a camouflaged monster's character has
+			no Humanoid or no root — which is a character mid-respawn, and a frame or two long.
+
+			ROUGHLY THE R15 DEFAULT, so the one frame it covers looks like every other frame. A zero
+			here would drop the disguised animal to the monster's root height for that frame, which is
+			the exact flicker this whole phase removes.
+		]]
+		DefaultFootOffset = 3,
 		-- How long the corpse takes to fade once CorpseDuration is up. Long enough that a survivor
 		-- walking in on the tail of it still registers a body was there; short enough that it is not a
 		-- second, softer corpse with its own lifetime. §4.9: a fade, not a gore effect.
@@ -446,76 +545,31 @@ local Config = {
 		TransformParticleRate = 12,
 	},
 
-	-- §6.5's canonical item block. Declared above so Config.Salt can alias into it; see that comment.
+	-- §6.5's canonical item block, and since V08 the ONLY home for an item number — `Config.Salt`,
+	-- the alias table it was hoisted above for, is gone. See the note where that table used to be.
 	Items = Items,
 
-	Salt = {
-		--[[
-			V02: THESE FOUR ARE ALIASES, NOT VALUES. §6.5 renames them; the rename cannot land until the
-			five modules that read them are edited, and V02 may not edit a service. Tune `Items` above —
-			changing a line here does nothing, because there is no value here to change.
+	--[[
+		V02 DECLARED `Config.Salt` A SHRINKING ALIAS TABLE AND V08 FINISHED IT OFF.
 
-			DELETE EACH ONE with the chunk that renames its last reader. What remains below is the half
-			of this table §6.5 does not mention: real values with no v2 counterpart, which stay.
+		Its instruction was "DELETE EACH ONE with the chunk that renames its last reader". V08 renamed
+		every remaining reader — `ItemService` (Phases 3-4), `TrialService` (Phase 1), `MonsterService`
+		(Phase 2), `UIController` and `InputController` (Phase 5) — so the whole table went with them.
 
-			`tests/config.test.luau` pins each of these four to its canonical source, so replacing a
-			reference here with a literal is a RED SUITE rather than a silent divergence.
-		]]
-		SpawnCount = Items.SaltSpawnCount,
-		StunDuration = Items.SaltStunDuration,
-		RevealDuration = Items.SaltRevealDuration,
-		ThrowRange = Items.SaltThrowRange,
+		WHERE ITS CONTENTS WENT:
+		  · SpawnCount / StunDuration / RevealDuration / ThrowRange -> `Items.Salt*` (V02's four)
+		  · CarryLimit / ThrowConeDegrees                           -> `Items.*`
+		  · PouchRgb                                                -> `Items.SaltRgb`, plus two siblings
+		  · RevealGlowFillRgb / RevealGlowOutlineRgb                -> `Monster.ExposedGlow*Rgb`
+		  · PickupRangeStuds                                        -> `Items.TrialPickupRangeStuds`,
+		    which the TRIAL still needs; the live game has no walk-over pickup radius any more
+		  · PouchPoolSize                                           -> DELETED with the `SaltSpawn` pool
 
-		CarryLimit = 1,
-
-		--[[
-			How close a player must be to a pouch for the server to hand it over (C13).
-
-			THERE IS NO PICKUP REMOTE, and this number is why. The shape is the rule: the server
-			resolves what you are standing at from your own character's position, and the client names
-			nothing. A pickup that took an argument would be a free "give me salt"
-			handler needing its own budget, its own validation and its own verdict union; a proximity
-			tick needs none of those and cannot be spammed, because there is nothing to spam.
-
-			DELIBERATELY SMALL, and V01 removed the number it used to be measured against — the task
-			system's nine-stud presence range. Presence was a thing you did on purpose and could
-			tolerate standing near; a pickup is a thing that happens TO you as you walk past, and one
-			that fires from nine studs away picks pouches up through walls. **V03 owes this a new
-			right-hand side**: the container search range is what it must sit under once that lands,
-			and until then nothing in `tests/config.test.luau` pins it at all.
-		]]
-		PickupRangeStuds = 6,
-
-		--[[
-			The half-angle, in degrees, of the cone a throw sweeps (C14). The server picks the nearest
-			valid target inside it; the client sends only a direction.
-
-			IT IS A CONE RATHER THAN A RAYCAST ON PURPOSE. A ray demands the accuracy of a shooter from
-			a player on a phone (§5: ~60% of players), and §4.6 is buying counterplay, not aim. It is
-			also why the throw cannot be a probe: widening it does not make salt tell you MORE, because
-			a miss and a hit on a survivor are the same silent outcome.
-
-			`tests/config.test.luau` pins it under 90. At 90 the cone is a hemisphere and at more than
-			90 you hit things behind you, which is not a throw.
-		]]
-		ThrowConeDegrees = 20,
-
-		--[[
-			How many `SaltSpawn` points the map is expected to carry, against which `SpawnCount` pouches
-			are placed. It feeds `server/pure/SearchPool.evaluate` — the one verdict module every
-			tag-driven pool in this game shares, rather than a second copy of it.
-
-			It must be at least `SpawnCount` or the round cannot place its pouches; the test pins that.
-			C17 owns the actual count in the map.
-		]]
-		PouchPoolSize = 6,
-
-		-- The pouch, and the reveal glow. RGB TRIPLES, NEVER Color3 — same reason as Monster's palette
-		-- as Monster's palette. `RevealGlow*` is a Highlight's two colours.
-		PouchRgb = { 240, 238, 225 },
-		RevealGlowFillRgb = { 255, 250, 235 },
-		RevealGlowOutlineRgb = { 190, 235, 255 },
-	},
+		The two §6.5 invariants that read through it — `ThrowRange > KillRange` and
+		`RevealDuration > StunDuration` — were RE-POINTED at `Items`, not deleted with the table. They
+		are invariants wearing alias clothing, and losing one while deleting a table is the silent way
+		to lose a §6.5 guarantee.
+	]]
 
 	--[[
 		V02, §4.4. SEARCHING — what replaced the task system, and the trade at the heart of v2.0.
@@ -635,12 +689,35 @@ local Config = {
 		invariant as `SaltDamage x (SaltSpawnCount - 1)` — nothing in the game tells you when it has
 		been tuned away.
 
-		THE CEILING IS §5'S MOBILE BUDGET. Four forms at four each is 16 wandering models; whoever
-		builds their appearance counts them against the part and light caps `PerformanceController`
-		already enforces, and V07's are parts with no lights and no particles.
+		THE CEILING IS §5'S MOBILE BUDGET, AND THIS NUMBER DROPPED 4 -> 3 TO PAY FOR TWO NEW FORMS.
+		Six forms at three each is 18 wandering models against the sixteen V07 shipped. Six at four
+		would have been 24 — a 50% rise in the most expensive scenery in the map, to buy a variety the
+		head count does not need.
+
+		THREE IS STILL INSIDE §5's "3-4 each" AND STILL ABOVE THE FLOOR, and the floor is what the
+		drop has to answer to rather than the spec sentence. At 3, claiming one leaves TWO free
+		entities of that form; at 4 it left three. The mechanic degrades from "one of four" to "one of
+		three", which is a real weakening of the disguise and it is the price of six silhouettes
+		instead of four. It is worth paying because the alternative failure is worse: a form whose
+		entities are all in one corner is a form the monster cannot wear anywhere else, and SPREAD is
+		what six forms buys. Below 3 do not tune this without re-reading the floor's argument in
+		`tests/config.test.luau`.
 	]]
 	Ambient = {
-		PerForm = 4,
+		PerForm = 3,
+		--[[
+			THE GROUND PROBE (Phase 2). How far above a spawn pad the ray starts and how far down it
+			looks, in studs, plus the pad's own half-height as the fallback when it hits nothing.
+
+			THESE ARE MAP-SHAPED NUMBERS, NOT BALANCE ONES, and they are here anyway because
+			`check:config` does not distinguish and a literal in a service is a literal nobody finds.
+			`SpawnPadHalfHeight` MUST TRACK `anchor()` in `tools/greybox/barrio.luau`, which builds the
+			pad 0.8 tall — the two files cannot import each other, so this is the seam, and it is only
+			the FALLBACK path, which is the path nothing exercises until the map has a hole in it.
+		]]
+		GroundProbeUp = 6,
+		GroundProbeDown = 24,
+		SpawnPadHalfHeight = 0.4,
 		--[[
 			HOW FAR AN ENTITY WANDERS FROM THE POINT IT SPAWNED AT, and it is deliberately small.
 
@@ -650,11 +727,78 @@ local Config = {
 			stable as the count.
 		]]
 		WanderRadius = 24,
+		--[[
+			HOW CLOSE THE ASWANG MUST BE TO A TERRITORY TO WEAR ITS FORM (Phase 3).
+
+			THIS NUMBER IS THE WHOLE TACTICAL CONSTRAINT. Large, and camouflage is "hide anywhere" with
+			extra steps; small, and the monster is refused so often that the ability is unreliable and
+			§4.3's escape stops working. It is the first thing to move at V16 and the reason it is
+			here rather than in `AmbientService`.
+
+			`tests/ambient-territory.test.luau` PINS IT BELOW `WanderRadius`, and that bound is not
+			cosmetic: above it the monster can claim a slot from further than the real animal ever
+			roams, so it can stand as a pig where no pig has been — the constraint becomes advisory
+			with every test still green. It is also the bound on how far an entity visibly JUMPS when
+			a claim happens, since the rig is driven to the monster.
+		]]
+		ClaimRadius = 18,
 		WanderSpeed = 4,
 		-- Seconds between retargets, and the pause an entity takes on arrival. §5's "a wander loop and
 		-- an idle is enough", in two numbers.
 		WanderInterval = 6,
 		IdleSeconds = 3,
+		--[[
+			THE PROCEDURAL MOTION (Phase 4). §5 asks for "a wander loop and an idle"; this is that,
+			plus enough life that a standing animal is not a statue.
+
+			THEY ARE HERE RATHER THAN IN THE SERVICE BECAUSE THEY ARE A SECRECY SURFACE, not because
+			`check:config` insists. Motion is what §4.5's deduction reads — "which cat is behaving
+			oddly" — so these six numbers set how loud the ONE permitted difference between a
+			disguised rig and a real one is. A larger `BobStuds` makes a running monster's disguise
+			more obviously running.
+
+			`BobStuds` IS THE ONE TO WATCH ON A PHONE AND THE ONE TO WATCH FOR SECRECY, for opposite
+			reasons. Small enough and nobody sees the life; large enough and a fast rig visibly leaves
+			the ground that Phase 2 spent a whole phase seating it on.
+
+			`MotionKneeStuds` MUST TRACK `WanderSpeed` AND IS NOT A FREE KNOB. It is the speed at which
+			a rig reaches half amplitude, so setting it below walking pace saturates every rig and a
+			sprinting monster's disguise stops looking any different from a strolling pig — which
+			deletes §4.5's one licensed tell with every test still green.
+		]]
+		BobStuds = 0.12,
+		BobHz = 1.4,
+		SwayDegrees = 4,
+		SwayHz = 0.9,
+		IdleHz = 0.25,
+		MotionKneeStuds = 4,
+
+		--[[
+			THE STRIDE — the three terms that animate the one form with joints instead of a body.
+
+			VILLAGER is an R15 rig, so it walks by playing a clip rather than by bobbing. See
+			`AmbientMotion.strideWeight` / `strideRate` for why it is separated from the bob at all, and
+			for the parity argument that keeps a disguised villager animating like a free one.
+
+			`StrideReferenceStuds` IS THE PACE THE WALK CLIP WAS AUTHORED FOR, not a speed the game
+			sets. Roblox's stock R15 walk reads correctly at roughly a jogging pace, so a villager
+			ambling at `WanderSpeed` (4) plays it at about half rate and a puppeted one keeping up with
+			a sprinting monster plays it faster. That difference IS §4.5's designed tell.
+
+			`StrideRateMin` IS NOT COSMETIC. A walk clip at rate 0 is a frozen pose rather than a still
+			character, and a villager stopped mid-step is both a visible bug and — if it ever applied
+			unevenly — a difference between two rigs, which is the one thing this system may not have.
+		]]
+		StrideReferenceStuds = 9,
+		StrideRateMin = 0.35,
+		StrideRateMax = 1.9,
+		--[[
+			HOW LONG A WEIGHT CHANGE TAKES TO FADE. Short enough to follow a real change of pace,
+			long enough that per-frame jitter in the measured speed does not make the legs stutter —
+			`speed` is a distance divided by a Heartbeat delta, so it is noisy by construction.
+		]]
+		StrideBlendSeconds = 0.15,
+
 		--[[
 			THE FALLBACK SCATTER, used ONLY when the map provides no `AmbientSpawn`-tagged points.
 
@@ -1396,6 +1540,26 @@ local Config = {
 				cancel back to back.
 			]]
 			RequestCancelSearch = { Capacity = 6, RefillPerSecond = 0.5 },
+			--[[
+				V08, §4.6. THE DROP, PRICED LIKE `RequestCancelSearch` RATHER THAN LIKE THE THROW.
+
+				A refused THROW costs a player one pouch's worth of opportunity and the salt stays in
+				their hand. A refused DROP leaves them holding something they asked to put down —
+				which reads as the game ignoring their input, the worse of the two failures and the
+				one a player blames the game for. Same asymmetry `RequestCancelSearch` documents.
+
+				AND THE DROP IS HONESTLY BURSTY IN THE ONE MOMENT THAT MATTERS. §4.6 makes the buntot
+				pagi's carrier a target; the play the design wants is a carrier under pressure
+				dropping it so it is not lost with their body, and a survivor swapping items at a
+				container fires drop-then-pickup back to back. A limiter that refuses either is a
+				gameplay bug that presents as lag.
+
+				NOTHING BEHIND IT IS EXPENSIVE. The handler reads one slot entry, spawns one anchored
+				part and clears one table key — so the reason to bound it at all is a firehose into
+				`Instance.new`, not the decision. This table's own header says to tune these looser
+				than legitimate play and let the validation refuse the exploiter.
+			]]
+			RequestDropItem = { Capacity = 6, RefillPerSecond = 0.5 },
 			--[[
 				V07, §4.3. A DELIBERATE, RARE ACT, priced like `RequestTransform` above it rather than
 				like a search: the charge is the real limiter — one hide per completed feed — and this

@@ -744,9 +744,12 @@ end
 	Highlight EXISTS only while Exposed. There is no arrangement in which it publishes health outside
 	the window, because outside the window there is no instance to read.
 
-	THE COLOURS STAY UNDER `Config.Salt` and the RAMP under `Config.Monster`, which is not an
-	oversight: salt paints the glow, health decides how bright it burns. See Config.luau's comment on
-	`ExposedGlowTransparency*`.
+	THE COLOURS AND THE RAMP ARE BOTH UNDER `Config.Monster` AS OF V08, AND THEY DID NOT USED TO BE.
+	This comment previously said they were deliberately split — colours under `Config.Salt` because
+	salt paints the glow, the ramp under `Config.Monster` because health decides how bright it burns.
+	That split stopped being available when V08 deleted `Config.Salt` entirely, so the colours moved
+	to `Monster.ExposedGlowFillRgb`/`OutlineRgb`, beside the ramp `applyExposed` reads them with. See
+	Config.luau's comment on `ExposedGlowTransparency*` for the full argument.
 
 	DECLARED ABOVE `applyHealthEvent` BECAUSE THAT FUNCTION CALLS IT. Lua resolves a `local function`
 	only from its declaration onward, so the reverse order made this a nil GLOBAL — a runtime error on
@@ -865,8 +868,8 @@ local function applyExposed(player: Player)
 	local generation = os.clock()
 
 	glow.Name = "SaltReveal"
-	glow.FillColor = rgb(Config.Salt.RevealGlowFillRgb)
-	glow.OutlineColor = rgb(Config.Salt.RevealGlowOutlineRgb)
+	glow.FillColor = rgb(Config.Monster.ExposedGlowFillRgb)
+	glow.OutlineColor = rgb(Config.Monster.ExposedGlowOutlineRgb)
 	glow.DepthMode = Enum.HighlightDepthMode.Occluded
 	glow.Parent = character
 
@@ -1035,7 +1038,14 @@ end
 	between `MonsterTransformed` (a moment nobody may miss) and this (a thing you either saw or did
 	not).
 ]]
-local function enterCamouflage(player: Player, form: Types.CamouflageForm): boolean
+--[[
+	`at` IS PASSED IN RATHER THAN READ HERE, AND THAT IS A FORWARD-REFERENCE CONSTRAINT, NOT A STYLE
+	CHOICE. `rootOf` is declared ~370 lines below this function; calling it here COMPILES and dies at
+	runtime with "attempt to call a nil value", which is the trap this file has fallen into three
+	times. The caller has already resolved the root — it needs it to pick the form — so handing the
+	position down costs nothing and cannot be nil by the time it arrives.
+]]
+local function enterCamouflage(player: Player, form: Types.CamouflageForm, at: Vector3): boolean
 	local monster = monsters[player.UserId]
 	local character = player.Character
 
@@ -1049,7 +1059,17 @@ local function enterCamouflage(player: Player, form: Types.CamouflageForm): bool
 		return false
 	end
 
-	local slotIndex = AmbientService.ClaimSlot(form)
+	--[[
+		THE CLAIM IS BOUNDED BY WHERE THE MONSTER IS STANDING (Phase 3). `ClaimSlot` refuses unless a
+		free territory of this form is within `Config.Ambient.ClaimRadius`, which is what makes the
+		territory rule a constraint on the ASWANG rather than a note about the scenery — and what
+		bounds how far the claimed entity visibly JUMPS when it is driven onto the monster.
+
+		`at` IS THE SERVER'S OWN COPY of the monster's root position, never a client-supplied one.
+		Nothing about this reaches a second player: the refusal goes back to the requester as
+		`CAMO_NO_SLOT`, which is a fact about where they themselves are standing.
+	]]
+	local slotIndex = AmbientService.ClaimSlot(form, at)
 
 	if slotIndex == nil then
 		return false
@@ -1397,6 +1417,31 @@ local function rootOf(character: Model): BasePart?
 end
 
 --[[
+	HOW FAR THIS CHARACTER'S ROOT IS ABOVE ITS OWN FEET (Phase 2).
+
+	MEASURED, NOT CONSTANT, BECAUSE THE TRANSFORM SCALES THE AVATAR (§4.3). The R15 default is about
+	3 studs and a scaled monster's is not, so a hard-coded 3 would put the disguise back in the air for
+	exactly the state the monster is always in when it is allowed to camouflage.
+
+	`Humanoid.HipHeight` IS THE UNVERIFIED HALF OF THIS AND IT IS IN FOLLOW UPS. This plan has NOT
+	confirmed in this codebase whether HipHeight measures from the root's centre or from its underside
+	for an R15 rig, and the two answers differ by `root.Size.Y / 2`. The expression below assumes the
+	underside. IT IS WRITTEN TO FAIL VISIBLY RATHER THAN SUBTLY: Step 2.6 photographs a puppeted rig
+	beside a free one, and if the offset is wrong the rig sits a consistent one-root-half high or low
+	in every capture. Confirm it there and correct the sign here; do not infer it from the docs.
+]]
+local function footOffsetOf(character: Model): number
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = rootOf(character)
+
+	if humanoid == nil or root == nil then
+		return Config.Monster.DefaultFootOffset
+	end
+
+	return humanoid.HipHeight + root.Size.Y / 2
+end
+
+--[[
 	THE ONE CONDITION THAT CANNOT BE PURE (§4.3, "raycast line-of-sight").
 
 	Killing through a wall is the difference between a stalking game and a lag-compensated murder
@@ -1640,13 +1685,29 @@ local function validateAndCamouflage(player: Player)
 	end
 
 	--[[
+		WHERE THE MONSTER IS STANDING IS NOW PART OF THE QUESTION (Phase 3). Which forms are available
+		depends on which territories are within `ClaimRadius`, so the pick needs a position — and a
+		character that has not loaded has no answer rather than a default one.
+
+		NO `CamouflageUpdate` ON THIS PATH, matching the role check above. A missing character is a
+		frame of respawn, not a refusal worth naming, and every verdict on the wire is a thing an
+		attacker can time.
+	]]
+	local requesterCharacter = player.Character
+	local requesterRoot = if requesterCharacter ~= nil then rootOf(requesterCharacter) else nil
+
+	if requesterRoot == nil then
+		return
+	end
+
+	--[[
 		ANNOTATED AT THE ASSIGNMENT. Without the annotation the value arrives inferred as plain
 		`string` and every downstream use of it rejects — the same widening
 		`.claude/lessons/pure-module-unions-widen-in-lists.md` describes, reaching this file through
 		`AmbientRoster.Roster`'s element type. Declaring the local re-imposes the union here, once,
 		instead of at each of the three places it is used.
 	]]
-	local form: Types.CamouflageForm? = AmbientService.PickAvailableForm()
+	local form: Types.CamouflageForm? = AmbientService.PickAvailableFormNear(requesterRoot.Position)
 
 	-- Annotated for the reason `form` is, one screen up: the union widens on the way out otherwise.
 	local verdict: CamouflageRules.Verdict = CamouflageRules.evaluate({
@@ -1730,7 +1791,22 @@ local function validateAndCamouflage(player: Player)
 		return
 	end
 
-	local stillForm: Types.CamouflageForm? = AmbientService.PickAvailableForm()
+	--[[
+		RE-READ AFTER THE WINDUP, NOT REUSED FROM BEFORE IT. `CamouflageEnterTime` has elapsed and the
+		monster has been walking the whole time, so the territories in range are not the ones that
+		were in range when it pressed the key. Reusing the earlier position would let a monster start
+		the windup on a pig pen and finish it on the basketball court, which is the constraint
+		defeated by a timer.
+	]]
+	local recheckCharacter = player.Character
+	local recheckRoot = if recheckCharacter ~= nil then rootOf(recheckCharacter) else nil
+
+	if recheckRoot == nil then
+		return
+	end
+
+	local stillForm: Types.CamouflageForm? =
+		AmbientService.PickAvailableFormNear(recheckRoot.Position)
 
 	local recheck: CamouflageRules.Verdict = CamouflageRules.evaluate({
 		HasBeenRevealed = monster.HasBeenRevealed,
@@ -1780,7 +1856,7 @@ local function validateAndCamouflage(player: Player)
 	]]
 	local wearing: Types.CamouflageForm = stillForm
 
-	if enterCamouflage(player, wearing) then
+	if enterCamouflage(player, wearing, recheckRoot.Position) then
 		if Config.Debug.VerboseLogging then
 			print(`[MonsterService] {player.Name} camouflaged as {wearing}`)
 		end
@@ -2834,7 +2910,7 @@ end
 	transformed including the Aswang.
 
 	ItemService ANDs this with `RoundService.GetAswangUserId()` before handing a single boolean to
-	`pure/SaltThrow`, so the role never enters the pure module at all.
+	`pure/ItemThrow`, so the role never enters the pure module at all.
 ]]
 function MonsterService.IsTransformed(userId: number): boolean
 	local monster: MonsterState? = monsters[userId]
@@ -2922,6 +2998,28 @@ end
 
 	DELIBERATELY NOT A KILL AND NOT A `MarkKilled`: §4.6 is counterplay, not a win condition. Salt
 	never ends a round, which is why `MonsterHealth.apply` floors it at `WeakenedThreshold`.
+
+	V08 CLOSES THE LOOP AND CHANGES NOTHING. V05, V06 and V07 each landed their share of §4.6's five
+	jobs as they built the systems behind them; V08 is the chunk that gives salt a way to be thrown
+	at containers-sourced items, and it found all five already here.
+
+	SO THIS IS THE FULL LIST, IN ORDER, AND THE ORDER IS THE FUNCTION'S CORRECTNESS:
+
+	  1. exit camouflage    — before revert, or the character reverts into a cat's parts   (V07)
+	  2. interrupt the feed — before revert, so the interruption is exact rather than raced (V06)
+	  3. force the revert   — §4.6's headline effect                                        (C14)
+	  4. −SaltDamage        — through pure/MonsterHealth, floored at WeakenedThreshold      (V05)
+	  5. Exposed for SaltRevealDuration — the glow, whose brightness reads the health       (V05)
+	  6. HasBeenRevealed    — through CamouflageRules.revealedAfter, the camouflage gate    (V07)
+
+	`ItemService` IS THE ONLY CALLER, and V08 kept it that way. There is no bare `ForceRevert`, no
+	bare `Expose` and no way to damage the monster from outside this function — so there is no path
+	that reverts without damaging, damages without revealing, or reveals without opening the gate.
+	That property is worth more than any of the six individually: each was added by a different
+	chunk, and the only thing that stopped them drifting apart is that they share one entry point.
+
+	ADDING A SEVENTH JOB MEANS EDITING THIS LIST. Adding a second CALLER means arguing with this
+	paragraph first.
 ]]
 function MonsterService.ApplySaltHit(player: Player)
 	--[[
@@ -3227,8 +3325,8 @@ function MonsterService.Start()
 			local character = if player ~= nil then player.Character else nil
 			local root = if character ~= nil then rootOf(character) else nil
 
-			if root ~= nil then
-				AmbientService.PuppetSlot(monster.AmbientSlot, root.CFrame)
+			if root ~= nil and character ~= nil then
+				AmbientService.PuppetSlot(monster.AmbientSlot, root.CFrame, footOffsetOf(character))
 			end
 		end
 	end)

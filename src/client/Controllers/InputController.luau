@@ -50,6 +50,21 @@ local CAMOUFLAGE_ACTION = "AswangCamouflage"
 local SMOKE_ACTION = "AswangSmoke"
 
 --[[
+	V08, §4.6. THE DROP KEY, AND IT DECIDES NOTHING.
+
+	NO ARGUMENT AND NO CLIENT-SIDE CHECK. `Config.Items.CarryLimit` is 1, so the server already knows
+	what this player is holding, and `pure/ItemDrop` on the server owns whether they may put it down.
+	An `if carried == nil then return end` guard here would be a second copy of a rule, and the two
+	would disagree the first time a pickup and a drop crossed on the wire — which is verbatim the
+	reasoning this file already gives for not pre-checking the throw.
+
+	MOBILE GETS A BUTTON, NOT A KEY. §5 puts ~60% of players on a phone; the pad is how the throw
+	already reaches them, and the drop is registered with it below for the same reason. Its
+	thumb-zone placement is `ui-polish`'s question, not this chunk's.
+]]
+local DROP_ACTION = "ItemDrop"
+
+--[[
 	A plain function for the same reason `performKill` below is one: C18's HUD button must invoke THIS,
 	not a second copy of it. Returns whether the request was sent.
 
@@ -286,11 +301,27 @@ local function performThrow(): boolean
 		Remotes.Get("RequestThrowSalt"):FireServer(camera.CFrame.LookVector)
 	end
 
-	-- The HUD's salt estimate lives in UIController and is decremented HERE, at the keypress, because
-	-- `SaltEffect` names nobody and cannot attribute a throw. Optimistic: the server may refuse this
-	-- (no pouch, wrong phase), in which case the display is briefly one low and self-corrects on the
-	-- next pickup. It is prefixed `~` on screen for exactly that reason.
-	UIController.NoteThrow()
+	--[[
+		V08 DELETED THE OPTIMISTIC DECREMENT WITH THE ESTIMATE IT CORRECTED.
+
+		C13 called `UIController.NoteThrow()` here because the HUD counted salt itself and
+		`SaltEffect` names nobody, so a throw could not be attributed. The HUD now reads
+		`ClientRoundSnapshot.YourCarriedItem`, which the server owns — so the display updates from
+		the next snapshot, at most `Config.Round.SnapshotInterval` away.
+
+		THE THROW'S OWN FEEDBACK WAS NEVER THE HUD ANYWAY. `SaltEffect` broadcasts a burst at the
+		impact point and every client renders it, the thrower's included. That is immediate and
+		diegetic; the label was always the slower half.
+	]]
+	return true
+end
+
+--[[
+	V08, §4.6. Put down what you are holding. Argument-free — see `DROP_ACTION` above and the
+	declaration in `Remotes.luau`; the server resolves the item from the player's own slot.
+]]
+local function performDrop(): boolean
+	Remotes.Get("RequestDropItem"):FireServer()
 
 	return true
 end
@@ -304,6 +335,18 @@ local function onThrowAction(
 	end
 
 	return if performThrow() then Enum.ContextActionResult.Sink else Enum.ContextActionResult.Pass
+end
+
+-- V08. A press, not a hold — dropping is instantaneous, unlike §4.4's search.
+local function onDropAction(
+	_actionName: string,
+	inputState: Enum.UserInputState
+): Enum.ContextActionResult
+	if inputState ~= Enum.UserInputState.Begin then
+		return Enum.ContextActionResult.Pass
+	end
+
+	return if performDrop() then Enum.ContextActionResult.Sink else Enum.ContextActionResult.Pass
 end
 
 --[[
@@ -392,6 +435,11 @@ function InputController.Start()
 		Throw = function()
 			performThrow()
 		end,
+		-- V08. The drop rides the same registration path as the throw, so the pad and the key run
+		-- one implementation rather than two that agree until one is edited.
+		Drop = function()
+			performDrop()
+		end,
 		--[[
 			V03. REGISTERED AS A PAIR because §4.4's verb is a hold, not a tap — the pad reports when
 			the thumb goes down and when it comes up, exactly as `BindQuickChat` does for the wheel's
@@ -445,7 +493,7 @@ function InputController.Start()
 
 		The throw is still the bind that survives a touch button best — it is aimed by the CAMERA,
 		which a phone player is already controlling, so the button carries no aiming burden. That is
-		why `Config.Salt.ThrowConeDegrees` exists rather than a raycast.
+		why `Config.Items.ThrowConeDegrees` exists rather than a raycast.
 
 		`Q` REACHES THIS HANDLER — confirmed at C27, the same way `R` above was. One press produced one
 		`RequestThrowSalt` carrying the camera LookVector, and `RequestTrialThrow` stayed silent, so
@@ -470,6 +518,15 @@ function InputController.Start()
 	-- server refuses a survivor independently.
 	ContextActionService:BindAction(CAMOUFLAGE_ACTION, onCamouflageAction, false, Enum.KeyCode.C)
 	ContextActionService:BindAction(SMOKE_ACTION, onSmokeAction, false, Enum.KeyCode.G)
+
+	--[[
+		V08, §4.6. `X`. Bound for everyone — §4.4 has the Aswang carrying and dropping on identical
+		rules, so a bind that existed for only one role would be a role oracle in the keymap.
+
+		`false` for the touch-button argument, like every bind in this file: no bind here creates a
+		CAS touch button, and the pad is the one thing in this game that places a touch control.
+	]]
+	ContextActionService:BindAction(DROP_ACTION, onDropAction, false, Enum.KeyCode.X)
 end
 
 return InputController

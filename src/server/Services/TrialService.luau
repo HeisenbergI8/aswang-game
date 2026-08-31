@@ -44,7 +44,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Remotes = require(Shared.Remotes)
-local SaltThrow = require(Shared.pure.SaltThrow)
+local ItemThrow = require(Shared.pure.ItemThrow)
 local TrialAdmission = require(Shared.pure.TrialAdmission)
 local TrialTimeline = require(Shared.pure.TrialTimeline)
 local Types = require(Shared.Types)
@@ -163,10 +163,10 @@ local function trialChaseSpot(): BasePart?
 	return taggedPart(TAG_TRIAL_CHASE)
 end
 
--- Vector3 -> the plain table `pure/SaltThrow` takes. That module cannot mention Vector3: Lune has no
+-- Vector3 -> the plain table `pure/ItemThrow` takes. That module cannot mention Vector3: Lune has no
 -- Roblox datatypes, and the whole module would stop being runnable from a terminal. Same helper
 -- ItemService keeps for the same reason.
-local function vec3(v: Vector3): SaltThrow.Vec3
+local function vec3(v: Vector3): ItemThrow.Vec3
 	return { X = v.X, Y = v.Y, Z = v.Z }
 end
 
@@ -633,7 +633,7 @@ local function stepRig(session: Session, player: Player, delta: number)
 		THE STUN, TRIGGERED BY THE POUCH REACHING THE RIG.
 
 		⚠️ THE THROW ITSELF IS NOT TAUGHT HERE, AND THIS IS A KNOWN C22 GAP RATHER THAN AN OVERSIGHT.
-		`ItemService` resolves `RequestThrowSalt` through `pure/SaltThrow` with
+		`ItemService` resolves `RequestThrowSalt` through `pure/ItemThrow` with
 		`Phase = RoundService.GetPhase()`, and a trial runs while the phase is IDLE — so the verdict is
 		WRONG_PHASE and a trial player's throw is refused by the existing path. §9.1 asks that the
 		player "learn to throw salt", and what this delivers is that salt STOPS the aswang, learned by
@@ -647,7 +647,7 @@ local function stepRig(session: Session, player: Player, delta: number)
 	local pouch = session.Pouch
 
 	if pouch ~= nil and pouch.Parent ~= nil then
-		if (pouch.Position - primary.Position).Magnitude <= Config.Salt.PickupRangeStuds then
+		if (pouch.Position - primary.Position).Magnitude <= Config.Items.TrialPickupRangeStuds then
 			session.StunnedUntil = os.clock() + Config.Trial.ChaseStunSeconds
 			pouch:Destroy()
 			session.Pouch = nil
@@ -918,10 +918,15 @@ function TrialService.Start()
 		IDLE, so the real remote answered WRONG_PHASE and the tutorial taught an action the player
 		was refused. A playtest confirmed the gap.
 
-		IT SHARES THE AIM WITH THE REAL THROW AND NOTHING ELSE. `SaltThrow.inCone` is the same
+		IT SHARES THE AIM WITH THE REAL THROW AND NOTHING ELSE. `ItemThrow.inCone` is the same
 		function `ItemService` calls — same range, same cone, one implementation — so what a player
 		learns here is what works in a round. A second copy of the geometry would drift, and a
 		tutorial that teaches a throw the game does not have is worse than teaching no throw at all.
+
+		V08 RENAMED THE MODULE (`pure/SaltThrow` -> `pure/ItemThrow`) AND CHANGED NOTHING ABOUT THIS
+		FUNCTION. `tests/item-throw.test.luau` asserts that directly: it runs `inCone` and `evaluate`
+		over the same five distances and requires them to agree, which is the property that makes
+		this retarget a rename rather than a rewrite.
 
 		WHAT IT DOES NOT SHARE is every round rule: phase, thrower state, carry limit, and whether the
 		target is the transformed Aswang. None of those has a meaning in a trial, where the phase is
@@ -965,12 +970,12 @@ function TrialService.Start()
 				return
 			end
 
-			local hit = SaltThrow.inCone(
+			local hit = ItemThrow.inCone(
 				vec3(root.Position),
 				vec3(direction),
 				vec3(primary.Position),
-				Config.Salt.ThrowRange,
-				Config.Salt.ThrowConeDegrees
+				Config.Items.SaltThrowRange,
+				Config.Items.ThrowConeDegrees
 			)
 
 			--[[

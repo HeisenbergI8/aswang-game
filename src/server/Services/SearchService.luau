@@ -105,8 +105,10 @@ local layout: ContainerLayout.Layout? = nil
 local opened: { [number]: boolean } = {}
 
 --------------------------------------------------------------------------------
--- Pool discovery. Lifted almost verbatim from ItemService.discoverPool, which is
--- the established shape for a tag-driven pool in this repo.
+-- Pool discovery. The verdict is `server/pure/SearchPool.evaluate`, shared rather
+-- than copied, and since V08 this is the ONLY tag-driven pool in the repo:
+-- `ItemService.discoverPool` and the `SaltSpawn` points it read were deleted with
+-- the second salt economy, and items now come from containers alone.
 --------------------------------------------------------------------------------
 
 --[[
@@ -284,13 +286,19 @@ local occupied: { [number]: number } = {}
 --[[
 	WHAT THIS PLAYER HAS FOUND THIS ROUND. Server-only, keyed by UserId, never replicated as a table.
 
-	V03 RECORDS AND GRANTS NOTHING — see `SearchService.ItemFound`. This exists so that V08 has
-	somewhere truthful to read from, and so that a playtester can confirm "searching yields items"
-	from the server side rather than from a client's word for it.
+	⚠️ IT IS A DEBUGGING AID, NOT STATE, AND V08 MAKES THAT DISTINCTION LOAD-BEARING.
+	`ItemService.slot` is the authoritative answer to what a player is holding. This table is
+	CUMULATIVE — everything they have ever found this round — so the two disagree the moment anything
+	is dropped, thrown or lost on death, and that is correct rather than a bug. It exists so a
+	playtester can confirm "searching yields items" from the server side rather than from a client's
+	word for it.
 
-	A ROSTER OF WHO HOLDS WHAT IS A ROSTER OF WHO CAN ANSWER THE ASWANG, which is `ItemService`'s
-	stated reason for keeping `carried` server-side, and §4.5's reason the buntot pagi's carrier
-	announces themselves by CHOICE. Never broadcast this, never mirror it onto an attribute.
+	NOTHING SHOULD READ THIS TO DECIDE ANYTHING. Two server tables answering nearly the same question
+	is how a later reader picks the wrong one, and this is the wrong one for every gameplay question.
+
+	A ROSTER OF WHO HOLDS WHAT IS A ROSTER OF WHO CAN ANSWER THE ASWANG, which is `ItemService.slot`'s
+	stated reason for staying server-side, and §4.5's reason the buntot pagi's carrier announces
+	themselves by CHOICE. Never broadcast this, never mirror it onto an attribute.
 ]]
 local foundByPlayer: { [number]: { string } } = {}
 

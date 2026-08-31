@@ -17,7 +17,7 @@
 	oracle: every value here concerns THE RECEIVER'S OWN monster state, and a client that is not the
 	Aswang can never cause this function to run at all.
 
-	CONTRAST `SaltThrow`, WHICH DELIBERATELY COLLAPSES ITS REFUSALS INTO ONE `MISS`. That module is
+	CONTRAST `ItemThrow`, WHICH DELIBERATELY COLLAPSES ITS REFUSALS INTO ONE `MISS`. That module is
 	called on a request a SURVIVOR sends about ANOTHER PLAYER, so a split verdict would let a client
 	stand in front of each player in turn and read the monster off the refusal shape. This module is
 	called about the feeder itself, by the server, unprompted. Different question, different answer.

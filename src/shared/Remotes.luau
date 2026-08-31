@@ -270,7 +270,7 @@ local EVENTS_UP = {
 		C22. A throw INSIDE a trial, and it is a separate remote from `RequestThrowSalt` on purpose.
 
 		§9.1 asks that the player "learn to throw salt", and they could not: `ItemService` resolves
-		every throw through `pure/SaltThrow` against `RoundService.GetPhase()`, and a trial runs while
+		every throw through `pure/ItemThrow` against `RoundService.GetPhase()`, and a trial runs while
 		the phase is IDLE — so the real remote answers WRONG_PHASE and the tutorial taught an action
 		the player could not perform.
 
@@ -282,7 +282,7 @@ local EVENTS_UP = {
 
 		It carries a direction and nothing else, exactly as `RequestThrowSalt` does. The server owns
 		the range, the cone, the target and the outcome — and both remotes resolve through the SAME
-		`SaltThrow.inCone`, so the throw a player learns here is the throw that works in a round.
+		`ItemThrow.inCone`, so the throw a player learns here is the throw that works in a round.
 	]]
 	"RequestTrialThrow",
 	--[[
@@ -317,6 +317,33 @@ local EVENTS_UP = {
 		remainder of one hold. That is why its budget is the more generous of the two.
 	]]
 	"RequestCancelSearch",
+	--[[
+		V08, §4.6. NO ARGUMENTS, and the absent argument is the entire security design.
+
+		THE ITEM IS NOT NAMED BY THE CLIENT. `Config.Items.CarryLimit` is 1, so there is exactly one
+		thing a player can be holding and the server already knows what it is. This is
+		`RequestClaimDaily`'s and `RequestCamouflage`'s rule — everything the decision needs is
+		server-side already — and `RequestSearch`'s: the server resolves what a player has from that
+		player's own state, and the client names nothing.
+
+		A `RequestDropItem(itemType)` WOULD HAVE BEEN A FREE PROBE AND A FREE DUPLICATOR. It needs a
+		verdict for "you are not holding that", which is the comparison the server was already going
+		to make; and a client naming `BUNTOT_PAGI` while holding salt is a request the server must
+		refuse rather than one it can simply not be asked. There is exactly one buntot pagi per round
+		(§4.6) and it IS the second win condition, so a handler that spawns an item the client named
+		is the sharpest exploit surface this chunk has. It has no argument, so it cannot be asked.
+
+		NOR IS THERE A POSITION. A drop lands `Config.Items.DropForwardStuds` in front of the
+		player's OWN character, read on the server. A client-supplied position drops the win
+		condition through a wall, inside the map, or at a teammate's feet across the barrio.
+
+		IT IS NOT A ROLE ORACLE IN EITHER DIRECTION. §4.4 has the Aswang searching on identical
+		rules, so the monster can hold and drop items exactly as a survivor can, and must — see
+		`Types.ClientRoundSnapshot.YourCarriedItem`: an empty-handed survivor and the Aswang are
+		indistinguishable only if the monster genuinely fills slots. Nothing is returned to the
+		caller on any path, including OK.
+	]]
+	"RequestDropItem",
 	--[[
 		V07, §4.3. NO ARGUMENTS, and the absent argument is the security design.
 

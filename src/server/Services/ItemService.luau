@@ -1,26 +1,35 @@
 --!strict
 --[[
-	ItemService — Salt: spawning, pickup, throwing, stun and reveal.
+	ItemService — the three items: the carry slot, dropping, throwing, stun and reveal.
 
-	Milestone: M4
-	Spec: docs/MVP-SPEC.md
+	Milestone: V08
+	Spec: docs/MVP-SPEC.md §4.6
 
-	SALT IS THE ONLY COUNTERPLAY IN THE GAME (§4.6), and this file is deliberately the least clever one
-	in the repo. Four things happen here and each is server-decided:
+	THE ITEMS ARE THE ONLY COUNTERPLAY IN THE GAME (§4.6), and this file is deliberately the least
+	clever one in the repo. Four things happen here and each is server-decided:
 
-	  · pouches spawn at `SaltSpawn` points at STARTING          (C13)
-	  · a player walking within PickupRangeStuds picks one up    (C13, no remote — see below)
-	  · RequestThrowSalt(direction) is resolved into a hit       (C14, pure/SaltThrow)
+	  · a completed search yields an item into ONE carry slot     (V08, SearchService.ItemFound)
+	  · RequestDropItem() puts it back on the floor               (V08, argument-free)
+	  · RequestThrowSalt(direction) is resolved into a hit        (C14, pure/ItemThrow)
 	  · a hit stuns, forces a revert, and glows for RevealDuration (C14)
 
-	THERE IS NO PICKUP REMOTE AND THAT IS A SECURITY DECISION, not an omission. The rule: the server
-	resolves what a player is standing at from that player's own character position, and the client
-	names nothing. A `RequestPickup(pouchId)` would need a budget,
-	a verdict union, and validation that the named pouch is the one you are standing on — three
-	surfaces bought to replace a distance comparison the server is already positioned to make.
+	ITEMS COME FROM CONTAINERS, NEVER FROM A SPAWN POINT. V08 deleted the `SaltSpawn` pool, the pouch
+	parts and the walk-over pickup tick that C13 shipped. V03 had already built the replacement —
+	`SearchService` seeds all seven items into containers from `Config.Items.*SpawnCount` and fires
+	`ItemFound` on a completed search — and the two economies were live at once, which put eight
+	pouches in a round where §4.6 says four and broke §6.5 invariant 1 without touching a number.
 
-	The pool verdict is `server/pure/SearchPool.evaluate`, shared rather than copied. It is generic
-	over (names, required, expected) and names no mechanic at all.
+	THERE IS STILL NO PICKUP REMOTE AND THAT IS STILL A SECURITY DECISION. The rule is unchanged and
+	is now enforced in two places: the server resolves what a player is standing at from that
+	player's own character position, and the client names nothing. `RequestDropItem` therefore takes
+	NO ARGUMENT — with `Config.Items.CarryLimit = 1` there is exactly one thing you can be holding
+	and the server already knows what it is. A `RequestDropItem(itemType)` would be a handler that
+	spawns an item the client named, and one of the three items is the round's only win condition.
+
+	ONE SLOT, THREE ITEM TYPES, NO RECHARGE. `pure/ItemCarry` owns whether a pickup is allowed and
+	`pure/ItemThrow` owns whether a throw connects. Bawang and the buntot pagi are CARRIED AND
+	DROPPED ONLY in V08 — the doorway block is V09 and the strike is V10, and neither is half-built
+	here.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -31,114 +40,50 @@ local AntiCheatService = require(script.Parent.AntiCheatService)
 local MonsterService = require(script.Parent.MonsterService)
 local NoiseService = require(script.Parent.NoiseService)
 local RoundService = require(script.Parent.RoundService)
+local SearchService = require(script.Parent.SearchService)
 local TeachingService = require(script.Parent.TeachingService)
-local SearchPool = require(script.Parent.Parent.pure.SearchPool)
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
 local Remotes = require(Shared.Remotes)
-local SaltCarry = require(Shared.pure.SaltCarry)
-local SaltThrow = require(Shared.pure.SaltThrow)
+local ItemCarry = require(Shared.pure.ItemCarry)
+local ItemDrop = require(Shared.pure.ItemDrop)
+local ItemUse = require(Shared.pure.ItemUse)
+local ItemThrow = require(Shared.pure.ItemThrow)
 local Types = require(Shared.Types)
 
 local ItemService = {}
 
-local TAG_SPAWN = "SaltSpawn"
+--[[
+	The items lying on the ground right now. One parent so a phase change clears them with a single
+	pass, exactly as MonsterService's `Corpses` folder does.
 
--- Every `SaltSpawn` part in the map, keyed by Name. Rebuilt on every draw rather than cached, for the
--- reason any tag-driven pool is: C17 will add, move and delete these parts while a server is running,
--- and a cached point is one that can stop existing.
-local pointsByName: { [string]: BasePart } = {}
-
--- The pouches actually in the world right now. One parent so a phase change clears them with a single
--- pass, exactly as MonsterService's `Corpses` folder does.
-local pouches: Folder? = nil
-
--- SERVER-ONLY. How many pouches each player is carrying, keyed by UserId. Never replicated as a table:
--- a roster of who is holding salt is a roster of who can answer the Aswang, and Amendment A3's whole
--- argument is that per-player facts about the living do not go out to everyone.
-local carried: { [number]: number } = {}
-
-local function discoverPool(): SearchPool.Report
-	local names: { string } = {}
-
-	table.clear(pointsByName)
-
-	for _, instance in CollectionService:GetTagged(TAG_SPAWN) do
-		if not instance:IsA("BasePart") then
-			warn(
-				`[ItemService] {instance:GetFullName()} is tagged {TAG_SPAWN} but is a `
-					.. `{instance.ClassName}, not a BasePart — skipped.`
-			)
-			continue
-		end
-
-		table.insert(names, instance.Name)
-
-		-- The `: BasePart?` is load-bearing under --!strict: indexing a
-		-- `{ [string]: BasePart }` yields a non-optional value, so comparing it to nil is a type error
-		-- rather than a lookup.
-		local existing: BasePart? = pointsByName[instance.Name]
-
-		if existing == nil then
-			pointsByName[instance.Name] = instance
-		end
-	end
-
-	-- Sorted because `GetTagged`'s order is engine-defined and must not become a hidden input to a
-	-- random selection.
-	table.sort(names)
-
-	return SearchPool.evaluate(names, Config.Salt.SpawnCount, Config.Salt.PouchPoolSize)
-end
+	IT REPLACES THE `SaltPouches` FOLDER AND IT IS NOT THE SAME THING. `SaltPouches` held items the
+	round SPAWNED; this holds items a player PUT DOWN — on purpose, on death, or on a disconnect.
+	Nothing seeds it at STARTING, because containers are where items come from now.
+]]
+local droppedItems: Folder? = nil
 
 --[[
-	THE LOUD HALF, ungated by VerboseLogging because the rule in this repo is that routine tracing is
-	gated and faults warn unconditionally — and a map with no salt in it is a fault
-	whose only player-visible symptom is that the game is unwinnable and nobody knows why.
+	SERVER-ONLY. THE SLOT. What each player is holding, keyed by UserId, or absent for an empty hand.
+
+	NEVER REPLICATED AS A TABLE. A roster of who holds what is a roster of who can answer the Aswang
+	— C13 said it about a salt count and it is sharper now, because one entry in this table is the
+	buntot pagi and §4.6 makes its carrier a target. `SearchService.foundByPlayer` carries the same
+	warning for the same reason.
+
+	THE ASWANG IS IN THIS TABLE LIKE EVERYONE ELSE. §4.4 has the monster searching on identical
+	rules, so it finds items, fills this slot and drops things. That is not an oversight to be
+	optimised away: `Types.ClientRoundSnapshot.YourCarriedItem` is safe precisely because an
+	empty-handed survivor and the Aswang are indistinguishable, and they only are if the monster can
+	genuinely hold things. A `if isAswang then return end` here would make an empty slot a tell.
+
+	ONE ENTRY PER PLAYER, NOT A LIST, and `Config.Items.CarryLimit = 1` is why. `pure/ItemCarry`
+	compares an occupancy against that number so the rule has one home; this table's SHAPE is the
+	second enforcement, and it is the one that cannot drift.
 ]]
-local function reportPool(report: SearchPool.Report)
-	if #report.Duplicates > 0 then
-		warn(
-			`[ItemService] {TAG_SPAWN} parts share a Name and were skipped: `
-				.. `{table.concat(report.Duplicates, ", ")}. Every tagged part needs a unique one.`
-		)
-	end
-
-	if report.Verdict == "EMPTY" then
-		warn(
-			`[ItemService] NO "{TAG_SPAWN}" PARTS IN THE MAP. Tag {Config.Salt.PouchPoolSize} anchored `
-				.. `parts with "{TAG_SPAWN}" via CollectionService, or no salt can ever spawn and §4.6's `
-				.. `counterplay does not exist — survivors have no answer to the Aswang at all.`
-		)
-	elseif report.Verdict == "SHORT" then
-		warn(
-			`[ItemService] Only {#report.Unique} "{TAG_SPAWN}" part(s) found; `
-				.. `{Config.Salt.SpawnCount} pouches are meant to spawn. Fewer will.`
-		)
-	elseif report.Verdict == "OVERSIZED" then
-		warn(
-			`[ItemService] {#report.Unique} "{TAG_SPAWN}" parts found, but Config.Salt.PouchPoolSize `
-				.. `says {Config.Salt.PouchPoolSize}. Spawning still works; the map and Config disagree.`
-		)
-	elseif Config.Debug.VerboseLogging then
-		print(`[ItemService] Salt pool OK — {#report.Unique} spawn points.`)
-	end
-end
-
---[[
-	Exposed for Step 2.5's spawn, which needs both the verdict and the parts behind it. Returning the
-	report rather than the table keeps `pointsByName` private: a caller that wanted the parts would have
-	to ask for a name it already got from the report.
-]]
-function ItemService.EvaluatePool(): SearchPool.Report
-	local report = discoverPool()
-
-	reportPool(report)
-
-	return report
-end
+local slot: { [number]: Types.ItemType } = {}
 
 -- Copied from MonsterService rather than exported from it: a four-line colour helper is not worth a
 -- cross-service dependency, and the alternative is ItemService requiring MonsterService for a Color3.
@@ -146,189 +91,13 @@ local function rgb(triple: { number }): Color3
 	return Color3.fromRGB(triple[1], triple[2], triple[3]) -- config-ok: RGB channel indices, not knobs
 end
 
---[[
-	THE POUCH. A part, a tag, and nothing else.
-
-	No ProximityPrompt: C08 already found that Roblox's CoreScript refuses to render a prompt with
-	`KeyboardKeyCode = None`, and a pickup that costs a keypress is a pickup a player walks past. This
-	is a thing you collect by touching, resolved server-side on a tick.
-
-	`SaltPouch` IS A REPLICATED TAG AND THAT IS FINE, on the same argument `ActiveTaskPoint` won at
-	C07: it describes an object in the world that every client can already see, it names no player, and
-	the client needs it to draw the pickup affordance at all. `check:secrecy` inspects tags and this one
-	passes because it carries nothing.
-]]
-local TAG_POUCH = "SaltPouch"
-
-local rng = Random.new()
-
-local function spawnPouches()
-	local folder = pouches
-
-	if folder == nil then
-		return
-	end
-
-	local report = discoverPool()
-
-	reportPool(report)
-
-	-- Fisher-Yates over a COPY, so the pool order is not mutated under the caller. `Random.new()` with
-	-- no argument, deliberately: a seeded draw is reproducible by anyone who can guess the seed, and
-	-- `Random.new(os.time())` is client-observable to the second.
-	local names = table.clone(report.Unique)
-
-	for index = #names, 2, -1 do
-		local swap = rng:NextInteger(1, index)
-
-		names[index], names[swap] = names[swap], names[index]
-	end
-
-	local wanted = math.min(Config.Salt.SpawnCount, #names)
-
-	for index = 1, wanted do
-		local point: BasePart? = pointsByName[names[index]]
-
-		if point == nil then
-			continue
-		end
-
-		local pouch = Instance.new("Part")
-
-		pouch.Name = `SaltPouch_{names[index]}`
-		pouch.Size = Vector3.new(1, 1, 1) -- config-ok: the pouch's own size, not a balance knob
-		pouch.Position = point.Position + Vector3.new(0, 1, 0) -- config-ok: sits on the pad, not a knob
-		pouch.Anchored = true
-		pouch.CanCollide = false
-		pouch.Color = rgb(Config.Salt.PouchRgb)
-		pouch.Material = Enum.Material.Sand
-		pouch.Parent = folder
-
-		--[[
-			A LABEL AND A GLOW, so a pouch reads as salt rather than as a white cube.
-
-			This is presentation, and it is here rather than on the client for one reason: the pouch is
-			ALREADY a fully public replicated object, so a BillboardGui on it tells nobody anything they
-			could not see by walking over. Nothing about it is per-player, so there is no secrecy question
-			— compare the reveal Highlight, which is deliberately server-owned for the opposite reason.
-
-			C34 replaces this with an actual model. Until then a tester needs to be able to find the one
-			mechanic that answers the monster.
-		]]
-		local billboard = Instance.new("BillboardGui")
-		billboard.Name = "PouchLabel"
-		billboard.Size = UDim2.fromOffset(60, 20) -- config-ok: placeholder label size, replaced at C34
-		billboard.StudsOffset = Vector3.new(0, 1.5, 0) -- config-ok: sits above the pouch
-		billboard.AlwaysOnTop = true
-		billboard.Parent = pouch
-
-		local text = Instance.new("TextLabel")
-		text.Size = UDim2.fromScale(1, 1)
-		text.BackgroundTransparency = 1
-		text.Text = "SALT"
-		text.TextColor3 = Color3.new(1, 1, 1)
-		text.TextStrokeTransparency = 0
-		text.TextScaled = true
-		text.Font = Enum.Font.GothamBold
-		text.Parent = billboard
-
-		local glow = Instance.new("PointLight")
-		glow.Name = "PouchGlow"
-		glow.Color = rgb(Config.Salt.PouchRgb)
-		glow.Brightness = 2 -- config-ok: placeholder pickup affordance, replaced at C34
-		glow.Range = 8 -- config-ok: same
-		glow.Parent = pouch
-
-		CollectionService:AddTag(pouch, TAG_POUCH)
-	end
-
-	if Config.Debug.VerboseLogging then
-		print(`[ItemService] {wanted} pouch(es) placed of {Config.Salt.SpawnCount} wanted.`)
-	end
-end
-
--- Everything this service put in the world, and everything it remembers. Called on the way into
--- INTERMISSION and IDLE, mirroring MonsterService.clearCorpses — NOT on "any phase that is not ACTIVE",
--- which is the mistake that destroyed the winning kill's corpse within a frame of creating it.
-local function clearPouches()
-	local folder = pouches
-
-	if folder ~= nil then
-		for _, pouch in folder:GetChildren() do
-			pouch:Destroy()
-		end
-	end
-
-	table.clear(carried)
-end
-
---[[
-	THE PICKUP TICK. Distance re-measured on the server every tick from the player's own character,
-	which is C08 Step 3.3's rule: a stamp a client sent is a stamp a client chose.
-
-	O(players x pouches) is at most 8 x 4 per tick and there is no cheaper shape worth writing. A
-	spatial query would be `workspace:GetPartBoundsInRadius`, which allocates per call and is the
-	wrong trade at this size — §5's budget is about frame cost on a phone, and this loop runs on the
-	server.
-]]
-local function pickupTick()
-	local folder = pouches
-
-	if folder == nil or RoundService.GetPhase() ~= Enums.RoundPhase.Active then
-		return
-	end
-
-	for _, player in Players:GetPlayers() do
-		local character = player.Character
-		local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
-
-		if root == nil or not root:IsA("BasePart") then
-			continue
-		end
-
-		local verdict = SaltCarry.evaluate({
-			Phase = RoundService.GetPhase(),
-			PlayerState = RoundService.GetPlayerState(player),
-			Carried = carried[player.UserId] or 0,
-			Limit = Config.Salt.CarryLimit,
-		})
-
-		if verdict ~= "OK" then
-			continue
-		end
-
-		for _, pouch in folder:GetChildren() do
-			if not pouch:IsA("BasePart") then
-				continue
-			end
-
-			if (pouch.Position - root.Position).Magnitude > Config.Salt.PickupRangeStuds then
-				continue
-			end
-
-			carried[player.UserId] = (carried[player.UserId] or 0) + 1
-			pouch:Destroy()
-
-			-- C23. The first pouch a player ever takes explains what it is for. §10 is explicit that
-			-- the folklore must not be assumed. Fired to the player who did it, about a thing they
-			-- did themselves — no audience question here.
-			TeachingService.Cue(player, "CUE_FIRST_SALT")
-
-			-- ONE PER TICK PER PLAYER. Breaking here rather than continuing means two pouches lying in
-			-- the same spot cannot both be taken in one frame by a player whose limit is 1 — the
-			-- SaltCarry call above is outside this loop and would not have seen the first pickup.
-			break
-		end
-	end
-end
-
 --------------------------------------------------------------------------------
 -- C14 — the throw, the stun, the reveal
 --------------------------------------------------------------------------------
 
--- Vector3 -> the plain table pure/SaltThrow takes. The pure module cannot mention Vector3: Lune has no
+-- Vector3 -> the plain table pure/ItemThrow takes. The pure module cannot mention Vector3: Lune has no
 -- Roblox datatypes and the whole module would stop being runnable from a terminal.
-local function vec(position: Vector3): SaltThrow.Vec3
+local function vec(position: Vector3): ItemThrow.Vec3
 	return { X = position.X, Y = position.Y, Z = position.Z }
 end
 
@@ -395,7 +164,7 @@ local function applyStun(player: Player)
 	humanoid.WalkSpeed = 0 -- config-ok: a stun is total; 0 is the mechanic, not a knob
 	humanoid.JumpPower = 0 -- config-ok: same
 
-	task.delay(Config.Salt.StunDuration, function()
+	task.delay(Config.Items.SaltStunDuration, function()
 		local current = stunned[player.UserId]
 
 		-- A stale timer from an earlier hit declines to act, exactly as MonsterService's forced-revert
@@ -479,7 +248,7 @@ local saltEffectRemote = Remotes.Get("SaltEffect")
 	FireAllClients IS CORRECT HERE and it is the only broadcast this plan adds. A throw is a white
 	burst in the air at a place; every client standing there sees it whether or not this remote exists,
 	and a client that is nowhere near renders a burst it cannot see. `Hit` says the salt struck
-	something salt can strike — which, per pure/SaltThrow, means a TRANSFORMED Aswang, and a
+	something salt can strike — which, per pure/ItemThrow, means a TRANSFORMED Aswang, and a
 	transformed Aswang is already public via MonsterTransformed. It buys a hit sound instead of a
 	fizzle and states nothing new.
 ]]
@@ -505,16 +274,54 @@ end
 local function resolveThrow(
 	thrower: Player,
 	direction: Vector3
-): (Types.SaltVerdict, Player?, Vector3)
+): (Types.ItemThrowVerdict, Player?, Vector3)
 	local character = thrower.Character
 	local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
 
 	if root == nil or not root:IsA("BasePart") then
-		return "THROWER_NOT_ALIVE", nil, Vector3.zero
+		return "ITEM_THROWER_NOT_ALIVE", nil, Vector3.zero
 	end
 
 	local origin = root.Position
 	local aswangUserId = RoundService.GetAswangUserId()
+
+	--[[
+		THE THROWER-ONLY GATES, ANSWERED ONCE, BEFORE ANY CANDIDATE IS CONSIDERED.
+
+		THIS SHIPPED WRONG AND AN EXPLOIT AUDIT PROVED IT BY RUNNING THE REAL MODULE. `ITEM_WRONG_PHASE`,
+		`ITEM_THROWER_NOT_ALIVE` and `ITEM_NO_ITEM` depend only on the thrower — but they were produced
+		only INSIDE the candidate loop below, past a `continue` that skips the thrower and anyone
+		without a HumanoidRootPart. With zero surviving iterations the function fell through to the
+		`best == nil` branch and returned MISS, so:
+
+		    ENDING, holding salt, one candidate    -> ITEM_WRONG_PHASE   (refused, correctly)
+		    ENDING, holding salt, ZERO candidates  -> MISS               (accepted, and SPENT)
+
+		MISS reaches the spend line, so a solo player in ENDING or a dead player alone in the barrio
+		burned their salt and fired a `SaltEffect` burst. Narrow in a live 3-5 player round — the C15
+		redesign keeps a dead player's character attached, so they still count as candidates — and
+		wide open in a solo session, which `Debug.SoloTesting` permits.
+
+		A SENTINEL TARGET RATHER THAN A SECOND COPY OF THE RULES. The call below uses the thrower's own
+		position and `TargetIsTransformedAswang = false`, which can only ever produce a thrower-gate
+		verdict or MISS — never OK. So this asks `pure/ItemThrow` the thrower question using
+		`pure/ItemThrow`'s own answers, and there is no second predicate here to drift from the first.
+	]]
+	local throwerVerdict = ItemThrow.evaluate({
+		Phase = RoundService.GetPhase(),
+		ThrowerState = RoundService.GetPlayerState(thrower),
+		Held = slot[thrower.UserId],
+		ThrowerPos = vec(origin),
+		Direction = vec(direction),
+		TargetPos = vec(origin),
+		TargetIsTransformedAswang = false,
+		Range = Config.Items.SaltThrowRange,
+		ConeDegrees = Config.Items.ThrowConeDegrees,
+	})
+
+	if throwerVerdict ~= "OK" and throwerVerdict ~= "MISS" then
+		return throwerVerdict :: Types.ItemThrowVerdict, nil, origin
+	end
 
 	local best: Player? = nil
 	local bestDistance = math.huge
@@ -530,28 +337,32 @@ local function resolveThrow(
 		end
 
 		--[[
-			THE ROLE AND THE FORM ARE ANDed HERE AND NOWHERE ELSE. `pure/SaltThrow` receives one
+			THE ROLE AND THE FORM ARE ANDed HERE AND NOWHERE ELSE. `pure/ItemThrow` receives one
 			boolean and never learns that a role exists — which is what lets that module live in
 			`shared/pure/` and be callable by any client without leaking anything.
 		]]
 		local isTransformedAswang = aswangUserId == candidate.UserId
 			and MonsterService.IsTransformed(candidate.UserId)
 
-		local verdict = SaltThrow.evaluate({
+		local verdict = ItemThrow.evaluate({
 			Phase = RoundService.GetPhase(),
 			ThrowerState = RoundService.GetPlayerState(thrower),
-			Carried = carried[thrower.UserId] or 0,
+			-- V08. The slot, not a count. `pure/ItemThrow` collapses "holding a bawang" into MISS
+			-- with the four geometric worlds; see its header for why that fifth world may not be
+			-- split out even though the thrower already knows what they are holding.
+			Held = slot[thrower.UserId],
 			ThrowerPos = vec(origin),
 			Direction = vec(direction),
 			TargetPos = vec(candidateRoot.Position),
 			TargetIsTransformedAswang = isTransformedAswang,
-			Range = Config.Salt.ThrowRange,
-			ConeDegrees = Config.Salt.ThrowConeDegrees,
+			Range = Config.Items.SaltThrowRange,
+			ConeDegrees = Config.Items.ThrowConeDegrees,
 		})
 
 		--[[
 			A NON-GEOMETRIC REFUSAL IS THE SAME FOR EVERY CANDIDATE, so returning it from inside the
-			loop is correct rather than sloppy: WRONG_PHASE, THROWER_NOT_ALIVE and NO_POUCH depend only
+			loop is correct rather than sloppy: ITEM_WRONG_PHASE, ITEM_THROWER_NOT_ALIVE and
+			ITEM_NO_ITEM depend only
 			on the thrower, and re-deriving them per candidate is what keeps ONE call site for the whole
 			rule instead of a pre-check that can drift from it.
 		]]
@@ -560,7 +371,7 @@ local function resolveThrow(
 			-- union by excluding two of its members widens the remainder to plain `string`, which then
 			-- fails to satisfy the declared return type. Six of the scaffold's seven original analyze
 			-- errors were this exact shape.
-			return verdict :: Types.SaltVerdict, nil, origin
+			return verdict :: Types.ItemThrowVerdict, nil, origin
 		end
 
 		if verdict == "OK" then
@@ -574,7 +385,7 @@ local function resolveThrow(
 				no version of this that is asymmetric by accident.
 
 				COLLAPSED INTO THE EXISTING `MISS`, AND A `MISS_SMOKE` WOULD BE A ROLE ORACLE.
-				`pure/SaltThrow` reports one MISS for every failure reason precisely because a throw
+				`pure/ItemThrow` reports one MISS for every failure reason precisely because a throw
 				is a request a SURVIVOR makes about ANOTHER PLAYER — a split verdict lets a client
 				stand in front of each player in turn and read the monster off the refusal shape. A
 				smoke-specific value would be worse than most: it is produced only when the Aswang has
@@ -599,13 +410,13 @@ local function resolveThrow(
 
 			`direction.Unit` on a zero or non-finite vector yields NaN rather than throwing, so the
 			impact point would be NaN and the burst would render nowhere. Guarded rather than trusted —
-			this is the one place a client's raw vector reaches arithmetic, and `pure/SaltThrow` has
+			this is the one place a client's raw vector reaches arithmetic, and `pure/ItemThrow` has
 			already refused the throw by this point but does not hand back a sanitised direction.
 		]]
 		local magnitude = direction.Magnitude
 		local aim = if magnitude > 0 and magnitude < math.huge then direction.Unit else Vector3.zero
 
-		return "MISS", nil, origin + aim * Config.Salt.ThrowRange
+		return "MISS", nil, origin + aim * Config.Items.SaltThrowRange
 	end
 
 	local bestCharacter = (best :: Player).Character
@@ -615,17 +426,362 @@ local function resolveThrow(
 	return "OK", best, impact
 end
 
-local function onPhaseChanged(phase: Types.RoundPhase)
-	if phase == Enums.RoundPhase.Starting then
-		spawnPouches()
-	elseif phase == Enums.RoundPhase.Intermission or phase == Enums.RoundPhase.Idle then
-		clearPouches()
+--------------------------------------------------------------------------------
+-- V08 — the slot, the world, and the four ways a slot empties
+--------------------------------------------------------------------------------
+
+-- The tag every item lying on the floor carries. Replicated, and carries nothing — see the AddTag
+-- call in `placeItem` for the argument, which is C13's `SaltPouch` argument unchanged.
+local TAG_DROPPED = "DroppedItem"
+
+--[[
+	THE COLOUR OF A DROPPED ITEM. Placeholder presentation, replaced at V15 with real models.
+
+	IT MUST DISTINGUISH THE THREE, because from the drop handler onward all three can be lying on the
+	ground at once and one of them is the round's only win condition. A tester has to be able to tell
+	the buntot pagi from a pouch at ten paces without walking to it.
+]]
+local function colourOf(item: Types.ItemType): Color3
+	if item == Enums.ItemType.Bawang then
+		return rgb(Config.Items.BawangRgb)
+	elseif item == Enums.ItemType.BuntotPagi then
+		return rgb(Config.Items.BuntotPagiRgb)
+	end
+
+	return rgb(Config.Items.SaltRgb)
+end
+
+--[[
+	PUT AN ITEM IN THE WORLD AT A POSITION. The one place an item part is created.
+
+	ANCHORED AND NON-COLLIDING. It must not be pushed around by characters, must not fall through the
+	barrio's greybox floor, and must not block a doorway — V09 owns the only thing that is allowed to
+	do that, and doing it accidentally here would half-build garlic with none of its rules.
+
+	THE POSITION IS ALWAYS SERVER-DERIVED. Every caller passes a position the SERVER read: a
+	searcher's own character, a dying player's own character, a husk's own character. No path lets a
+	client name where an item lands, which matters most for the buntot pagi — a client-supplied
+	position drops the win condition through a wall or across the barrio.
+]]
+local function placeItem(item: Types.ItemType, position: Vector3)
+	local folder = droppedItems
+
+	if folder == nil then
+		return
+	end
+
+	local part = Instance.new("Part")
+
+	--[[
+		THE NAME IS THE ITEM TYPE AND NOTHING ELSE.
+
+		WHAT MUST NOT GO ON IT: the UserId of whoever dropped it — not in the Name, not in an
+		attribute, not in a child value. "Who dropped this" is a fact about a player. A dropped item
+		named `Dropped_12345` is a per-player fact lying on the floor of the barrio, readable by
+		every client, and no check in this repo would report it.
+
+		The ITEM TYPE is public and has to be: a player must be able to tell salt from the round's
+		only win condition before walking over it, which is also why `colourOf` exists.
+	]]
+	part.Name = item
+	part.Size = Vector3.new(1, 1, 1) -- config-ok: the item's own size, not a balance knob
+	part.Anchored = true
+	part.CanCollide = false
+	part.Color = colourOf(item)
+	part.Material = Enum.Material.SmoothPlastic
+	-- config-ok: sits on the ground where it was dropped, not a knob
+	part.Position = position + Vector3.new(0, 1, 0)
+
+	--[[
+		THE `DroppedItem` TAG IS REPLICATED AND THAT IS FINE, on the argument C13's `SaltPouch` tag
+		won: it describes an object in the world every client can already see, it names no player,
+		and the client needs it to draw a pickup affordance at all. `check:secrecy` inspects tags and
+		this one passes because it carries nothing.
+	]]
+	CollectionService:AddTag(part, TAG_DROPPED)
+
+	--[[
+		PICKUP RESOLVES ON `Touched`, NOT ON A TICK, and the distance is re-checked on the server.
+
+		C13 swept O(players x pouches) every quarter second for the life of the server. `Touched` is
+		a hint that something is nearby; the AUTHORITY is the same comparison `pickupTick` made —
+		measured from the player's own character, on the server — so C13's rule survives ("the server
+		resolves what a player is standing at from that player's own character position") without the
+		per-tick cost.
+
+		`Touched` FIRES FOR ANY BasePart, including a corpse, another dropped item and the map
+		itself. The narrowing below is to avoid resolving a player for every leaf that brushes it;
+		`ItemCarry` re-checks the state regardless.
+	]]
+	part.Touched:Connect(function(hit: BasePart)
+		if part.Parent == nil then
+			return
+		end
+
+		local character = hit:FindFirstAncestorOfClass("Model")
+		local player = if character then Players:GetPlayerFromCharacter(character) else nil
+
+		if player == nil then
+			return
+		end
+
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+
+		if root == nil or not root:IsA("BasePart") then
+			return
+		end
+
+		--[[
+			THE SERVER-SIDE RE-CHECK, AND IT NARROWS THE ATTACK RATHER THAN CLOSING IT.
+
+			A `Touched` event is the client's physics telling the server something happened; this is
+			the server measuring the distance for itself, which is C13's rule and is worth keeping.
+
+			WHAT IT DOES NOT BUY, stated plainly because the previous comment here overstated it: the
+			position it measures is the CHARACTER'S, and Roblox gives the client network ownership of
+			its own character. An executor enumerates `workspace.DroppedItems` — the parts are public,
+			tagged, named by item type and colour-coded, because a player has to be able to tell the
+			win condition from a pouch — teleports to the buntot pagi, takes it, and teleports back.
+			There is no remote on this path, so `RequestDropItem`'s token bucket does not apply and
+			the pickup rate is unbounded.
+
+			THIS IS THE STANDARD ROBLOX OWNERSHIP MODEL AND IS NOT NEW TO V08 — `RequestSearch` has
+			the same exposure. What IS new is that V08 puts the round's only win condition on the
+			floor in a self-labelling part. Closing it properly needs a displacement sanity check
+			against the last replicated position, or a rate-limited pickup remote; neither is in this
+			chunk's scope, and pretending a distance test substitutes for one is how it stays open.
+		]]
+		if (part.Position - root.Position).Magnitude > Config.Items.DropPickupRangeStuds then
+			return
+		end
+
+		local verdict = ItemCarry.evaluate({
+			Phase = RoundService.GetPhase(),
+			PlayerState = RoundService.GetPlayerState(player),
+			Held = slot[player.UserId],
+			Incoming = item,
+			Limit = Config.Items.CarryLimit,
+		})
+
+		--[[
+			ON ANY REFUSAL THE ITEM STAYS ON THE FLOOR, and there is nothing to spill — it never left
+			the world. That is the correct §4.4 outcome: items belong to the world, not to
+			individuals, so a full-handed player walking over the buntot pagi leaves it for whoever
+			comes next rather than destroying it.
+		]]
+		if verdict ~= "OK" then
+			return
+		end
+
+		slot[player.UserId] = item
+		part:Destroy()
+	end)
+
+	part.Parent = folder
+end
+
+--[[
+	SPILL WHAT A PLAYER WAS HOLDING, AT THE BODY. Death, disconnect, and a search their hand was too
+	full to accept. Nil-safe in both directions: a player holding nothing spills nothing, and a
+	player with no character spills nothing.
+
+	AT THE BODY IS THE POINT, AND IT IS NOT THE SAME AS A DELIBERATE DROP. §4.6: when the carrier
+	dies the buntot pagi "drops where they fell… a corpse in the open with the win condition lying
+	next to it". Offsetting this one forward would put the item somewhere the carrier was heading
+	rather than where they died, which is the whole beat. `dropItemInFront` below is the other case.
+
+	THE `item` ARGUMENT IS PASSED RATHER THAN READ FROM THE SLOT so that a caller which has already
+	cleared the slot can still spill correctly, and so that the order of "clear then spill" versus
+	"spill then clear" cannot silently drop an item on the floor of a table nobody reads.
+
+	IT DOES NOT CLEAR THE SLOT. Every caller does that itself, deliberately: the disconnect path
+	nils the whole entry, the death path nils it, and the drop handler nils it. A helper that did
+	both would make "spill without clearing" — which no caller wants — impossible to notice.
+
+	⚠️ THE SILENT RETURN ON A MISSING CHARACTER IS THE BUNTOT PAGI'S LAST PATH OUT OF THE SLOT, so it
+	WARNS rather than vanishing quietly. `RoundService.onPlayerRemoving` sets `player.Character = nil`
+	and reparents the body into `workspace.Husks`; this service's `PlayerRemoving` handler runs
+	FIRST — and only because `init.server.luau` lists `ItemService` before `RoundService`. That
+	ordering is load-bearing and was undocumented until an exploit audit found it. If it ever
+	changes, every disconnect-while-carrying deletes the item, and the warn below is the only thing
+	that would say so.
+]]
+local function spillItem(player: Player, item: Types.ItemType?)
+	if item == nil then
+		return
+	end
+
+	local character = player.Character
+	local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
+
+	if root == nil or not root:IsA("BasePart") then
+		warn(
+			`[ItemService] Could not spill an item for {player.UserId}: no character. `
+				.. `If this fires on a disconnect, ItemService.Start now runs AFTER RoundService.`
+		)
+		return
+	end
+
+	placeItem(item, root.Position)
+end
+
+--[[
+	A DELIBERATE DROP, LANDING `Config.Items.DropForwardStuds` IN FRONT OF THE DROPPER.
+
+	THE FORWARD OFFSET IS THE MECHANIC, NOT A FLOURISH, and it shipped missing: V08 first placed a
+	dropped item at the dropper's own root, one stud up, while `Config.Items.DropForwardStuds` had a
+	declaration, a `Remotes.luau` comment describing it, and a `tests/config.test.luau` invariant
+	pinning it against `DropPickupRangeStuds` — and no reader anywhere in `src/`. The invariant was
+	green over a rule the code did not apply. Found by an exploit audit, not by a gate.
+
+	WHY IT MATTERS: the drop radius is 6 studs and the item was landing 1 stud away, INSIDE the
+	radius that takes it straight back. Either the pickup fires on the spawn overlap and the drop is
+	instantly undone — so §4.6's "dropped, passed, and picked up from a body" is unimplemented for
+	the buntot pagi — or it does not fire and the item is unpickupable until somebody walks out of
+	the radius and back in. Both are bugs and neither shows up in a check.
+
+	`LookVector` IS READ FROM THE SERVER'S COPY OF THE CHARACTER, like every other position in this
+	file. The client sends no argument and names no direction; `RequestDropItem` has no parameters
+	precisely so this cannot be aimed.
+]]
+local function dropItemInFront(player: Player, item: Types.ItemType?)
+	if item == nil then
+		return
+	end
+
+	local character = player.Character
+	local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
+
+	if root == nil or not root:IsA("BasePart") then
+		-- Falls back to nothing rather than to the origin: an item at (0,0,0) is worse than a
+		-- refused drop, because it is somewhere a player can reach and did not choose.
+		return
+	end
+
+	placeItem(item, root.Position + root.CFrame.LookVector * Config.Items.DropForwardStuds)
+end
+
+-- Everything this service put in the world. Called on the way into INTERMISSION and IDLE, mirroring
+-- MonsterService.clearCorpses — NOT on "any phase that is not ACTIVE", which is the mistake that
+-- destroyed the winning kill's corpse within a frame of creating it.
+local function clearDroppedItems()
+	local folder = droppedItems
+
+	if folder == nil then
+		return
+	end
+
+	for _, item in folder:GetChildren() do
+		item:Destroy()
+	end
+end
+
+--[[
+	V08. A CONTAINER YIELDED AN ITEM (§4.4, §4.6). THE ONLY WAY AN ITEM ENTERS A SLOT FROM THE WORLD
+	that is not a deliberate pick-up-off-the-floor.
+
+	`SearchService.ItemFound` fires from the ONE path that yields an item, AFTER the container is
+	marked opened. So by the time this runs, the item has already left the world and the container is
+	already spent.
+
+	WHICH IS WHY A REFUSAL HERE HAS TO PUT THE ITEM BACK, AND THAT IS THE HARD PART OF THIS FUNCTION.
+	§4.4's anti-frustration rule says items belong to the world, not to individuals; a player whose
+	hand is full completes a six-second search, makes noise, and would otherwise DESTROY the item.
+	With seven items in the round and one of them the win condition, a full-handed search on the
+	buntot pagi's container would delete the second win condition silently — no error, no warning,
+	and no way to tell afterwards that it had happened.
+
+	A BindableEvent's arguments are `...any`, so this NARROWS rather than casts — V03's own
+	instruction where `ItemFound` is declared. The narrowing is defensive rather than necessary
+	today (`Enums.ItemType` is frozen and `SearchService` seeds from it), and it stays that way.
+]]
+local function onItemFound(player: unknown, itemId: unknown)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
 	end
 
 	--[[
-		EVERY phase that is not ACTIVE, unlike clearPouches which fires only on INTERMISSION/IDLE. The
-		difference mirrors MonsterService.onPhaseChanged's split and it is deliberate: pouches lying on
-		the ground during ENDING are scenery, a glow during ENDING is a mark on a player.
+		NARROWED BY ASSIGNMENT FROM `Enums`, NOT BY A CAST ON THE INCOMING VALUE, and the difference
+		is load-bearing rather than stylistic.
+
+		`local item = itemId :: Types.ItemType` COMPILES AND IS WRONG. `itemId` is `unknown`; after
+		three `~=` tests Luau refines it to `string | string | string`, the cast widens rather than
+		narrows, and the `ItemCarry.Request` below then fails to typecheck on `Incoming`. This is
+		`.claude/lessons/pure-module-unions-widen-in-lists.md` arriving through a second door — a
+		literal union does not survive being reconstructed from a value that lost it.
+
+		Assigning the frozen `Enums` constant instead gives back the `:: Types.ItemType` cast that
+		`Enums.luau` already carries on each member, which is the one place that cast belongs. It is
+		also V03's own instruction where `ItemFound` is declared: narrow with a function, not a cast.
+	]]
+	local item: Types.ItemType
+
+	if itemId == Enums.ItemType.Salt then
+		item = Enums.ItemType.Salt
+	elseif itemId == Enums.ItemType.Bawang then
+		item = Enums.ItemType.Bawang
+	elseif itemId == Enums.ItemType.BuntotPagi then
+		item = Enums.ItemType.BuntotPagi
+	else
+		warn(`[ItemService] SearchService.ItemFound fired with an unknown item: {tostring(itemId)}`)
+		return
+	end
+
+	local verdict = ItemCarry.evaluate({
+		Phase = RoundService.GetPhase(),
+		PlayerState = RoundService.GetPlayerState(player),
+		Held = slot[player.UserId],
+		Incoming = item,
+		Limit = Config.Items.CarryLimit,
+	})
+
+	if verdict ~= "OK" then
+		--[[
+			THE ITEM GOES TO THE FLOOR, NOT TO NOTHING. See the header. It lands at the searcher's own
+			position, which is where the container was — which is where a player who could not carry
+			it would expect to find it when they come back with an empty hand.
+		]]
+		spillItem(player, item)
+
+		if Config.Debug.VerboseLogging then
+			-- A UserId and a verdict. Never the item, and never a role: an item id in the log beside
+			-- a UserId is the roster the slot table's comment refuses to build, written to disk.
+			print(`[ItemService] Pickup refused for {player.UserId}: {verdict}`)
+		end
+
+		return
+	end
+
+	slot[player.UserId] = item
+
+	-- C23. The first pouch a player ever takes explains what it is for; §10 is explicit that the
+	-- folklore must not be assumed. Fired to the player who did it, about a thing they did
+	-- themselves — no audience question here. SALT ONLY: the cue's copy is about salt, and V09/V10
+	-- own whether their items deserve one.
+	if item == Enums.ItemType.Salt then
+		TeachingService.Cue(player, "CUE_FIRST_SALT")
+	end
+end
+
+local function onPhaseChanged(phase: Types.RoundPhase)
+	--[[
+		INTERMISSION AND IDLE ONLY, mirroring what `clearPouches` did and what
+		`MonsterService.clearCorpses` does — NOT "any phase that is not ACTIVE", which is the mistake
+		that destroyed the winning kill's corpse within a frame of creating it.
+
+		Items lying on the ground during ENDING are scenery, and a slot during ENDING is a fact about
+		a round that has finished. Neither is a mark on a player, which is the distinction the split
+		below draws for effects.
+	]]
+	if phase == Enums.RoundPhase.Intermission or phase == Enums.RoundPhase.Idle then
+		clearDroppedItems()
+		table.clear(slot)
+	end
+
+	--[[
+		EVERY phase that is not ACTIVE, unlike the sweep above which fires only on INTERMISSION/IDLE.
+		The difference mirrors MonsterService.onPhaseChanged's split and it is deliberate: items lying
+		on the ground during ENDING are scenery, a glow during ENDING is a mark on a player.
 	]]
 	if phase ~= Enums.RoundPhase.Active then
 		clearAllEffects()
@@ -633,32 +789,121 @@ local function onPhaseChanged(phase: Types.RoundPhase)
 end
 
 function ItemService.Init()
-	table.clear(carried)
-	table.clear(pointsByName)
+	table.clear(slot)
+end
+
+--[[
+	V08, §4.6/§6.4. THE FOUR WAYS A SLOT EMPTIES WITHOUT THE ITEM BEING USED, AND THREE OF THEM PUT
+	IT ON THE FLOOR.
+
+	  1. DEATH — it drops where they fell. §4.6 requires this by name and builds a whole beat on it.
+	  2. DISCONNECT — it drops where the husk stands. See `PlayerRemoving` below; it is a decision.
+	  3. THE ROUND LEAVING ACTIVE — the slot clears and the world is swept. Nothing to preserve.
+	  4. A DELIBERATE DROP — Step 4.3's handler.
+
+	ONLY (3) DESTROYS THE ITEM, and only because the round it belonged to is over.
+]]
+
+--[[
+	DROP ON DEATH, AT THE POSITION THE PLAYER DIED AT.
+
+	§4.6 requires this by name: the buntot pagi "can be dropped, passed, and picked up from a body",
+	and when the carrier dies it drops where they fell — "a corpse in the open with the win condition
+	lying next to it and a monster that knows you have to come back for it". A slot that were simply
+	cleared on death would delete the second win condition the first time the carrier is caught, and
+	nothing in the game would report it.
+
+	READ THE POSITION BEFORE ANYTHING MOVES OR DESTROYS THE CHARACTER. `spillItem` reads the
+	HumanoidRootPart, and a `Died` handler that runs after a ragdoll settles drops the win condition
+	somewhere nobody watched them die. Connecting on `Died` rather than on the corpse's creation is
+	what keeps the read early.
+
+	AND IT MUST NOT BE A ROLE TELL. Every player who dies drops what they were holding, and a player
+	holding nothing drops nothing — which is the same observable for a survivor and for the Aswang.
+	There is no branch on role here and there must never be one.
+]]
+local function watchCharacter(player: Player, character: Model)
+	-- A character that has not produced a Humanoid in ten seconds is not going to; the nil branch
+	-- below is the whole handling.
+	local humanoid = character:WaitForChild("Humanoid", 10) -- config-ok: a load timeout, not a knob
+
+	if humanoid == nil or not humanoid:IsA("Humanoid") then
+		return
+	end
+
+	humanoid.Died:Connect(function()
+		spillItem(player, slot[player.UserId])
+		slot[player.UserId] = nil
+	end)
 end
 
 function ItemService.Start()
 	local folder = Instance.new("Folder")
 
-	folder.Name = "SaltPouches"
+	folder.Name = "DroppedItems"
 	folder.Parent = workspace
-	pouches = folder
+	droppedItems = folder
 
 	RoundService.PhaseChanged.Event:Connect(onPhaseChanged)
 
 	--[[
-		A departing player's carry goes with them. Without this the table grows for the life of the
-		server and, worse, a returning player would inherit their own old pouch count.
+		V08. The snapshot's producer for `YourCarriedItem`. REGISTERED RATHER THAN REQUIRED, because
+		this service requires RoundService and the reverse would be a cycle; the reasoning is written
+		at `RoundService.SetCarriedItemProvider`.
 
-		NOTE FOR PHASE 5. The user's disconnect-husk rule preserves a player's STATE across a
-		reconnect, and it is an open question whether their CARRY should travel with it — the husk is
-		meant to be the same body standing in the same place, which argues the pouch is still in its
-		hand. Dropping it here is the conservative choice (a rejoining player never gains salt) and it
-		is the one that is safe if the husk never ships. Revisit when Phase 5 lands rather than
-		assuming this line is settled.
+		THE CLOSURE READS ONE KEY AND RETURNS ONE VALUE. It takes the Player `buildSnapshot` is
+		already building for, so there is no path by which it can be asked about somebody else, and
+		it reads no role — a branch on the Aswang here is what would turn an empty slot into a tell.
+	]]
+	RoundService.SetCarriedItemProvider(function(player: Player): Types.ItemType?
+		return slot[player.UserId]
+	end)
+
+	--[[
+		THE SEAM V03 LEFT UNCONNECTED. `SearchService.ItemFound` is a BindableEvent created at MODULE
+		scope, not inside `Start`, which is why connecting here is safe even though
+		`init.server.luau` starts `ItemService` BEFORE `SearchService`. V03 built it that way
+		deliberately; do not move it, and do not reorder the bootstrap to "fix" a problem that the
+		module-scope construction already solved.
+	]]
+	SearchService.ItemFound.Event:Connect(onItemFound)
+
+	for _, player in Players:GetPlayers() do
+		if player.Character ~= nil then
+			watchCharacter(player, player.Character)
+		end
+
+		player.CharacterAdded:Connect(function(character: Model)
+			watchCharacter(player, character)
+		end)
+	end
+
+	Players.PlayerAdded:Connect(function(player: Player)
+		player.CharacterAdded:Connect(function(character: Model)
+			watchCharacter(player, character)
+		end)
+	end)
+
+	--[[
+		V08 ANSWERS C13's OPEN QUESTION: THE ITEM DOES NOT TRAVEL WITH THE HUSK.
+
+		C13 left this as a "conservative choice, revisit when Phase 5 lands". §4.6 settles it. Three
+		reasons, and the first is the one that decides it:
+
+		  · §4.6's death rule already says the buntot pagi lands where its carrier fell. A disconnect
+		    that made it VANISH would be strictly worse than dying with it — which hands players an
+		    incentive to alt-F4 while holding the win condition.
+		  · The husk is a body standing in the barrio that other players can see and that
+		    `RoundService.MarkHuskKilled` can kill. An item on the floor beside it is consistent with
+		    everything else about the husk.
+		  · A carry preserved across a reconnect is a DUPLICATION surface: the slot table survives,
+		    the husk survives, and the reconnect path would have to prove it does not hand back an
+		    item that was also dropped. Dropping unconditionally makes that unprovable state
+		    unreachable. There is exactly one buntot pagi and it IS the second win condition.
 	]]
 	Players.PlayerRemoving:Connect(function(player: Player)
-		carried[player.UserId] = nil
+		spillItem(player, slot[player.UserId])
+		slot[player.UserId] = nil
 
 		-- `stunned` is dropped directly because there is no humanoid left to restore. The reveal's
 		-- half of this is `MonsterService.onPlayerRemoving`, which since V05 calls `clearExposed`
@@ -690,7 +935,7 @@ function ItemService.Start()
 
 			--[[
 			NOTHING IS RETURNED TO THE CALLER ON ANY PATH, including OK. The client learns what happened
-			the way everyone else does — from SaltEffect and from the world. See Types.SaltVerdict: a
+			the way everyone else does — from SaltEffect and from the world. See Types.ItemThrowVerdict: a
 			verdict echoed back is a role oracle for the price of one pouch.
 		]]
 			if verdict ~= "OK" and verdict ~= "MISS" then
@@ -702,15 +947,45 @@ function ItemService.Start()
 				return
 			end
 
-			-- §4.6: "Once used, it's gone." THE POUCH IS SPENT ON A MISS TOO, and this line sits above the
-			-- hit branch so that no future early-return can skip it. A miss that cost nothing would make
-			-- salt a probe you throw at everyone, which is the thing pure/SaltThrow's header refuses.
-			carried[player.UserId] = math.max(0, (carried[player.UserId] or 0) - 1)
+			--[[
+				THE WRONG ITEM IS NOT A THROW, AND THIS GUARD IS THE BUG STEP 4.2 EXISTS TO NOT SHIP.
+
+				`pure/ItemThrow` returns MISS for a player holding a BAWANG or the BUNTOT_PAGI — the
+				fifth world, collapsed into MISS deliberately so a refusal shape cannot be
+				differenced into a role oracle. MISS reaches the spend line below. So without this
+				guard, pressing the throw key while holding the round's ONLY buntot pagi destroys the
+				second win condition, and the symptom is indistinguishable from an honest miss.
+
+				IT ASKS `pure/ItemUse` RATHER THAN COMPARING TO "SALT" INLINE, so the V09/V10 boundary
+				that `tests/item-use.test.luau` pins is the boundary this service enforces. When V09
+				gives bawang a verb, this line stops being the place that decides bawang does nothing.
+
+				ITS POSITION IS LOAD-BEARING IN BOTH DIRECTIONS. It sits BELOW the refusal branch, so
+				a wrong-item press still burns an AntiCheat token and still returns silently; and
+				ABOVE the noise emit, so a press with a bawang in hand makes no sound. That second
+				half matters — `NoiseService.Emit` fires on a miss precisely so a throw sounds the
+				same whether or not it hit, and a noise that fired for a non-throw would be a free
+				"I am holding something that is not salt" broadcast to everyone in radius.
+			]]
+			if ItemUse.verbFor(slot[player.UserId]) ~= "USE_THROW" then
+				return
+			end
+
+			--[[
+				§4.6: "Once used, it's gone." THE SALT IS SPENT ON A MISS TOO, and this line sits
+				above the hit branch so that no future early-return can skip it. A miss that cost
+				nothing would make salt a probe you throw at everyone, which is the thing
+				`pure/ItemThrow`'s header refuses.
+
+				CLEARED RATHER THAN DECREMENTED: reaching here means the slot held SALT and the slot
+				holds one thing.
+			]]
+			slot[player.UserId] = nil
 
 			--[[
 				V04, §4.4. A THROW IS LOUD, AND IT IS EQUALLY LOUD ON A MISS.
 
-				THE SAME ARGUMENT AS THE LINE ABOVE, AND THE SAME ONE pure/SaltThrow MAKES ABOUT ITS
+				THE SAME ARGUMENT AS THE LINE ABOVE, AND THE SAME ONE pure/ItemThrow MAKES ABOUT ITS
 				SINGLE MISS VERDICT. A noise that only fired on OK would be an identity probe with a
 				sound instead of a return value: throw a pouch at somebody, listen, learn what the
 				verdict refuses to tell you. Both verdicts reach this line, so both sound alike.
@@ -734,12 +1009,66 @@ function ItemService.Start()
 			broadcastEffect(player, impact, verdict == "OK")
 		end)
 
-	task.spawn(function()
-		while true do
-			pickupTick()
-			task.wait(0.25) -- config-ok: scheduler tick, not a balance knob
+	--[[
+		THE RATE LIMIT IS INLINE AND FIRST, copying the throw handler above it and MonsterService's
+		two exactly. `check-ratelimit.mjs` matches `AntiCheat\w*[.:](Allow|Check|Consume|RateLimit|
+		Permit)` within 1200 characters of an `.OnServerEvent:Connect(`, by its own admission a
+		proximity tripwire — so a handler that IS limited but does it elsewhere reads as unguarded
+		and fails the build. Consume FIRST, before anything is read.
+
+		THERE IS NO ARGUMENT TO VALIDATE, which is the point of the declaration in `Remotes.luau`.
+		The throw handler needs a `typeof(direction) ~= "Vector3"` guard because a client sends a
+		vector; this one reads a server table and a server position and nothing else.
+
+		DROPPING MAKES NO NOISE, AND THAT IS A REFUSAL RATHER THAN AN OMISSION. §4.4 names the noisy
+		actions and dropping is not one of them. More sharply: a drop cue would let anyone within
+		noise radius hear the buntot pagi's carrier decide to put it down — which converts §4.5's
+		"I have the buntot pagi" phrase, a CHOICE with a cost, into an automatic broadcast.
+	]]
+	Remotes.Get("RequestDropItem").OnServerEvent:Connect(function(player: Player)
+		if not AntiCheatService.Consume(player, "RequestDropItem") then
+			return
 		end
+
+		local verdict = ItemDrop.evaluate({
+			Phase = RoundService.GetPhase(),
+			PlayerState = RoundService.GetPlayerState(player),
+			Held = slot[player.UserId],
+		})
+
+		--[[
+			NOTHING IS RETURNED TO THE CALLER ON ANY PATH, including OK — the throw handler's rule,
+			inherited. The client learns its hand is empty from its own next snapshot, which is a
+			per-player `FireClient` it was going to receive anyway.
+		]]
+		if verdict ~= "OK" then
+			if Config.Debug.VerboseLogging then
+				-- A UserId and a verdict. NEVER the item: an item id beside a UserId in the log is
+				-- the roster `slot`'s comment refuses to build, written to disk.
+				print(`[ItemService] Drop refused for {player.UserId}: {verdict}`)
+			end
+
+			return
+		end
+
+		-- FORWARD, not at the feet — see `dropItemInFront`. A drop that landed inside the pickup
+		-- radius would be taken straight back, which is the bug this call site shipped with.
+		dropItemInFront(player, slot[player.UserId])
+		slot[player.UserId] = nil
 	end)
+
+	--[[
+		THERE IS NO TICK ANY MORE, AND NOTHING SHOULD BRING ONE BACK.
+
+		C13 ran a `task.wait(0.25)` pickup loop on the server for the life of the server, sweeping
+		O(players x pouches) every quarter second. V08 deleted it with the pouches: this service is
+		now entirely event-driven — `SearchService.ItemFound`, the two `OnServerEvent` handlers,
+		`RoundService.PhaseChanged`, `Humanoid.Died` and `Players.PlayerRemoving`.
+
+		The one thing that plausibly wants a tick is picking a dropped item back up off the floor,
+		and Step 4.3 resolves that on a `Touched` connection on the dropped part itself, with a
+		server-side distance re-check, rather than by re-introducing the sweep.
+	]]
 end
 
 return ItemService

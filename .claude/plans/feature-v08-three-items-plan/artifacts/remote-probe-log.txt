@@ -1,0 +1,31 @@
+V08 remote-argument probe — RequestDropItem / RequestThrowSalt / RequestSearch
+Date: 2026-08-29
+Method: transient OnServerEvent listeners attached server-side (execute_luau, datamodel_type=Server),
+disconnected immediately after. Keys driven via user_keyboard_input on the Client datamodel:
+X (drop), Q (throw), E (search), one keyPress each, 500ms apart.
+
+Probe setup (Luau, run in Server datamodel):
+  local Remotes = require(game.ReplicatedStorage.Shared.Remotes)
+  local names = { "RequestDropItem", "RequestThrowSalt", "RequestSearch" }
+  for _, name in names do
+    local remote = Remotes.Get(name)
+    remote.OnServerEvent:Connect(function(player, ...)
+      local args = { ... }
+      table.insert(log, { remote = name, player = player.Name, argCount = #args })
+    end)
+  end
+
+Result (3 total events recorded for 3 key presses — one per remote, no cross-firing):
+  1. RequestDropItem   from Demiurgos_18   argCount=0   (fired by X)
+  2. RequestThrowSalt  from Demiurgos_18   argCount=1   (fired by Q — carries a direction, as designed)
+  3. RequestSearch     from Demiurgos_18   argCount=0   (fired by E)
+
+Assertions:
+  - RequestDropItem arrives with 0 arguments. CONFIRMED.
+  - X does not fire RequestThrowSalt (or RequestSearch). CONFIRMED — exactly 3 events total for
+    3 key presses, one per remote, in press order X,Q,E. No extra/duplicate events from any key.
+  - RequestSearch arrives with 0 arguments (server resolves the container from the player's own
+    position, per Remotes.luau's own comment). CONFIRMED.
+
+Probe disconnected after capture (execute_luau confirmed disconnected:true, finalCount:3 — no
+further growth after disconnect).

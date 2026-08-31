@@ -23,7 +23,7 @@
 	survivor does sincerely; `.claude/lessons/absence-is-observable.md` is the long version.
 
 	NO `script.Parent` REQUIRES and no Roblox datatypes — `Vec3` is a plain table, converted at the
-	call site exactly as `SaltThrow`'s and `KillValidation`'s are.
+	call site exactly as `ItemThrow`'s and `KillValidation`'s are.
 ]]
 
 export type Vec3 = { X: number, Y: number, Z: number }

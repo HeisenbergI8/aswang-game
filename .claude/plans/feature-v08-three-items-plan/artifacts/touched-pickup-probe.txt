@@ -1,0 +1,38 @@
+V08 — the one genuinely unverified Roblox behaviour: does Touched fire on an anchored,
+CanCollide = false part?
+Date: 2026-08-29
+Method: rather than driving a full search -> slot -> drop -> pickup chain (state-dependent, needs an
+item in hand first), built an ISOLATED experiment that reproduces the exact part shape ItemService's
+placeItem() creates (src/server/Services/ItemService.luau:428-463) and asked the one engine question
+directly.
+
+Probe part created in workspace (Server datamodel), matching placeItem()'s real properties:
+  Anchored = true
+  CanCollide = false
+  CanTouch = true (engine default, unchanged)
+  Position = (0, 5, 0)
+
+A Touched listener was attached to the probe part, recording hit part name + parent name.
+The player's character was teleported 10 studs away (0, 5, 10), then walked to the probe using
+mcp__Roblox_Studio__character_navigation (real pathfinding/movement, not a teleport-into-overlap) —
+the same locomotion a real player uses to "walk over a pouch".
+
+Result: Touched FIRED. 2 hits recorded during the walk-in:
+  1. hit = "Handle" (parent "Pal Hair", the character's hair accessory)
+  2. hit = "Head"   (parent "Demiurgos_18", the character model)
+
+Both hits resolve to the same character Model via hit:FindFirstAncestorOfClass("Model"), exactly the
+lookup placeItem()'s own Touched handler uses (ItemService.luau:483) before calling
+Players:GetPlayerFromCharacter(character). This is not merely "some part touched something" — it is
+the identical resolution path production code depends on, proven against the identical part shape.
+
+Conclusion: Touched DOES fire for an anchored, CanCollide = false part on a live character walking
+into it, in this Studio/engine version. The pickup mechanism's foundational assumption holds. This is
+the single highest-value finding in this verification pass, per the coordinator's brief.
+
+Cleanup: probe part destroyed and Touched connection disconnected immediately after capture. Nothing
+left in workspace.
+
+Caveat: this proves the ENGINE BEHAVIOUR (Touched fires on this part shape), not the full production
+code path end-to-end (item actually reaching a slot after a real walk-over). See
+search-active-window.txt / hud captures for the closest available evidence on the full chain.

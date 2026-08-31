@@ -623,12 +623,58 @@ end
 	carrier of a role in `check-secrecy.mjs`, and one carrier is auditable in a way that two are not.
 	C03 puts the role on RoleAssigned and the client caches it locally.
 ]]
+--[[
+	V08, §4.6. WHO ANSWERS "WHAT IS THIS PLAYER HOLDING", AND WHY IT IS INJECTED.
+
+	`ItemService` owns the slot and `ItemService` requires THIS service — for the phase, the player
+	state and the Aswang's UserId. A require in the other direction is a cycle, and Luau answers a
+	cycle with a half-built table rather than an error, so it would fail at runtime in whichever
+	direction `init.server.luau` happened to resolve first.
+
+	SO THE OWNER REGISTERS ITSELF. `ItemService.Start` calls this; `buildSnapshot` asks it. Same
+	shape as `RoundService.PhaseChanged`, pointed the other way: there, subscribers reach in; here,
+	the owner hands in a reader.
+
+	IT IS THE FIRST INJECTED READER IN THIS REPO and that is worth naming rather than hiding. Every
+	other cross-service link here is a direct `require` in the allowed direction or a BindableEvent
+	the owner exposes. A BindableEvent cannot do this job: events PUSH, and `buildSnapshot` needs to
+	PULL, synchronously, at snapshot time. The alternative is `ItemService` pushing a `CarryUpdate`
+	remote of its own — a second server→client remote for a field the snapshot already declares, and
+	two sources for one value in the HUD. The seam is the smaller change.
+
+	IT RETURNS ONE PLAYER'S OWN ITEM AND CANNOT BE ASKED ABOUT ANOTHER. The provider takes the
+	Player `buildSnapshot` is already building for, and that snapshot is sent with `:FireClient`.
+	There is no broadcast form of this payload — `broadcastSnapshot` below loops and fires
+	individually for exactly this reason, and that loop is what makes `YourState` safe today.
+
+	nil UNTIL `ItemService.Start` RUNS, and `buildSnapshot` handles that: a snapshot built during
+	bootstrap carries no item, which is also the truth. Not an error and not a warn — this is called
+	every `Round.SnapshotInterval` and a warn here would be a log flood in a Studio session.
+]]
+local carriedItemProvider: ((Player) -> Types.ItemType?)? = nil
+
+function RoundService.SetCarriedItemProvider(provider: (Player) -> Types.ItemType?)
+	carriedItemProvider = provider
+end
+
 local function buildSnapshot(player: Player): Types.ClientRoundSnapshot
 	return {
 		Phase = state.Phase,
 		SecondsRemaining = RoundService.GetSecondsRemaining(),
 		RoundNumber = state.RoundNumber,
 		YourState = RoundService.GetPlayerState(player),
+		--[[
+			V08. THE PLAYER'S OWN SLOT, AND THE `Your` PREFIX IS THE WHOLE CONTRACT — see
+			`Types.ClientRoundSnapshot`, which argues this field at length.
+
+			THE ONE THAT MATTERS HERE: the Aswang's slot is `nil` far more often than a survivor's,
+			because the monster is usually hunting rather than searching — but `nil` is ALSO what an
+			empty-handed survivor sends, and the two are the same value on the same field at the
+			same cadence. What would break that is a special case: an `if isAswang then nil end`, or
+			a "cannot carry" member added to ItemType for the monster's benefit. Neither exists, and
+			`ItemService.slot`'s own comment refuses both.
+		]]
+		YourCarriedItem = if carriedItemProvider ~= nil then carriedItemProvider(player) else nil,
 	}
 end
 

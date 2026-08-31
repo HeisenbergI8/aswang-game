@@ -51,14 +51,25 @@ export type MonsterState = "NORMAL" | "TRANSFORMED" | "EXPOSED" | "FEEDING" | "C
 export type BodyKind = "CORPSE" | "HUSK"
 
 --[[
-	§4.3. What a revealed Aswang can turn into. Four ambient forms so the barrio's scenery is a place
+	§4.3. What a revealed Aswang can turn into. Six ambient forms so the barrio's scenery is a place
 	the monster can hide IN rather than a backdrop, and so §4.5's "It's the [animal]!" phrase has a
 	closed set of things it can name.
+
+	SIX RATHER THAN FOUR, AND THE POPULATION DID NOT GROW TO PAY FOR IT. `Config.Ambient.PerForm`
+	drops 4 -> 3 in the same change, so the barrio carries 18 entities instead of 16. §5 asks for
+	"3-4 each"; three is inside that and above the secrecy floor `tests/config.test.luau` pins.
+
+	WHY THESE TWO. Both are animals a rural Philippine barrio genuinely carries in numbers, and both
+	are TETHERED OR YARD-BOUND in life rather than free-roaming — goats are tethered and rotated at a
+	field edge, chickens forage a household yard. That is what lets each form have a TERRITORY without
+	the constraint reading as an arbitrary game rule, which matters because the territory is also a
+	constraint on the monster: a pig on the basketball court is now wrong, so the Aswang can only wear
+	a pig near the mud. That is deliberate and it is the counterplay §4.5 asks for.
 
 	NOT A PET SYSTEM, and the distance matters because `check:scope` arms `pets?`. These are forms the
 	Aswang wears, owned by nobody, purchasable never (§8.3).
 ]]
-export type CamouflageForm = "CAT" | "DOG" | "PIG" | "VILLAGER"
+export type CamouflageForm = "CAT" | "DOG" | "PIG" | "GOAT" | "CHICKEN" | "VILLAGER"
 
 export type PlayerStats = {
 	Rounds: number,
@@ -314,7 +325,64 @@ export type SearchPoolVerdict = "OK" | "EMPTY" | "SHORT" | "DUPLICATE_ID" | "OVE
 	NO_POUCH is the C13 half: you are not carrying salt. It is also never echoed, because the client
 	already knows what it is carrying — the server told it and it can count its own pickups.
 ]]
+-- ⚠️ V08 IS RETIRING THIS. `ItemService.resolveThrow` is its last reader and Step 4.2 replaces it
+-- with `ItemThrowVerdict` below. It survives only so Phases 2 and 3 leave a green tree; do not wire
+-- anything new to it.
 export type SaltVerdict = "OK" | "WRONG_PHASE" | "THROWER_NOT_ALIVE" | "NO_POUCH" | "MISS"
+
+--[[
+	V08, §4.6. THE THREE ITEM VERDICTS, AND WHY THEY ARE THREE UNIONS RATHER THAN ONE.
+
+	Each one is the return type of a different pure module, and the modules refuse for different
+	reasons at different moments: `ItemCarry` refuses a pickup, `ItemThrow` refuses a use, and the
+	drop refuses a put-down. One merged union would let a handler compare against a value its module
+	can never return, which compiles and means nothing.
+
+	ALL THREE ARE PREFIXED `ITEM_`, and that is `SearchVerdict`'s rule below, restated because it is
+	not decoration. `SaltVerdict` above carries a bare `WRONG_PHASE` and `MonsterState` a bare
+	`NORMAL`; three more unions spelling it the same way makes a handler wired to the wrong path a
+	working program with the wrong meaning. `check:remotes` and `check:secrecy` are text tripwires
+	and cannot see that. The prefix makes it an analyzer error instead.
+
+	NONE OF THE THREE IS EVER ECHOED TO A CLIENT. This is `SaltVerdict`'s rule inherited verbatim:
+	`ItemService`'s handlers return nothing on any path, including OK, and the client learns what
+	happened from the world and from its own snapshot. A verdict echoed back is a role oracle for the
+	price of one pouch — see `pure/ItemThrow`'s header for the five worlds that argument covers.
+]]
+export type ItemCarryVerdict =
+	"OK"
+	| "ITEM_WRONG_PHASE"
+	| "ITEM_NOT_ALIVE"
+	| "ITEM_SLOT_FULL"
+	| "ITEM_NO_LIMIT_SET"
+
+export type ItemThrowVerdict =
+	"OK"
+	| "ITEM_WRONG_PHASE"
+	| "ITEM_THROWER_NOT_ALIVE"
+	| "ITEM_NO_ITEM"
+	| "MISS"
+
+--[[
+	THE DROP, AND IT HAS NO GEOMETRY AT ALL. You may put down what you are holding, wherever you are
+	standing, whenever you are alive in an ACTIVE round. There is no "you cannot drop here".
+
+	A PLACEMENT RULE WOULD BE V09'S, NOT V08'S. Bawang is PLACED on a doorway and that placement has
+	conditions; dropping is the plain act of ceasing to hold something, and conflating the two now
+	would build half of V09 inside V08 with none of its rules written down.
+]]
+export type ItemDropVerdict = "OK" | "ITEM_WRONG_PHASE" | "ITEM_NOT_ALIVE" | "ITEM_NOTHING_HELD"
+
+--[[
+	V08, §4.6. WHAT `pure/ItemUse` ANSWERS — which verb, if any, this item currently has.
+
+	`USE_NOT_IMPLEMENTED` IS THE V09/V10 BOUNDARY AND IT IS DELIBERATELY A VALUE RATHER THAN A GAP.
+	V08 gives all three items carry, drop and a slot; only salt gets a verb. Bawang's doorway block
+	is V09 and the buntot pagi's strike is V10, and each is a real mechanic with its own rules — not
+	something to be filled in by whoever notices the hole. A named verdict means the hole is asserted
+	in `tests/item-use.test.luau` rather than left to be discovered.
+]]
+export type ItemUseVerdict = "USE_THROW" | "USE_NOT_IMPLEMENTED" | "USE_NOTHING_HELD"
 
 --[[
 	The salt throw, broadcast to every client (§4.6, C14). THREE FIELDS, ALL ABOUT A TRAJECTORY AND
@@ -454,7 +522,7 @@ export type ClientRoundSnapshot = {
 		reason to exist. So: never widen this to another player's carry, and never mirror it onto an
 		attribute or a tag, both of which replicate to everyone.
 
-		OPTIONAL BECAUSE `Config.Items.*SpawnCount` PLUS `Config.Salt.CarryLimit = 1` MEAN ONE SLOT.
+		OPTIONAL BECAUSE `Config.Items.*SpawnCount` PLUS `Config.Items.CarryLimit = 1` MEAN ONE SLOT.
 		If the carry limit ever rises this becomes a list, and that is a contract change to argue in a
 		plan rather than a field to widen quietly.
 

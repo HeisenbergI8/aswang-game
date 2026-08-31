@@ -190,9 +190,10 @@ local MOTION = {
 }
 
 --[[
-	The palette, and it is RGB TRIPLES for the same reason Config's are: `Config.Monster`,
-	`Config.Monster` and `Config.Salt` store colours as `{ r, g, b }` rather than as `Color3`, so
-	that a value is data rather than a constructed object.
+	The palette, and it is RGB TRIPLES for the same reason Config's are: `Config.Monster` and
+	`Config.Items` store colours as `{ r, g, b }` rather than as `Color3`, so that a value is data
+	rather than a constructed object. (This named `Config.Salt` until V08 deleted it, and named
+	`Config.Monster` twice by mistake before that.)
 
 	These are not in Config because they are not shared with the server and nothing balances against
 	them. The Aswang red and the survivor blue in particular are C26's theming pass to replace, once
@@ -262,6 +263,20 @@ export type ActionHandlers = {
 	]]
 	Search: () -> (),
 	CancelSearch: () -> (),
+	--[[
+		V08, §4.6. The drop, declared here rather than only passed by `InputController`.
+
+		AN EXTRA FIELD ON AN ANNOTATED TABLE IS ACCEPTED SILENTLY BY THE TYPECHECKER — the same trap
+		`Types.SaltEffectPayload`'s comment names. A `Drop` handler passed to `BindActions` without
+		this line typechecks, stores fine, and is invisible to anything that reads the contract, so
+		the pad would never find it and mobile would silently have no drop.
+
+		NOT DRAWN BY `buildTouchPad` YET, like `Search` and `CancelSearch` above. §5 puts ~60% of
+		players on a phone and the one-slot rule means swapping items is drop-then-pickup, so a
+		missing drop button is a mobile player who cannot change what they are carrying. The contract
+		is widened here so the pad chunk finds the end waiting for it.
+	]]
+	Drop: () -> (),
 }
 
 --[[
@@ -297,14 +312,26 @@ function UIController.GetMyRole(): Types.Role?
 end
 
 --[[
-	Salt carried, counted BY THIS CLIENT from its own pickups and throws.
+	V08. THERE IS NO LOCAL CARRY STATE IN THIS FILE ANY MORE, AND THAT IS THE POINT OF THE STEP.
 
-	The server owns the real number and never sends it: a per-player count on a broadcast remote is a
-	shape `check:secrecy` cannot describe, and a per-player DOWN remote carrying it would be a new
-	network surface needing its own secrecy argument. So this is a display estimate, prefixed `~` on
-	screen so a tester reads it as a hint rather than a truth.
+	C13 kept a `saltSeen` estimate here, counted by this client from `SaltPouches.ChildRemoved`
+	within the pickup radius and decremented on its own keypress, prefixed `~` on screen so a tester
+	read it as a hint. It existed because there was no truthful channel: a per-player count on a
+	broadcast remote is a shape `check:secrecy` cannot describe.
+
+	V08 HAS THE CHANNEL, so `render` reads `snapshot.YourCarriedItem` directly and keeps nothing.
+	Server-owned, per-player, `FireClient`-only, refreshed every `Config.Round.SnapshotInterval`. An
+	estimate that can be WRONG is worse than a value that lags half a second — C13 found that when
+	two players near one pouch both incremented and the HUD showed a count the rules made
+	impossible, which reads as a broken game rather than as an approximation.
+
+	A MIRRORED LOCAL WOULD BE A SECOND SOURCE OF TRUTH for a value that already has one, and the
+	phase reset it would then need is exactly the drift this step removes.
+
+	IT IS THIS CLIENT'S OWN SLOT AND THERE IS NO OTHER SLOT TO SHOW. The snapshot has no field for
+	another player's carry and must not grow one — §4.5's "I have the buntot pagi" is a phrase a
+	player CHOOSES to say, and a HUD that showed who held what would delete its reason to exist.
 ]]
-local saltSeen = 0
 
 --------------------------------------------------------------------------------
 -- Construction. Every element is made once and then only updated, so `render`
@@ -1581,12 +1608,23 @@ local function promptFor(snapshot: Types.ClientRoundSnapshot): string
 
 		Keyed off the pad's existence rather than off `UserInputService` again, so the sentence and
 		the buttons can never disagree about what device this is.
+
+		V08 REWROTE BOTH LINES BECAUSE THEY TAUGHT A DELETED MECHANIC. Until V08 they ended "walk
+		over a pouch to take it", which was C13's `pickupTick` — a walk-over pickup at `SaltSpawn`
+		points that V08 deleted along with the second salt economy. Items come from CONTAINERS now
+		(§4.4), so the prompt named a verb the game no longer has and omitted the one it is built
+		around. A stale comment misleads a reader; this misled a PLAYER, on screen, every round, and
+		no gate could see it — it is a string, so `analyze`, `lint` and all five checks pass over it.
+		A playtester reading the HUD found it; Phase 5's diff never touched this function.
+
+		SEARCH FIRST, because §4.4 makes it the activity the whole round is built on and it is the
+		only way to obtain anything. Then the two things you can do with what you found.
 	]]
 	if touchPad ~= nil then
-		return "survive until sunrise · SALT to throw · walk over a pouch to take it"
+		return "survive until sunrise · SEARCH containers · SALT to throw · DROP to swap"
 	end
 
-	return "survive until sunrise · Q throw salt · walk over a pouch to take it"
+	return "survive until sunrise · E search · Q throw salt · X drop"
 end
 
 --[[
@@ -1818,13 +1856,28 @@ local function render(snapshot: Types.ClientRoundSnapshot)
 		then COLOUR.Dead
 		else COLOUR.Text
 
+	--[[
+		V08. THE ITEM'S NAME, NOT A COUNT, AND ABSENT RATHER THAN "NONE" FOR AN EMPTY HAND.
+
+		An empty hand is the common case for both a survivor between finds and the Aswang, so a
+		persistent "NONE" element would be a thing whose absence is readable if it were ever hidden
+		conditionally. Showing nothing at all for nothing held has no such edge.
+
+		The `~` is gone with the estimate it apologised for.
+	]]
+	local carriedWord = if snapshot.YourCarriedItem == Enums.ItemType.Salt
+		then "   salt"
+		elseif snapshot.YourCarriedItem == Enums.ItemType.Bawang then "   bawang"
+		elseif snapshot.YourCarriedItem == Enums.ItemType.BuntotPagi then "   buntot pagi"
+		else ""
+
 	status.Text = string.format(
-		'<font color="#%s">%s</font>\n' .. '<font color="#%s">%s</font>   salt ~%d',
+		'<font color="#%s">%s</font>\n' .. '<font color="#%s">%s</font>%s',
 		roleColour:ToHex(),
 		roleWord,
 		stateColour:ToHex(),
 		snapshot.YourState,
-		saltSeen
+		carriedWord
 	)
 
 	prompt.Text = promptFor(snapshot)
@@ -1936,88 +1989,21 @@ function UIController.Start()
 	end)
 
 	--[[
-		A round ending clears the local salt estimate, because the server clears the real one.
+		V08: THERE IS NO LOCAL CARRY TO CLEAR ANY MORE. The server clears the real slot on the way
+		into INTERMISSION and the next snapshot carries `nil`, so the HUD follows without this
+		handler knowing anything about items.
 
-		It also clears `myRole`. That matters for more than tidiness: without it a player who is the
+		It clears `myRole`. That matters for more than tidiness: without it a player who is the
 		Aswang once keeps their buttons and their red role line into the next round's lobby, and the
 		next round may deal them a survivor. RoleAssigned arrives again at STARTING, so the only window
 		this creates is one where the HUD says SURVIVOR before the draw — which is what every other
 		client shows too.
 	]]
 	Remotes.Get("PhaseChanged").OnClientEvent:Connect(function(phase: Types.RoundPhase)
-		if phase ~= Enums.RoundPhase.Active then
-			saltSeen = 0
-
-			--[[
-				The animation edges reset with the round, for the same reason `myRole` does.
-
-				Left alone, the first snapshot of a new round finds 0/5 against last round's 5/5 and
-				plays the completed bar draining and the count popping — a recap of the previous round
-				animating over the new one's lobby. Back at their seed values, the new round's first
-				render assigns silently and only animates what actually happens next.
-			]]
-		end
-
 		if phase == Enums.RoundPhase.Intermission or phase == Enums.RoundPhase.Idle then
 			myRole = nil
 		end
 	end)
-
-	--[[
-		THE SALT ESTIMATE, and why it is an estimate rather than a fact.
-
-		`SaltEffect` fires to every client on every throw, carrying a trajectory and no player — so this
-		client cannot tell whose throw it was. What it CAN tell is that it pressed Q itself, which
-		`InputController` records through `NoteThrow`. A pickup is inferred the same way: the pouch this
-		client was standing on disappeared.
-	]]
-	local pouches = workspace:WaitForChild("SaltPouches", 30) -- config-ok: startup wait, not balance
-
-	if pouches ~= nil then
-		pouches.ChildRemoved:Connect(function(pouch: Instance)
-			--[[
-				DISTANCE-GATED, or every client counts every pickup. `ChildRemoved` fires on ALL clients
-				when ANY pouch is taken, so an ungated increment would show a survivor across the map
-				collecting salt they never touched.
-
-				The pouch is already destroyed by the time this fires, so its position cannot be read
-				from it — but a `Part` retains its last CFrame after Destroy, which is enough to compare.
-			]]
-			if not pouch:IsA("BasePart") then
-				return
-			end
-
-			local character = Players.LocalPlayer.Character
-			local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
-
-			if root == nil or not root:IsA("BasePart") then
-				return
-			end
-
-			--[[
-				THE SERVER'S OWN RADIUS, NOT A GENEROUS ONE, AND CLAMPED TO THE CARRY LIMIT.
-
-				This read `PickupRangeStuds * 2` on the theory that a generous display was kinder than a
-				strict one. It is not: the server picks up at `PickupRangeStuds` (6) and `CarryLimit` is
-				1, so two players 7-12 studs apart near one pouch BOTH incremented, and the HUD could
-				show `~2` — a number the rules make impossible. An impossible number reads as a broken
-				game, not as an estimate.
-			]]
-			if (pouch.Position - root.Position).Magnitude <= Config.Salt.PickupRangeStuds then
-				saltSeen = math.min(saltSeen + 1, Config.Salt.CarryLimit)
-			end
-		end)
-	end
-end
-
---[[
-	Called by InputController when this client actually presses the throw key. Kept here rather than
-	letting InputController touch the HUD directly, so `saltSeen` has one owner.
-
-	`math.max` because the estimate can drift below zero if a pickup was missed.
-]]
-function UIController.NoteThrow()
-	saltSeen = math.max(0, saltSeen - 1)
 end
 
 return UIController
