@@ -40,7 +40,7 @@
 
 export type RoundPhase = "IDLE" | "INTERMISSION" | "STARTING" | "ACTIVE" | "ENDING"
 export type MonsterState = "NORMAL" | "TRANSFORMED" | "EXPOSED" | "FEEDING" | "CAMOUFLAGED"
-export type CamouflageForm = "CAT" | "DOG" | "PIG" | "VILLAGER"
+export type CamouflageForm = "CAT" | "DOG" | "PIG" | "GOAT" | "CHICKEN" | "VILLAGER"
 
 --[[
 	`NOT_REVEALED` IS FIRST IN THE UNION AND FIRST IN THE FUNCTION, and it is the only verdict in this

@@ -162,10 +162,108 @@ check(
 	`never placed: {table.concat(unreferenced, ", ")}`
 )
 
+--[[
+	THE RIG MESHES, AND THEIR OWN CEILING SEPARATE FROM THE PROPS' ON PURPOSE.
+
+	A prop mesh is placed once or twice and sits in fog at 200 studs. A rig mesh is placed THREE times
+	and one of them is standing next to the player, at night, being stared at — because §4.5's whole
+	deduction is "which cat". They are not interchangeable triangles, and one shared sum would let a
+	cheap prop pass pay for an expensive rig with nothing failing.
+
+	UNTIL THIS SUITE LEARNED TO COUNT THEM, THE RIGS WERE SPENT AND UNBUDGETED. Four generated meshes
+	at sixteen instances existed only as asset ids inside `AmbientService.FORM_LOOKS`, which no check
+	reads. §5's mobile budget is called non-negotiable and half of what was drawn was invisible to it.
+]]
+local RIG_TRI_CEILING = 9000
+local RIG_DRAWN_CEILING = 27000
+
+local perForm = tonumber(
+	string.match(fs.readFile("src/shared/Config.luau"), "\n\t\tPerForm = (%d+),")
+) :: number
+
+check("Config.Ambient.PerForm parses", perForm ~= nil and perForm > 0, tostring(perForm))
+
+check("the registry carries a RigMeshes list", type(assets.RigMeshes) == "table")
+check(
+	"all six camouflage forms have a rig mesh",
+	#assets.RigMeshes == 6,
+	`{#assets.RigMeshes} row(s); Types.CamouflageForm names six`
+)
+
+local rigTris = 0
+local rigDrawn = 0
+
+for _, entry in assets.RigMeshes do
+	local label = tostring(entry.Id)
+
+	check(
+		`{label} records a real asset id`,
+		type(entry.Asset) == "string" and string.match(entry.Asset, "^rbxassetid://%d+$") ~= nil,
+		tostring(entry.Asset)
+	)
+	check(
+		`{label} records a real texture id`,
+		type(entry.Texture) == "string" and string.match(entry.Texture, "^rbxassetid://%d+$") ~= nil,
+		tostring(entry.Texture)
+	)
+	check(
+		`{label} records the prompt it was generated from`,
+		type(entry.Prompt) == "string" and #entry.Prompt > 0,
+		"the meshes live in the gitignored place file; the prompt is the only way back"
+	)
+	check(
+		`{label} is within the per-rig budget`,
+		type(entry.Tris) == "number" and entry.Tris >= 12 and entry.Tris <= 2000,
+		`Tris = {tostring(entry.Tris)}; eighteen rigs are on screen at once`
+	)
+	check(
+		`{label} records how many are spawned`,
+		entry.Instances == perForm,
+		`Instances = {tostring(entry.Instances)}, Config.Ambient.PerForm = {perForm}`
+	)
+
+	rigTris += (if type(entry.Tris) == "number" then entry.Tris else 0)
+	rigDrawn += (if type(entry.Tris) == "number" and type(entry.Instances) == "number"
+		then entry.Tris * entry.Instances
+		else 0)
+end
+
+check(
+	`the six rig meshes total under {RIG_TRI_CEILING}`,
+	rigTris <= RIG_TRI_CEILING,
+	`{rigTris} requested`
+)
+check(
+	`the rig INSTANCES draw under {RIG_DRAWN_CEILING}`,
+	rigDrawn <= RIG_DRAWN_CEILING,
+	`{rigDrawn} triangles across {perForm} of each form — this is the number a phone pays`
+)
+
+--[[
+	AND THE IDS MUST MATCH THE SERVICE. The registry is the durable RECORD; `FORM_LOOKS` is what
+	actually loads. Two copies of an asset id is one copy too many, and the failure is silent: the
+	budget suite would happily certify a mesh the game never loads.
+]]
+local service = fs.readFile("src/server/Services/AmbientService.luau")
+
+for _, entry in assets.RigMeshes do
+	check(
+		`AmbientService loads the registered {entry.Id} mesh`,
+		string.find(service, tostring(entry.Asset), 1, true) ~= nil,
+		tostring(entry.Asset)
+	)
+	check(
+		`AmbientService loads the registered {entry.Id} texture`,
+		string.find(service, tostring(entry.Texture), 1, true) ~= nil,
+		tostring(entry.Texture)
+	)
+end
+
 if failures > 0 then
 	error(`{failures} barrio-assets assertion(s) failed`, 0)
 end
 
 print(
-	`  PASS  barrio-assets: {checked} assertions over {#assets.Meshes} meshes, {totalTris} triangles`
+	`  PASS  barrio-assets: {checked} assertions over {#assets.Meshes} props ({totalTris} tris) `
+		.. `and {#assets.RigMeshes} rigs ({rigDrawn} drawn)`
 )

@@ -127,7 +127,35 @@ local function assertedCount(tag: string): number?
 end
 
 local containerCount = configNumber("ContainerCount")
-local ambientExpected = configNumber("PerForm") * 4
+
+--[[
+	THE FORM COUNT IS READ FROM THE CANONICAL UNION, NOT TYPED HERE.
+
+	This line used to be `* 4`, and it went red the moment `CamouflageForm` grew to six — correctly,
+	but for the wrong reason: it was reporting its own staleness as a map fault. A hand-written form
+	count in a test is the same defect the test is checking for, one level up.
+
+	`Types.luau` IS THE SOURCE and `tests/camouflage-forms.test.luau` pins every other declaration of
+	the union against it, so counting members here cannot drift from what the game actually spawns.
+]]
+local unionBody =
+	string.match(fs.readFile("src/shared/Types.luau"), "export type CamouflageForm =([^\n]*)")
+
+local formCount = 0
+
+if unionBody ~= nil then
+	for _ in string.gmatch(unionBody, '"[A-Z_]+"') do
+		formCount += 1
+	end
+end
+
+check(
+	"the CamouflageForm union parses to a non-zero form count",
+	formCount > 0,
+	"a zero here would make the ambient expectation trivially satisfiable"
+)
+
+local ambientExpected = configNumber("PerForm") * formCount
 
 local assertedContainers = assertedCount("SearchContainer")
 local assertedAmbient = assertedCount("AmbientSpawn")
@@ -141,7 +169,7 @@ check(
 	`builder asserts {tostring(assertedContainers)}, Config says {containerCount}`
 )
 check(
-	"the asserted AmbientSpawn count equals Config.Ambient.PerForm x 4",
+	`the asserted AmbientSpawn count equals Config.Ambient.PerForm x {formCount} forms`,
 	assertedAmbient == ambientExpected,
 	`builder asserts {tostring(assertedAmbient)}, Config implies {ambientExpected}`
 )

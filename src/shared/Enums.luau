@@ -78,14 +78,19 @@ Enums.MonsterState = table.freeze({
 	Camouflaged = "CAMOUFLAGED" :: Types.MonsterState,
 })
 
--- V02, §4.3. The four forms a REVEALED Aswang may wear. §4.5's "It's the [animal]!" phrase names one
+-- V02, §4.3. The six forms a REVEALED Aswang may wear. §4.5's "It's the [animal]!" phrase names one
 -- of these, which is what stops camouflage being unbeatable — a barrio full of scenery becomes a
--- barrio with one monster in it. Villager is in the set because three animals in an empty street is
--- a tell; a fourth option that looks like a person is what makes the guess cost something.
+-- barrio with one monster in it. Villager is in the set because animals alone in an empty street is
+-- a tell; an option that looks like a person is what makes the guess cost something.
+--
+-- THE ORDER HERE IS THE SPAWN ORDER in `AmbientService.Start`, and `tests/camouflage-forms.test.luau`
+-- pins all six against every other place the union is written down.
 Enums.CamouflageForm = table.freeze({
 	Cat = "CAT" :: Types.CamouflageForm,
 	Dog = "DOG" :: Types.CamouflageForm,
 	Pig = "PIG" :: Types.CamouflageForm,
+	Goat = "GOAT" :: Types.CamouflageForm,
+	Chicken = "CHICKEN" :: Types.CamouflageForm,
 	Villager = "VILLAGER" :: Types.CamouflageForm,
 })
 

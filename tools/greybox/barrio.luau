@@ -28,11 +28,13 @@
 
 	  SearchContainer ×15  SearchService.discoverPool  unique Names; Config.Search.ContainerCount
 	  SaltSpawn    × 6  ItemService.discoverPool      Config.Salt.PouchPoolSize
-	  AmbientSpawn ×16  AmbientService spawn points   Config.Ambient.PerForm x 4; ZERO = ring fallback
+	  AmbientSpawn ×18  AmbientService spawn points   PerForm x 6 forms; each needs a `Form` attribute
 	  TrialSpawn   × 1  TrialService.trialSpawn       where a trial player is placed
 	  TrialChase   × 1  TrialService (C22 rig)        where the scripted rig appears
-	  MapLight     ×14  PerformanceController         SCENERY lights only — never a gameplay tell
-	                    12 street lanterns + the trial corner's + the chapel candle glow
+	  MapLight     ×11  PerformanceController         SCENERY lights only — never a gameplay tell
+	                    9 LIT street lanterns of 12 + the trial corner's + the chapel candle glow.
+	                    Three lanterns are DARK on purpose — see `lantern`. A dead fixture costs no
+	                    light slot, which is what pays for the extra arm part on the other nine.
 	  TaskPoint    × 2  TrialService.trialPoints      attribute `TrialOnly = true` — see the corner
 
 	THIS TABLE WAS WRONG FOR THE WHOLE OF V01–V07 AND NOTHING COULD HAVE TOLD YOU. It described a
@@ -46,7 +48,7 @@
 
 	  · ZERO `SearchContainer` is a barrio with nothing to do in it. Searching IS v2.0 (§4.4), and
 	    `SearchService`'s own comment names the symptom — "there is nothing to do and nobody knows why".
-	  · ZERO `AmbientSpawn` does not disable ambient life, it puts all sixteen animals in a RING at the
+	  · ZERO `AmbientSpawn` does not disable ambient life, it puts the whole population in a RING at the
 	    origin. `AmbientService`'s fallback fires only on zero tagged parts, so a partial list is worse
 	    than an empty one: it looks deliberate.
 
@@ -170,20 +172,20 @@ local ASSETS = {
 		them. Lose this block and every surface falls back to its stock base material.
 	]]
 	Materials = {
-		{ Id = "Nipa", Base = "Grass", Pattern = "Organic", Prompt = "weathered nipa palm thatch, overlapping dried leaf shingles, sun-bleached grey-brown with fresher tan repair patches", Variant = "BarrioNipa", Color = "rbxassetid://108873044154730", Normal = "rbxassetid://95916432346873", Rough = "rbxassetid://135680787932501", Metal = "rbxassetid://140716985042697" },
-		{ Id = "Sawali", Base = "WoodPlanks", Pattern = "Regular", Prompt = "woven split-bamboo sawali wall panel, diagonal plait, dry and splitting", Variant = "BarrioSawali", Color = "rbxassetid://137939066534199", Normal = "rbxassetid://95798484897338", Rough = "rbxassetid://126897870024037", Metal = "rbxassetid://102925602219852" },
-		{ Id = "Bamboo", Base = "Wood", Pattern = "Organic", Prompt = "cut bamboo poles, nodes and vertical grain, green fading to straw", Variant = "BarrioBamboo", Color = "rbxassetid://107432787497803", Normal = "rbxassetid://116873965026644", Rough = "rbxassetid://78535808997944", Metal = "rbxassetid://132674140450464" },
-		{ Id = "CourtSlab", Base = "Concrete", Pattern = "Regular", Prompt = "hand-troweled outdoor court concrete, hairline cracks, patched repairs, faded paint lines", Variant = "BarrioCourtSlab", Color = "rbxassetid://106122569340322", Normal = "rbxassetid://74847761901764", Rough = "rbxassetid://72374742602072", Metal = "rbxassetid://120212410107846" },
-		{ Id = "HollowBlock", Base = "Brick", Pattern = "Regular", Prompt = "unrendered CHB hollow block wall, mortar lines, grey and porous", Variant = "BarrioHollowBlock", Color = "rbxassetid://70583548972308", Normal = "rbxassetid://132975197419680", Rough = "rbxassetid://120576848126545", Metal = "rbxassetid://139964456952937" },
-		{ Id = "GIRoof", Base = "CorrodedMetal", Pattern = "Regular", Prompt = "corrugated galvanised iron sheet, rust streaking down the corrugations from the nail heads", Variant = "BarrioGIRoof", Color = "rbxassetid://95841156096652", Normal = "rbxassetid://134110095670870", Rough = "rbxassetid://128976136520561", Metal = "rbxassetid://83669620260260" },
-		{ Id = "Tarp", Base = "Fabric", Pattern = "Regular", Prompt = "faded polyethylene tarpaulin, creased, sun-bleached, frayed grommets", Variant = "BarrioTarp", Color = "rbxassetid://83753027347167", Normal = "rbxassetid://138718330382751", Rough = "rbxassetid://107163346649451", Metal = "rbxassetid://102132402856303" },
-		{ Id = "WetEarth", Base = "Mud", Pattern = "Organic", Prompt = "wet packed dirt path, tyre ruts, puddled and uneven", Variant = "BarrioWetEarth", Color = "rbxassetid://119654707766458", Normal = "rbxassetid://134870826698674", Rough = "rbxassetid://102594483926645", Metal = "rbxassetid://133704791027744" },
-		{ Id = "DryEarth", Base = "Ground", Pattern = "Organic", Prompt = "dry compacted barrio earth, scuffed bare ground between buildings", Variant = "BarrioDryEarth", Color = "rbxassetid://139741873853050", Normal = "rbxassetid://73531310450058", Rough = "rbxassetid://129986608957807", Metal = "rbxassetid://92525933764445" },
-		{ Id = "Paddy", Base = "LeafyGrass", Pattern = "Organic", Prompt = "rice paddy stalks, dense vertical blades, wet at the root", Variant = "BarrioPaddy", Color = "rbxassetid://97260815498079", Normal = "rbxassetid://84810786479225", Rough = "rbxassetid://117954264724182", Metal = "rbxassetid://124016757579868" },
-		{ Id = "Whitewash", Base = "Plaster", Pattern = "Regular", Prompt = "whitewashed rendered concrete, chalky, streaked with rain and mildew", Variant = "BarrioWhitewash", Color = "rbxassetid://106384944404034", Normal = "rbxassetid://93275637616693", Rough = "rbxassetid://80834692996214", Metal = "rbxassetid://109887196819914" },
-		{ Id = "RustedSteel", Base = "CorrodedMetal", Pattern = "Regular", Prompt = "rusted steel post, pitted, flaking paint over orange oxide", Variant = "BarrioRustedSteel", Color = "rbxassetid://123108516534979", Normal = "rbxassetid://96709395359102", Rough = "rbxassetid://92016084843561", Metal = "rbxassetid://136006039352924" },
-		{ Id = "Cloth", Base = "Fabric", Pattern = "Regular", Prompt = "faded cotton bunting, bruised pink and sickly cream, a year in the sun", Variant = "BarrioCloth", Color = "rbxassetid://131379210087991", Normal = "rbxassetid://99175893829691", Rough = "rbxassetid://106717344257550", Metal = "rbxassetid://93309980918532" },
-		{ Id = "Sack", Base = "Sand", Pattern = "Organic", Prompt = "jute rice sack, coarse woven fibre, dusty", Variant = "BarrioSack", Color = "rbxassetid://122565081261005", Normal = "rbxassetid://78245490899431", Rough = "rbxassetid://80753268388718", Metal = "rbxassetid://105919758313040" },
+		{ Id = "Nipa", Tile = 2.5, Base = "Grass", Pattern = "Organic", Prompt = "weathered nipa palm thatch, overlapping dried leaf shingles, sun-bleached grey-brown with fresher tan repair patches", Variant = "BarrioNipa", Color = "rbxassetid://108873044154730", Normal = "rbxassetid://95916432346873", Rough = "rbxassetid://135680787932501", Metal = "rbxassetid://140716985042697" },
+		{ Id = "Sawali", Tile = 2, Base = "WoodPlanks", Pattern = "Regular", Prompt = "woven split-bamboo sawali wall panel, diagonal plait, dry and splitting", Variant = "BarrioSawali", Color = "rbxassetid://137939066534199", Normal = "rbxassetid://95798484897338", Rough = "rbxassetid://126897870024037", Metal = "rbxassetid://102925602219852" },
+		{ Id = "Bamboo", Tile = 3, Base = "Wood", Pattern = "Organic", Prompt = "cut bamboo poles, nodes and vertical grain, green fading to straw", Variant = "BarrioBamboo", Color = "rbxassetid://107432787497803", Normal = "rbxassetid://116873965026644", Rough = "rbxassetid://78535808997944", Metal = "rbxassetid://132674140450464" },
+		{ Id = "CourtSlab", Tile = 3.5, Base = "Concrete", Pattern = "Regular", Prompt = "hand-troweled outdoor court concrete, hairline cracks, patched repairs, faded paint lines", Variant = "BarrioCourtSlab", Color = "rbxassetid://106122569340322", Normal = "rbxassetid://74847761901764", Rough = "rbxassetid://72374742602072", Metal = "rbxassetid://120212410107846" },
+		{ Id = "HollowBlock", Tile = 3, Base = "Brick", Pattern = "Regular", Prompt = "unrendered CHB hollow block wall, mortar lines, grey and porous", Variant = "BarrioHollowBlock", Color = "rbxassetid://70583548972308", Normal = "rbxassetid://132975197419680", Rough = "rbxassetid://120576848126545", Metal = "rbxassetid://139964456952937" },
+		{ Id = "GIRoof", Tile = 2, Base = "CorrodedMetal", Pattern = "Regular", Prompt = "corrugated galvanised iron sheet, rust streaking down the corrugations from the nail heads", Variant = "BarrioGIRoof", Color = "rbxassetid://95841156096652", Normal = "rbxassetid://134110095670870", Rough = "rbxassetid://128976136520561", Metal = "rbxassetid://83669620260260" },
+		{ Id = "Tarp", Tile = 4, Base = "Fabric", Pattern = "Regular", Prompt = "faded polyethylene tarpaulin, creased, sun-bleached, frayed grommets", Variant = "BarrioTarp", Color = "rbxassetid://83753027347167", Normal = "rbxassetid://138718330382751", Rough = "rbxassetid://107163346649451", Metal = "rbxassetid://102132402856303" },
+		{ Id = "WetEarth", Tile = 2.4, Base = "Mud", Pattern = "Organic", Prompt = "wet packed dirt path, tyre ruts, puddled and uneven", Variant = "BarrioWetEarth", Color = "rbxassetid://119654707766458", Normal = "rbxassetid://134870826698674", Rough = "rbxassetid://102594483926645", Metal = "rbxassetid://133704791027744" },
+		{ Id = "DryEarth", Tile = 2.2, Base = "Ground", Pattern = "Organic", Prompt = "dry compacted barrio earth, scuffed bare ground between buildings", Variant = "BarrioDryEarth", Color = "rbxassetid://139741873853050", Normal = "rbxassetid://73531310450058", Rough = "rbxassetid://129986608957807", Metal = "rbxassetid://92525933764445" },
+		{ Id = "Paddy", Tile = 2.2, Base = "LeafyGrass", Pattern = "Organic", Prompt = "rice paddy stalks, dense vertical blades, wet at the root", Variant = "BarrioPaddy", Color = "rbxassetid://97260815498079", Normal = "rbxassetid://84810786479225", Rough = "rbxassetid://117954264724182", Metal = "rbxassetid://124016757579868" },
+		{ Id = "Whitewash", Tile = 5, Base = "Plaster", Pattern = "Regular", Prompt = "whitewashed rendered concrete, chalky, streaked with rain and mildew", Variant = "BarrioWhitewash", Color = "rbxassetid://106384944404034", Normal = "rbxassetid://93275637616693", Rough = "rbxassetid://80834692996214", Metal = "rbxassetid://109887196819914" },
+		{ Id = "RustedSteel", Tile = 2, Base = "CorrodedMetal", Pattern = "Regular", Prompt = "rusted steel post, pitted, flaking paint over orange oxide", Variant = "BarrioRustedSteel", Color = "rbxassetid://123108516534979", Normal = "rbxassetid://96709395359102", Rough = "rbxassetid://92016084843561", Metal = "rbxassetid://136006039352924" },
+		{ Id = "Cloth", Tile = 1.5, Base = "Fabric", Pattern = "Regular", Prompt = "faded cotton bunting, bruised pink and sickly cream, a year in the sun", Variant = "BarrioCloth", Color = "rbxassetid://131379210087991", Normal = "rbxassetid://99175893829691", Rough = "rbxassetid://106717344257550", Metal = "rbxassetid://93309980918532" },
+		{ Id = "Sack", Tile = 1.5, Base = "Sand", Pattern = "Organic", Prompt = "jute rice sack, coarse woven fibre, dusty", Variant = "BarrioSack", Color = "rbxassetid://122565081261005", Normal = "rbxassetid://78245490899431", Rough = "rbxassetid://80753268388718", Metal = "rbxassetid://105919758313040" },
 	},
 
 	--[[
@@ -206,7 +208,17 @@ local ASSETS = {
 		{ Id = "SariSari", Asset = "rbxassetid://124419709324438", Texture = "rbxassetid://95326402783318", Tris = 2500, Placed = 4, Replaces = 0, Prompt = "sari-sari store front, barred slat window, hanging sachets, tarp awning" },
 		{ Id = "WellPump", Asset = "rbxassetid://131852474817632", Texture = "rbxassetid://139752002527040", Tris = 2000, Placed = 1, Replaces = 1, Prompt = "hand water pump and low stone well ring, rusted iron, mossy concrete" },
 		{ Id = "Scarecrow", Asset = "rbxassetid://96879056842732", Texture = "rbxassetid://120170772317000", Tris = 1500, Placed = 2, Replaces = 10, Prompt = "scarecrow, crossed bamboo poles, ragged shirt, straw hat, leaning" },
-		{ Id = "KuboShell", Asset = "rbxassetid://99633808685983", Texture = "rbxassetid://94282992515102", Tris = 3000, Placed = 2, Replaces = 0, Prompt = "bahay kubo, stilt house, sawali walls, steep nipa roof, open undercroft" },
+		--[[
+			RE-GENERATED WITH AN OPEN DOORWAY, and that is what turned it from an ornament into
+			CLADDING. The previous shell (`99633808685983`) was a solid hut placed at 26 x 16 x 22 —
+			smaller than the 37 x 12 x 31 greybox — so it stood INSIDE the two sealed houses rather
+			than over them. All seven kubo are enterable now, so a solid shell would paint a wall
+			across every doorway.
+
+			`Placed` WENT 2 -> 7 AND `Tris` DID NOT MOVE, because `Tris` is per mesh and not per
+			instance. Five more houses get the good geometry for no new triangles in the budget.
+		]]
+		{ Id = "KuboShell", Asset = "rbxassetid://128724254335456", Texture = "rbxassetid://94849437001240", Tris = 3000, Placed = 0, Replaces = 0, Prompt = "RETIRED — see the swept-yard block; squashed to 41% height by a non-uniform Size. bahay kubo Filipino nipa hut exterior shell, wide open doorway centred in the front wall, woven sawali bamboo walls, steep overhanging nipa thatch roof, low eaves, weathered, hollow inside with no floor" },
 		--[[
 			THE CHAPEL IS RECORDED AND DELIBERATELY NOT PLACED — `Placed = 0`.
 
@@ -216,11 +228,53 @@ local ASSETS = {
 			would need collision authored by hand. The greybox chapel is a real room with two doors,
 			which is worth more than a better-looking exterior that cannot be entered.
 
-			It stays in the registry because the asset exists and the id is the only record of it. A
-			later chunk that splits the chapel into shell-plus-interior can use it without paying for
-			generation again.
+			THE CLADDING RULE ABOVE DOES NOT RESCUE IT, AND THE REASON IS THE DOOR COUNT. Cladding works
+			for a kubo because `mesh()` makes the shell non-collidable, so the greybox keeps the
+			collision and the mesh only has to put its DOORWAY on the same face as the greybox gap —
+			one door, one yaw. The chapel has TWO, on S and E, and a single mesh cannot present an
+			opening on two faces at once. Whichever one it missed would be a doorway a player walks
+			through what looks like a solid whitewashed wall, which is worse than the box.
+
+			It stays in the registry because the asset exists and the id is the only record of it. The
+			fix is a chapel shell generated with two openings, or two half-shells; either is a mesh
+			job rather than a code one, and neither is this phase's.
 		]]
 		{ Id = "Chapel", Asset = "rbxassetid://72865002641738", Texture = "rbxassetid://87324092289695", Tris = 6000, Placed = 0, Replaces = 0, Prompt = "rural barangay chapel, concrete visita, corrugated roof, bell arch, whitewashed" },
+	},
+
+	--[[
+		THE AMBIENT RIG MESHES — SIX FORMS, EIGHTEEN INSTANCES, AND UNTIL NOW UNBUDGETED.
+
+		These are spawned by `src/server/Services/AmbientService.luau`, not by this file, and they were
+		recorded ONLY as two asset ids per form inside `FORM_LOOKS`. So four generated meshes at
+		sixteen instances were spent against §5's non-negotiable mobile budget and counted by nothing —
+		`tests/barrio-assets.test.luau` sums `Meshes` and never knew these existed.
+
+		THEY ARE REGISTERED HERE RATHER THAN NEXT TO THE SERVICE for exactly that reason: this block is
+		what the budget suite parses. A registry the check cannot see is a comment.
+
+		ALL SIX WERE REGENERATED AT A STATED REQUEST, and that was the only honest way to bring them
+		inside a ceiling. The original four carried no recorded triangle count, and nothing in this
+		toolchain reads a MeshPart's triangle count back — so the choice was a budget built on a number
+		nobody could reproduce, or six new meshes at a number written down before they were made.
+
+		`Instances` IS `Config.Ambient.PerForm`, AND IT IS THE NUMBER THAT ACTUALLY COSTS FRAMES.
+		`Tris` is what one mesh requested; `Tris x Instances` is what the phone draws. The suite checks
+		both, because a 6,000-triangle hero at one instance and an 800-triangle bird at three are very
+		different spends that a single sum would report identically.
+
+		THE PROMPTS ARE THE DURABLE RECORD OF INTENT and they carry corrections the research earned —
+		aspin not Labrador, black sway-backed native pig not pink Landrace, puspin with a kinked tail,
+		a small erect-eared native goat, slate-shanked native chicken, and sando-and-tsinelas rather
+		than a malong, which is Bangsamoro dress and would be a real geographic error here.
+	]]
+	RigMeshes = {
+		{ Id = "CAT", Asset = "rbxassetid://96211506575053", Texture = "rbxassetid://130634110713517", Tris = 1200, Instances = 3, Prompt = "Philippine puspin street cat, short coat, lean body, kinked stumpy tail, tabby-and-white markings, standing on all four legs" },
+		{ Id = "DOG", Asset = "rbxassetid://95323271856112", Texture = "rbxassetid://80047444313330", Tris = 1400, Instances = 3, Prompt = "Philippine aspin street dog, light-boned, short rough coat, tail held high, one ear up one folded, semi-circular spots at tail base, standing" },
+		{ Id = "PIG", Asset = "rbxassetid://108005880380762", Texture = "rbxassetid://120673320204813", Tris = 1400, Instances = 3, Prompt = "Philippine native backyard pig, black skin, sway back, low hanging belly, small erect ears, bristle crest along the spine, tufted tail, standing on four legs" },
+		{ Id = "GOAT", Asset = "rbxassetid://100545159776343", Texture = "rbxassetid://104493613437573", Tris = 1200, Instances = 3, Prompt = "Philippine native goat, small and low-set, erect ears, short straight horns, black and brown coat, rope collar around neck, standing" },
+		{ Id = "CHICKEN", Asset = "rbxassetid://115234736069936", Texture = "rbxassetid://113527179344004", Tris = 800, Instances = 3, Prompt = "Philippine native chicken hen, brown and gold barred plumage, single red comb, whitish earlobe, slate grey shanks, head low pecking at the ground" },
+		{ Id = "VILLAGER", Asset = "rbxassetid://124492172741324", Texture = "rbxassetid://119550214494630", Tris = 1800, Instances = 3, Prompt = "rural Filipino villager standing still, white sleeveless sando undershirt, dark work trousers, tsinelas rubber sandals, woven straw salakot hat, weathered and thin, arms at sides" },
 	},
 }
 --#ASSETS-END
@@ -243,6 +297,54 @@ local SURFACE: { [string]: { Base: Enum.Material, Variant: string? } } = {}
 for _, entry in ASSETS.Materials do
 	-- Indexing `Enum.Material` by a runtime string has no typed form. Contained to this one line.
 	SURFACE[entry.Id] = { Base = (Enum.Material :: any)[entry.Base], Variant = entry.Variant }
+end
+
+--[[
+	`StudsPerTile` — THE ONE NUMBER THAT DECIDES WHETHER ANY OF THESE MATERIALS READS AS WHAT IT IS.
+
+	`generate_material` mints every variant at the SAME default, 10, and nothing here ever changed it.
+	Ten studs per tile is roughly a metre and a half of real-world texture stretched over five, which
+	fails in both directions at once and looks like two unrelated bugs:
+
+	  - ON THE GROUND it is far too coarse. `Ground` is 583 studs square, so a crack pattern repeating
+	    every 10 studs is a metre-wide feature blown up to a car — which is why the plaza read as grey
+	    boulders rather than as a concrete slab.
+	  - ON A WALL it is far too fine — the same number, the opposite symptom. A sawali panel is 12
+	    studs tall, so at 10 the whole wall gets barely one tile of a diagonal bamboo plait and the
+	    weave never resolves. It reads as vertical planks, which is exactly what it looked like.
+
+	SO THE VALUE BELONGS TO THE MATERIAL, NOT TO THE GENERATOR, and it is authored beside the asset ids
+	in `ASSETS.Materials` for the same reason those are: the variants live in the place file, which is
+	gitignored and unsearchable, so this table is the only durable record that a tuning ever happened.
+
+	SET HERE RATHER THAN BY HAND IN THE PROPERTIES PANEL. Fourteen variants tuned by hand is fourteen
+	chances to miss one, and a missed one is invisible — it is not an error, it is a surface that looks
+	slightly wrong in a screenshot nobody is taking.
+
+	A MISSING VARIANT WARNS RATHER THAN THROWS. A place that has never run `generate_material` has no
+	variants at all, and that is a legitimate state for a fresh place file — the builder should still
+	produce a barrio, just an untextured one.
+]]
+local MaterialService = game:GetService("MaterialService")
+
+for _, entry in ASSETS.Materials do
+	if entry.Variant == nil or entry.Tile == nil then
+		continue
+	end
+
+	local variant = MaterialService:FindFirstChild(entry.Variant)
+
+	if variant == nil or not variant:IsA("MaterialVariant") then
+		warn(
+			`[barrio] MaterialVariant "{entry.Variant}" is not a direct child of MaterialService — `
+				.. `{entry.Id} keeps its stock base material and its tiling is not applied. `
+				.. `Re-generate it, and promote it out of MaterialService.AssistantMaterials.`
+		)
+
+		continue
+	end
+
+	variant.StudsPerTile = entry.Tile
 end
 
 local function paint(p: BasePart, id: string): BasePart
@@ -412,7 +514,22 @@ local function building(
 	folder.Parent = root
 
 	local t = 2 -- wall thickness
-	local door = 10
+--[[
+		THE DOORWAY, AND IT IS THE ONE NAVMESH NUMBER IN THIS FUNCTION.
+
+		Ten authored units is FIFTEEN AND A HALF STUDS across — a gap three times a character's width,
+		which is why every house read as having a missing wall rather than a door. Six is nine and a
+		half studs: unmistakably a doorway, and still more than twice the ~4 studs a character needs.
+
+		THE FLOOR IS REACHABILITY, NOT LOOKS. `measure.luau` walks a real path through this gap to every
+		search container, so a value that a character cannot pass does not look wrong, it makes a
+		container unreachable — which is exactly the failure Kubo_SW hit when it was sealed. Re-run
+		`measure.luau` after changing it, and read the number rather than reasoning about it.
+
+		THE DOOR LEAF DOES NOT COUNT AGAINST THIS. It is `decor`, so it has no collision and no query —
+		it covers half the opening to the eye and none of it to the navmesh.
+	]]
+	local door = 6
 	local hw, hd = w / 2, d / 2
 
 	local floor = box(`{name}_Floor`, cx, 0.15, cz, w, 0.3, d, WOOD, folder)
@@ -447,28 +564,33 @@ local function building(
 		THE POSTS DO NOT COLLIDE. `prop()` guarantees that, and the builder asserts zero dressing
 		colliders at the foot of this file. A collidable post beside a doorway would narrow it.
 	]]
+	--[[
+		`box()` RATHER THAN `prop()`, AND THAT IS NOT A STYLE CHOICE. `prop`, `turn` and `lean` are
+		declared with the C30 dressing helpers, hundreds of lines BELOW this function. Calling them
+		from here compiles fine and dies at run time with "attempt to call a nil value" — which is
+		exactly what the first version of this block did. `box` is in scope; the four extra
+		property lines are the price.
+
+		Sizes are in `box` units (multiplied by SCALE on the way out), the same units the floor and
+		roof above use — not `prop` units, which pre-divide.
+
+		DECLARED AT FUNCTION SCOPE RATHER THAN INSIDE `if stilted`, because the door and window
+		dressing below the walls needs it too and those run for every building. It was moved up rather
+		than copied: two `decor` helpers that must agree on CanCollide is the shape this file already
+		learned to distrust, and a collidable prop in a doorway is the specific failure it would cause.
+	]]
+	local function decor(dname: string, dx: number, dy: number, dz: number, sx: number, sy: number, sz: number, colour: Color3): Part
+		local q = box(dname, dx, dy, dz, sx, sy, sz, colour, folder)
+
+		q.CanCollide = false
+		q.CanQuery = false
+		q.CanTouch = false
+		q.CastShadow = false
+
+		return q
+	end
+
 	if stilted then
-		--[[
-			`box()` RATHER THAN `prop()`, AND THAT IS NOT A STYLE CHOICE. `prop`, `turn` and `lean` are
-			declared with the C30 dressing helpers, hundreds of lines BELOW this function. Calling them
-			from here compiles fine and dies at run time with "attempt to call a nil value" — which is
-			exactly what the first version of this block did. `box` is in scope; the four extra
-			property lines are the price.
-
-			Sizes are in `box` units (multiplied by SCALE on the way out), the same units the floor and
-			roof above use — not `prop` units, which pre-divide.
-		]]
-		local function decor(dname: string, dx: number, dy: number, dz: number, sx: number, sy: number, sz: number, colour: Color3): Part
-			local q = box(dname, dx, dy, dz, sx, sy, sz, colour, folder)
-
-			q.CanCollide = false
-			q.CanQuery = false
-			q.CanTouch = false
-			q.CastShadow = false
-
-			return q
-		end
-
 		for _, corner in { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } } do
 			paint(
 				decor(
@@ -487,24 +609,110 @@ local function building(
 
 		--[[
 			THE PITCH. A nipa roof is steep — it sheds monsoon rain, and that steepness is most of what
-			separates the silhouette from a shed. The flat slab above keeps its job as the eaves; two
-			leaning panels make the ridge over it.
+			separates the silhouette from a shed.
+
+			THAT SENTENCE WAS ALREADY HERE AND THE GEOMETRY UNDER IT DID NOT HONOUR IT. The old block
+			leaned two panels at 32 degrees but sized and placed them so the ridge finished about FIVE
+			studs above a TWELVE stud wall — a roof one-third the height of the room it covers. Every
+			house in the barrio read as a shed, which is exactly what the comment promised it would
+			avoid, and no check in this repo looks at a shape.
+
+			SO THE RISE IS NOW DERIVED RATHER THAN TYPED. Research-05 describes the bahay kubo roof as
+			"tall and steeply pitched", tall enough that the volume above the living space is what
+			drives the passive cooling — so the roof is at LEAST as tall as the wall, not a hat on it.
+			`ROOF_RISE` states that as a ratio of the wall, and the pitch angle, the panel length and
+			the panel positions all fall out of it. Change the ratio and the roof stays closed; change
+			an angle by hand, as the old block did, and it does not.
+
+			THE ENDS MUST BE CLOSED, and at this rise that stops being a detail: two bare slopes leave
+			you looking straight up into the roof void from either end of the house. How they are
+			closed is argued at the gable block below, which is where the shape was actually decided.
+		]]
+		local ROOF_RISE = 1.15 -- the ridge, as a multiple of the wall height. See above.
+		local eavesY = height + 0.5
+		local rise = height * ROOF_RISE
+		--[[
+			`box` SCALES X AND Z BY `SCALE` AND LEAVES Y ALONE, so a pitch computed from authored units
+			would be wrong by that factor and would drift the moment anyone touched `SCALE`. Every span
+			below is converted to STUDS first, the trigonometry happens in studs, and only the two
+			`box` size arguments are converted back. Getting this backwards tilts the panels correctly
+			and leaves a gap along the ridge that is only visible from inside the house.
+		]]
+		local halfZ = (d + 4) / 2 * SCALE
+		local pitch = math.atan(rise / halfZ)
+		-- The sloping length of one panel, back in authored units for `box`.
+		local sideSlope = math.sqrt(rise * rise + halfZ * halfZ) / SCALE
+
+		--[[
+			A GABLE, AND THE FIRST ATTEMPT HERE WAS A HIP THAT COULD NOT BE BUILT FROM BOXES.
+
+			The hip version leaned four rectangles inward and looked right in arithmetic. It is not: on a
+			hip, the two LONG panels are TRAPEZOIDS that narrow to the ridge, and a rectangle does not
+			narrow. Built from rectangles the long panels stayed full width all the way up and burst
+			through the end panels as two spikes standing proud of the ridge.
+
+			SO THE ROOF IS A GABLE and the ends are closed with WEDGES, which is the one primitive that is
+			actually a triangle. Two per end, back to back, because a gable end is isoceles and a wedge is
+			right-angled. Gable and hip are both common on a nipa house, so this costs nothing in accuracy.
+
+			WEDGE ORIENTATION IS MEASURED, NOT REMEMBERED. A `WedgePart` of `Size(x, y, z)` is ZERO height
+			at its -Z face and FULL height at its +Z face — verified by raycasting one in this place rather
+			than recalled, because getting it backwards produces a roof with two notches in it that looks
+			like a texture problem rather than a rotation problem.
 		]]
 		for _, sign in { -1, 1 } do
+			-- The long panels. `sign` is +1 for the +Z side, and a positive rotation about X puts that
+			-- panel's +Z edge DOWN — so the sign that names the side is also the sign that tilts it.
 			local panel = decor(
 				`{name}_Pitch{if sign < 0 then "N" else "S"}`,
 				cx,
-				height + 2.4,
-				cz + sign * (d / 5),
+				eavesY + rise / 2,
+				cz + sign * (d + 4) / 4,
 				w + 4,
 				0.5,
-				d / 2 + 2,
+				sideSlope,
 				THATCH
 			)
 
-			panel.CFrame = panel.CFrame * CFrame.Angles(math.rad(sign * 32), 0, 0)
+			panel.CFrame = panel.CFrame * CFrame.Angles(math.rad(sign * math.deg(pitch)), 0, 0)
 			paint(panel, "Nipa")
+
+			--[[
+				THE GABLE END. Woven rather than thatched: on a real kubo the triangle above the wall plate
+				is a sawali panel, often left loose as a vent, and it is the one place the weave is seen
+				head-on rather than in glancing light.
+
+				`WedgePart` IS BUILT DIRECTLY RATHER THAN THROUGH `box`, so these sizes are RAW STUDS and
+				are not multiplied by `SCALE`. `halfZ` is already in studs for exactly this reason; the X
+				and Z positions are converted here instead.
+			]]
+			for _, half in { -1, 1 } do
+				local gable = Instance.new("WedgePart")
+
+				gable.Name = `{name}_Gable{if sign < 0 then "W" else "E"}{if half < 0 then 1 else 2}`
+				gable.Anchored = true
+				gable.Size = Vector3.new(0.6, rise, halfZ)
+				gable.Color = THATCH
+				gable.CanCollide = false
+				gable.CanQuery = false
+				gable.CanTouch = false
+				gable.CastShadow = false
+				-- Full height at +Z by default, so the half on the -Z side stands as built and the half on
+				-- the +Z side is turned to put its tall face back on the ridge line at the centre.
+				gable.CFrame = CFrame.new(
+					(cx + sign * (w + 4) / 2) * SCALE,
+					eavesY + rise / 2,
+					cz * SCALE + half * halfZ / 2
+				) * CFrame.Angles(0, if half < 0 then 0 else math.pi, 0)
+				gable.Parent = folder
+
+				paint(gable, "Sawali")
+			end
 		end
+
+		-- The ridge cap. A real nipa ridge is a bundle lashed over the join, and without it the two
+		-- panels meet in a visible seam at the one place the eye goes first.
+		paint(decor(`{name}_Ridge`, cx, eavesY + rise, cz, w + 4, 0.8, 1.6, THATCH), "Nipa")
 	end
 
 	--[[
@@ -602,6 +810,285 @@ local function building(
 		end
 	end
 
+	--[[
+		THE DOORWAY AND THE WINDOWS — the two things a player standing in front of a house actually
+		reads, and until now the house had neither.
+
+		WHAT WAS THERE: a ten-unit gap between two wall segments, and nothing else. No jamb, no lintel,
+		no threshold, no leaf, and no way up to it. At fifteen studs across it was wider than it was
+		useful and read as a MISSING WALL rather than as a door — which is what a player reported, in
+		those words.
+
+		WHY THE OPENING ALSO GOT NARROWER. A door is legible because it is door-shaped; fifteen studs
+		is a garage. It is now `DOOR_UNITS`, and the number is a floor rather than a preference: a
+		Roblox character is about four studs across and `measure.luau` walks a real path through this
+		gap to every container, so anything that cannot pass a character breaks reachability rather
+		than looking wrong. Re-run `measure.luau` after touching it — this is a NAVMESH change, and it
+		is the only edit in this pass that is.
+
+		THE WINDOWS ARE NOT OPENINGS AND THAT IS DELIBERATE. Research-05: awning windows on all sides,
+		over half the wall area, propped open on a `tukod` stick. Cutting them for real would mean
+		splitting every wall into sill, header and two piers — four times the parts, on the largest
+		surface in the map, to gain a hole nobody can see through at ClockTime 0 in fog. So the wall
+		stays one slab and the window is built ON it: a dark recess, a sill, a shutter leaning out over
+		it, and the stick holding the shutter up. At night that reads as an open window, and it costs
+		no collision, no navmesh and no second wall segment.
+
+		EVERY PART HERE IS `decor` — non-colliding, non-querying, no shadow. A collidable jamb would
+		narrow the doorway the paragraph above just finished widening enough to walk through.
+	]]
+	if stilted then
+		local doorHeight = height * 0.58
+		local leafW = door / 2
+
+		for tag, present in doors do
+			if not present then
+				continue
+			end
+
+			--[[
+				ONE ORIENTATION TABLE INSTEAD OF FOUR BRANCHES. `nx`/`nz` is the outward normal of this
+				face; `ax`/`az` runs ALONG it. Every part below is placed as "centre, plus some distance
+				out along the normal, plus some distance sideways along the face", so the four faces are
+				one piece of arithmetic rather than four transcriptions of it — which is the shape the
+				`side()` function above got wrong twice before it settled.
+			]]
+			local nx = if tag == "E" then 1 elseif tag == "W" then -1 else 0
+			local nz = if tag == "S" then 1 elseif tag == "N" then -1 else 0
+			local ax, az = math.abs(nz), math.abs(nx)
+			local outward = if nx ~= 0 then hw else hd
+			local yaw = if nx ~= 0 then math.rad(90) else 0
+
+			local function at(outDist: number, sideDist: number)
+				return cx + nx * outDist + ax * sideDist, cz + nz * outDist + az * sideDist
+			end
+
+			-- The jambs and the lintel. A frame is most of what turns a hole into a door.
+			for _, dir in { -1, 1 } do
+				local jx, jz = at(outward, dir * (door / 2 + 0.4))
+
+				paint(
+					decor(
+						`{name}_DoorJamb{tag}{if dir < 0 then 1 else 2}`,
+						jx,
+						doorHeight / 2,
+						jz,
+						0.8 + ax * 0.8,
+						doorHeight,
+						0.8 + az * 0.8,
+						BAMBOO_C
+					),
+					"Bamboo"
+				)
+			end
+
+			local lx, lz = at(outward, 0)
+
+			paint(
+				decor(
+					`{name}_DoorLintel{tag}`,
+					lx,
+					doorHeight + 0.4,
+					lz,
+					if ax == 1 then door + 1.6 else 1.2,
+					0.9,
+					if az == 1 then door + 1.6 else 1.2,
+					BAMBOO_C
+				),
+				"Bamboo"
+			)
+
+			-- The threshold. A kubo floor is a step up from the ground, and the step is what tells you
+			-- the doorway is a doorway from side-on, where the frame is edge-on and invisible.
+			local tx, tz = at(outward, 0)
+
+			paint(
+				decor(
+					`{name}_DoorSill{tag}`,
+					tx,
+					0.45,
+					tz,
+					if ax == 1 then door + 1.6 else 2.4,
+					0.9,
+					if az == 1 then door + 1.6 else 2.4,
+					BAMBOO_C
+				),
+				"Bamboo"
+			)
+
+			--[[
+				THE LEAF, HUNG OPEN. A closed door on a house the player must be able to enter is a lie
+				the geometry tells and the collision does not, so it stands open against the outside
+				wall — which is also how a kubo door actually sits in a barrio at night in warm weather.
+
+				It covers HALF the opening, so the gap a player walks through is still unmistakably a
+				gap. Hinged at one jamb and swung out about 70 degrees.
+			]]
+			local ox, oz = at(outward + 0.9, -(door / 2) + leafW * 0.34)
+			local leaf = decor(
+				`{name}_DoorLeaf{tag}`,
+				ox,
+				doorHeight / 2,
+				oz,
+				if ax == 1 then leafW else 0.4,
+				doorHeight - 0.6,
+				if az == 1 then leafW else 0.4,
+				WOOD
+			)
+
+			--[[
+				FORTY DEGREES, NOT SEVENTY. At seventy the leaf stands almost perpendicular to the wall and
+				the camera sees its 0.4-unit EDGE — an invisible door, which is what the first build gave.
+				Forty turns its face toward anyone approaching, so the panel reads as a door standing open.
+			]]
+			leaf.CFrame = leaf.CFrame * CFrame.Angles(0, yaw + math.rad(40), 0)
+			paint(leaf, "Sawali")
+
+			--[[
+				THE HAGDAN. Research-05 again: the ladder is the main access and it is REMOVABLE — it
+				comes in at night or when the house is empty. Three treads is the whole prop, and it
+				matters more than its size suggests: without it the doorway is a hole in a wall with no
+				explanation of how anyone reaches it, which is the detail that makes the stilts read as
+				decoration rather than as structure.
+			]]
+			for step = 1, 3 do
+				local sx2, sz2 = at(outward + 1.1 + step * 1.15, 0)
+
+				paint(
+					decor(
+						`{name}_Hagdan{tag}{step}`,
+						sx2,
+						0.75 - step * 0.18,
+						sz2,
+						if ax == 1 then door * 0.55 else 1.1,
+						0.35,
+						if az == 1 then door * 0.55 else 1.1,
+						BAMBOO_C
+					),
+					"Bamboo"
+				)
+			end
+		end
+
+		--[[
+			ONE AWNING WINDOW PER DOORLESS FACE. Three per house rather than the "all sides" the
+			reference describes, because the fourth side is the door and a window beside a door at this
+			scale reads as a second door.
+		]]
+		for _, tag in { "N", "S", "E", "W" } do
+			if doors[tag] then
+				continue
+			end
+
+			local nx = if tag == "E" then 1 elseif tag == "W" then -1 else 0
+			local nz = if tag == "S" then 1 elseif tag == "N" then -1 else 0
+			local ax, az = math.abs(nz), math.abs(nx)
+			local outward = (if nx ~= 0 then hw else hd) + 0.2
+			local span = (if ax == 1 then w else d) * 0.42
+			--[[
+				SET LOW ENOUGH TO CLEAR THE EAVES, which the first version was not. At a sill of 0.44 x
+				the wall the shutter finished about two studs under a roof that overhangs three, so the
+				whole window sat inside the eaves' shadow and read as a scratch on the wall. It is the
+				kind of error that looks like a texture problem and is a coordinate problem.
+			]]
+			local winH = height * 0.32
+			local sillY = height * 0.30
+			--[[
+				ROUGHLY HALF THE WINDOWS CARRY A LIGHT INSIDE, AND NONE OF THEM CARRY A `PointLight`.
+
+				`Neon` is emissive SHADING, not a light source: it costs no slot against §5's mobile
+				budget, which is the same trick the capiz panes and the fiesta bulbs already use, and it
+				is the whole reason this map can look inhabited at ClockTime 0.
+
+				HALF RATHER THAN ALL, because a barrio where every window is lit at three in the morning
+				is a hotel. Chosen by hashing the house name with the face so it is stable across runs and
+				differs between the faces of one house — a house lit on one side and dark on another is
+				what actually happens, and it gives the same building two readings depending on your
+				approach, which is free horror.
+			]]
+			local lit = (#name + string.byte(tag)) % 2 == 0
+
+			local function at(outDist: number)
+				return cx + nx * outDist, cz + nz * outDist
+			end
+
+			-- The opening itself: a dark recess. Unlit and near-black, so at night it reads as depth
+			-- rather than as a painted rectangle.
+			local rx, rz = at(outward)
+			local recess = decor(
+				`{name}_Win{tag}`,
+				rx,
+				sillY + winH / 2,
+				rz,
+				if ax == 1 then span else 0.3,
+				winH,
+				if az == 1 then span else 0.3,
+				Color3.fromRGB(18, 16, 15)
+			)
+
+			if lit then
+				recess.Color = Color3.fromRGB(206, 150, 74)
+				recess.Material = Enum.Material.Neon
+			else
+				recess.Material = Enum.Material.SmoothPlastic
+			end
+
+			-- The sill, and the shutter propped out over it on its tukod.
+			local sx3, sz3 = at(outward + 0.5)
+
+			paint(
+				decor(
+					`{name}_WinSill{tag}`,
+					sx3,
+					sillY - 0.2,
+					sz3,
+					if ax == 1 then span + 1.2 else 1.6,
+					0.4,
+					if az == 1 then span + 1.2 else 1.6,
+					BAMBOO_C
+				),
+				"Bamboo"
+			)
+
+			local hx, hz = at(outward + 2.3)
+			local shutter = decor(
+				`{name}_WinShutter{tag}`,
+				hx,
+				sillY + winH + 0.9,
+				hz,
+				if ax == 1 then span + 0.8 else 3.2,
+				0.3,
+				if az == 1 then span + 0.8 else 3.2,
+				THATCH
+			)
+
+			-- Hinged at the head and propped OUT and UP, which is what makes it an awning rather than
+			-- a shutter. The tilt is about the axis running along the face, so it is a rotation about
+			-- X on a north/south wall and about Z on an east/west one.
+			shutter.CFrame = shutter.CFrame
+				* (if ax == 1
+					then CFrame.Angles(math.rad(nz * -38), 0, 0)
+					else CFrame.Angles(0, 0, math.rad(nx * 38)))
+			paint(shutter, "Nipa")
+
+			local px, pz = at(outward + 3.4)
+
+			paint(
+				decor(
+					`{name}_WinTukod{tag}`,
+					px,
+					sillY + winH * 0.55,
+					pz,
+					0.35,
+					winH + 1.4,
+					0.35,
+					BAMBOO_C
+				),
+				"Bamboo"
+			)
+		end
+	end
+
 	return folder
 end
 
@@ -623,19 +1110,112 @@ end
 	being tagged rather than by a rule somebody could relax. Tag one of them here and the culler will
 	obediently switch off the only warning a survivor gets.
 ]]
-local function lantern(name: string, cx: number, cz: number, parent: Instance)
-	local post = box(`{name}_Post`, cx, 4, cz, 1, 8, 1, WOOD, parent)
-	local head = box(`{name}_Head`, cx, 8.4, cz, 2, 1.6, 2, Color3.fromRGB(200, 170, 110), parent)
+--[[
+	TWO ERAS ON ONE STREET, AND THE FIXTURE SILHOUETTE IS THE ERA SIGNAL.
+
+	A COBRA HEAD is the old sodium fixture: a tapered housing on a bracket arm, 1900-2200 K, and
+	**CRI around 22** — which is the number that matters. At that colour rendering the pool is nearly
+	monochrome amber and colours do not merely tint, they DIE. A survivor standing in one cannot tell a
+	red pouch from a brown crate, and that is a real horror-game property rather than a palette choice.
+
+	A WEDGE is an integrated solar LED, 4000-6500 K, sitting flat at the top of the arm with a
+	hard-edged pool. Mixing the two is what a barangay actually looks like now: the sodium ones are
+	what the municipality hung, the LEDs are what got replaced or donated since.
+
+	AND ROUGHLY ONE IN FOUR IS DARK. Barangay streetlight budgets lose to education, health and waste
+	collection, so broken fixtures are documented and normal. This is NOT decay-dressing: a dark
+	lantern costs **no light slot**, so the ratio is what pays for the extra arm part on the other
+	nine — and it sharpens §5's "fear comes from PARTIAL information" better than fog does, because a
+	dark stretch of street is information the player can act on.
+
+	THE `MapLight` TAG IS THE ONE THING HERE THAT MUST NOT SLIP. A lantern's `PointLight` carries it so
+	`PerformanceController` may cull it. The Aswang's eye glow and a salt pouch's glow must NEVER carry
+	it — they are §4.3's warning and §4.6's counterplay, and a culler would obediently switch off the
+	only warning a survivor gets.
+]]
+local function lantern(
+	name: string,
+	cx: number,
+	cz: number,
+	parent: Instance,
+	cobra: boolean,
+	lit: boolean
+)
+	--[[
+		CONCRETE, NOT WOOD. Philippine distribution and lighting poles are commonly prestressed
+		concrete, and `HollowBlock` is already in the material registry — so this costs a `paint()`
+		call and reads correctly instead of reading as North American.
+	]]
+	local post = box(`{name}_Post`, cx, 4, cz, 0.9, 8, 0.9, STONE, parent)
+
+	post.CanCollide = true
+	paint(post, "HollowBlock")
+
+	-- The bracket arm. Both eras have one; only what sits on the end of it differs.
+	local arm = box(`{name}_Arm`, cx + 1.1, 8, cz, 2.4, 0.35, 0.35, STONE, parent)
+
+	arm.CanCollide = false
+	arm.CastShadow = false
+	paint(arm, "RustedSteel")
+
+	--[[
+		THE HEAD, AND ITS SHAPE IS THE WHOLE ERA TELL AT DISTANCE. The cobra is deeper than it is
+		wide and hangs below the arm; the wedge is wide, flat and sits on top of it.
+	]]
+	local head = if cobra
+		then box(
+			`{name}_Head`,
+			cx + 2.1,
+			7.75,
+			cz,
+			1.5,
+			0.9,
+			0.8,
+			Color3.fromRGB(200, 170, 110),
+			parent
+		)
+		else box(
+			`{name}_Head`,
+			cx + 2.1,
+			8.3,
+			cz,
+			1.9,
+			0.35,
+			1.2,
+			Color3.fromRGB(214, 222, 232),
+			parent
+		)
+
+	head.CanCollide = false
+	head.CastShadow = false
+
+	--[[
+		A DARK FIXTURE IS A DEAD LAMP, NOT A DIM ONE. `Neon` at any transparency still emits, and a
+		faintly glowing broken streetlight reads as an art bug. So an unlit head is plain plastic in
+		a dead grey, and it carries NO `PointLight` at all — which is where the light slot is saved.
+	]]
+	if not lit then
+		head.Material = Enum.Material.SmoothPlastic
+		head.Color = Color3.fromRGB(58, 58, 62)
+
+		return
+	end
 
 	head.Material = Enum.Material.Neon
-	post.CanCollide = true
 
 	local light = Instance.new("PointLight")
 
 	light.Name = "Glow"
-	light.Color = Color3.fromRGB(255, 196, 120)
-	light.Brightness = 1.6
-	light.Range = 26
+	--[[
+		THE COBRA'S COLOUR IS THE LOW-CRI SODIUM, and it is deliberately saturated rather than a warm
+		white. The wedge is a cool LED. Between them they make the street read as two decades of
+		municipal budget rather than one lighting pass.
+	]]
+	light.Color = if cobra
+		then Color3.fromRGB(255, 168, 62)
+		else Color3.fromRGB(226, 238, 255)
+	light.Brightness = if cobra then 1.6 else 1.3
+	light.Range = if cobra then 26 else 20
 	light.Shadows = false
 	light.Parent = head
 
@@ -645,7 +1225,8 @@ end
 --[[
 	A tagged anchor — the only parts in this file the SERVICES care about.
 
-	Deliberately visible rather than invisible. A greybox is walked by a human deciding whether the
+	Invisible since the dressing pass — see the Transparency note in the body, which reverses the
+	original C17 argument. That argument was: a greybox is walked by a human deciding whether the
 	layout works, and an invisible task point makes "is the spread right?" unanswerable by looking.
 	C34 hides these behind real props; until then a coloured pad IS the affordance, alongside the one
 	`TaskController` draws for the five that are live.
@@ -668,6 +1249,26 @@ local function anchor(
 
 	p.Material = Enum.Material.SmoothPlastic
 	p.CanCollide = false
+	--[[
+		INVISIBLE, AND THIS REVERSES A C17 DECISION THAT OUTLIVED ITS REASON.
+
+		These pads were deliberately VISIBLE when this file built a greybox: a human walking an untextured
+		map needs to see where the anchors are, and a blue slab on the ground was the cheapest way to
+		show them. That argument was correct and it expired the moment the map got dressed. There are
+		about forty of them, and in a finished barrio they are forty opaque blue rectangles lying in the
+		dirt — including one directly in front of Kubo_NW's door, which is where it was noticed.
+
+		`AmbientService`'s own map contract already specifies the end state, in its header: "THE PART
+		ITSELF IS INVISIBLE SCAFFOLDING. Anchored, CanCollide = false, Transparency = 1. Only its CFrame
+		is read." The builder was the half that never caught up.
+
+		NOTHING READS THE PAD'S APPEARANCE. Every service takes its CFrame and its attributes, both of
+		which survive transparency — and the tag is how they are found, not the colour. To see them
+		again while editing a layout, select the tag in Studio's tag browser rather than re-showing them
+		for everyone.
+	]]
+	p.Transparency = 1
+	p.CastShadow = false
 
 	if attributes then
 		for key, value in attributes do
@@ -752,7 +1353,25 @@ roads.Parent = root
 road("Plaza", 0, 0, PLAZA * 2, PLAZA * 2, roads)
 local plazaSlab = roads:FindFirstChild("Plaza") :: Part
 plazaSlab.Color = PLAZA_C
-paint(plazaSlab, "CourtSlab")
+--[[
+	PACKED EARTH, NOT COURT CONCRETE — and the swap is about SCALE rather than about which texture is
+	prettier.
+
+	`CourtSlab` is generated from "hand-troweled outdoor court concrete", which is correct for a
+	basketball court and is still used for one: `Court_Slab` in the plaza dressing, 46 x 25. This part
+	is **139 x 139**. Painting a single troweled-concrete slab over eight times the court's area made
+	the entire plaza read as one poured surface, which is the thing that looked wrong — a barangay
+	plaza is a concrete COURT sitting IN a bare earth clearing, not a concrete field.
+
+	SO THE COURT NOW READS AS A COURT, because it is the only concrete in the frame. That contrast is
+	the whole gain: one 46-stud slab against 139 studs of earth is legible, and 139 studs of concrete
+	with a 46-stud rectangle of slightly different concrete on it is not.
+
+	`DryEarth` rather than `WetEarth` because the streets are already `DryEarth` and the plaza should
+	continue them. The one surface change that must NOT happen here is a third earth: two earths
+	meeting is a puddle, three is a mistake.
+]]
+paint(plazaSlab, "DryEarth")
 
 local reach = HALF - 4
 
@@ -852,6 +1471,29 @@ spawnPad.Neutral = true
 spawnPad.Parent = workspace
 
 --[[
+	AND THE DECAL IS A SEPARATE INSTANCE, WHICH THE PARAGRAPH ABOVE GOT WRONG FOR THREE CHUNKS.
+
+	`spawnPad.Transparency = 1` hides the PART. Roblox draws the sun on a child `Decal` that the engine
+	creates on any `SpawnLocation`, and a Decal carries its OWN `Transparency` — a transparent brick
+	with an opaque decal on it renders the decal and nothing else. So the 24-stud studio logo the
+	comment above claims to have removed was still sitting in the middle of the plaza, and a screenshot
+	of the map still had the single most "unfinished Roblox place" thing in it.
+
+	THIS IS WHY THE COMMENT WAS THE BUG. Nothing in `npm run verify` looks at a decal, the part really
+	was transparent, and the assertion above read as a job already done — so every later art pass
+	skipped it. `.claude/lessons/green-after-each-patch-hides-a-loop.md` names distrusting an
+	invariant a comment asserts; this is that, with the comment three chunks old.
+
+	DESTROYED RATHER THAN MADE TRANSPARENT, because the engine only creates it once. A re-run finds the
+	pad already there (`FindFirstChildWhichIsA` above reuses it) and there is nothing to re-hide.
+]]
+for _, child in spawnPad:GetChildren() do
+	if child:IsA("Decal") then
+		child:Destroy()
+	end
+end
+
+--[[
 	THE ARKO — the village gate arch, at the north edge of the plaza because §5 puts a landmark there.
 
 	V2.0: IT IS NOW SCENERY, AND THAT IS THE POINT. Under v1.3 this arch carried a tagged gate leaf and
@@ -941,9 +1583,11 @@ CollectionService:AddTag(chapelLight, "MapLight")
 	unreachable, plus SEVEN loop failures, because sealing any corridor cannot connect what was never
 	connected. Under v1.3 nothing needed to go in there, so nothing ever asked.
 
-	The two that stay sealed are not laziness. Their job is to BREAK SIGHTLINES so the sightline rule
-	can be partial rather than absent: you can almost always see something, and almost never
-	everything. Two is enough for that; four was more than §5 can now afford.
+	ALL SEVEN ARE OPEN AS OF THE POPULATION PASS, and the sightline job the last two were kept sealed
+	for turns out not to need them sealed. A door is a gap between two wall segments in ONE face; the
+	other three faces and the roof are untouched, so the house occludes exactly as much as it did.
+	`references/sightline-compensation.md` in that plan has the line cites and states what would
+	invalidate it — a SECOND door on either house, which `tests/barrio-interiors.test.luau` refuses.
 ]]
 -- ANNOTATED, and it is the same class of cast CLAUDE.md warns about for `Enums.RoundPhase`. Without
 -- it Luau infers the whole array's element type from the FIRST entry — `Doors: { S: boolean }` — and
@@ -977,9 +1621,23 @@ local KUBO: { KuboSpec } = {
 		measurement and fail the intent.
 
 		Moving two rather than adding two keeps the count at seven, inside §5's 6–8.
+
+		AND THEY ARE OPEN NOW. Both carry interiors, so all seven kubo are enterable against §5's "at
+		least 5". The sightline argument the sealed pair was defended with survives the change and is
+		written out in `.claude/plans/feature-barrio-population-plan/references/sightline-compensation.md`:
+		`building()` cuts a door as a GAP BETWEEN TWO WALL SEGMENTS in one face, leaving the other
+		three faces solid and the roof untouched. Occlusion comes from the house's MASS, and the mass
+		does not move. You still cannot see through any of them on any axis.
+
+		ONE DOOR EACH, AND THAT IS THE LOAD-BEARING HALF. Two opposed doors would cut an actual window
+		through a house and would invalidate the paragraph above. `tests/barrio-interiors.test.luau`
+		pins "no kubo has two opposed doors" so that argument cannot be broken silently.
+
+		INWARD, like the other five: an outward door puts its threshold in the dead band between the
+		ring and the perimeter, where nobody walks.
 	]]
-	{ Name = "Kubo_E", X = 158, Z = -30, Doors = {}, Enterable = false },
-	{ Name = "Kubo_W", X = -158, Z = 40, Doors = {}, Enterable = false },
+	{ Name = "Kubo_E", X = 158, Z = -30, Doors = { W = true }, Enterable = true },
+	{ Name = "Kubo_W", X = -158, Z = 40, Doors = { E = true }, Enterable = true },
 }
 
 for index, kubo in KUBO do
@@ -1061,17 +1719,51 @@ for index, kubo in KUBO do
 		paint(patch, "Nipa")
 	end
 
-	if not kubo.Enterable then
-		mesh(
-			"KuboShell",
-			`{kubo.Name}_Shell`,
-			kubo.X,
-			8,
-			kubo.Z,
-			Vector3.new(26, 16, 22),
-			root:FindFirstChild(kubo.Name)
-		)
-	end
+	--[[
+		THE SWEPT YARD — and this block used to be the mesh shell, which is retired here.
+
+		WHY THE SHELL IS GONE. It was applied at `Vector3.new(24 * SCALE + 1.5, 13.5, 20 * SCALE + 1.5)`,
+		which is 38.7 x 13.5 x 32.5. The mesh's OWN bounding box is 15.75 x 13.5 x 12.78 — an aspect of
+		1 : 0.857 : 0.812. Applied, that becomes 1 : 0.349 : 0.840. A `MeshPart` stretches to whatever it
+		is given, so the shell was standing at **41% of its correct height for its width**: a good steep
+		nipa hut flattened into a shed. That is the same failure `FORM_LOOKS` warns about at the top of
+		`AmbientService` — "a MeshPart STRETCHES to whatever it is given" — and nothing in this repo
+		looks at a shape, so it shipped and read as "it doesn't look like a nipa house".
+
+		AND IT COULD NOT BE FIXED IN PLACE. Scaled uniformly it is CORRECT and 34 studs tall, because the
+		house footprint is 37 x 31 and a bahay kubo that wide really is that tall. But the greybox under
+		it is a 12-stud wall with an authored interior, a door gap and a search container, and a second
+		complete house standing 34 studs over it is two roofs, not cladding. Squash it and it is a shed;
+		don't and it is a duplicate.
+
+		SO THE SILHOUETTE MOVED INTO `building()` INSTEAD, where it is boxes this file controls: a hip
+		roof at `ROOF_RISE` x the wall, a framed doorway with a leaf and a hagdan, and awning windows on
+		the doorless faces. Less surface detail than the mesh had, and every proportion correct — which is
+		the half a player standing in the street actually reads.
+
+		WHAT REPLACES IT HERE IS THE THING THE HOUSES WERE MISSING AT THEIR FEET. Every kubo sat directly
+		in rice paddy, right up to the wall, with a razor-straight edge where the two met. Nobody lives in
+		a paddy: the ground around a house is swept bare earth, and the swept patch is what says somebody
+		sweeps it. It is also what stops the `Paddy`/wall junction being the hardest line in the frame.
+	]]
+	local yard = box(
+		`{kubo.Name}_Yard`,
+		kubo.X,
+		0.06,
+		kubo.Z,
+		34,
+		0.12,
+		30,
+		PLAZA_C,
+		root:FindFirstChild(kubo.Name)
+	)
+
+	yard.CanCollide = false
+	yard.CanQuery = false
+	yard.CanTouch = false
+	yard.CastShadow = false
+
+	paint(yard, "DryEarth")
 end
 
 -- THE WELL / PUMP AREA — §5's fifth zone. A social waypoint off the west road, tucked behind Kubo_SW
@@ -1207,23 +1899,35 @@ local lights = Instance.new("Folder")
 lights.Name = "Lanterns"
 lights.Parent = root
 
+--[[
+	WHICH FIXTURE AND WHICH ONES ARE DEAD, WRITTEN DOWN RATHER THAN DRAWN.
+
+	`rng` is seeded, so a draw would be reproducible — but it would also be unreadable, and WHICH
+	lanterns are dark is a gameplay fact rather than a texture. The three dead ones are chosen so the
+	dark stretches are somewhere a player has a reason to be: an alley mouth, a ring corner and the
+	rice-field edge. The plaza keeps all four of its lights, because §5 wants the plaza to feel like
+	the safe place.
+
+	THE PLAZA IS ALL COBRA AND THE OUTSKIRTS SKEW LED, which is the real pattern: the municipality lit
+	the centre decades ago and the solar units arrived later, where the wire does not reach.
+]]
 for index, at in
 	{
-		{ -40, -40 },
-		{ 40, -40 },
-		{ -40, 40 },
-		{ 40, 40 }, -- plaza corners
-		{ 0, -128 }, -- chapel approach
-		{ -62, 46 }, -- well
-		{ 62, -100 },
-		{ -100, 62 },
-		{ 62, 100 }, -- alley mouths
-		{ -RING, -RING },
-		{ RING, RING }, -- ring corners
-		{ 120, 136 }, -- rice field edge
+		{ -40, -40, Cobra = true, Lit = true },
+		{ 40, -40, Cobra = true, Lit = true },
+		{ -40, 40, Cobra = true, Lit = true },
+		{ 40, 40, Cobra = true, Lit = true }, -- plaza corners
+		{ 0, -128, Cobra = true, Lit = true }, -- chapel approach
+		{ -62, 46, Cobra = false, Lit = true }, -- well
+		{ 62, -100, Cobra = true, Lit = false }, -- alley mouth, dead
+		{ -100, 62, Cobra = false, Lit = true },
+		{ 62, 100, Cobra = true, Lit = true }, -- alley mouths
+		{ -RING, -RING, Cobra = false, Lit = false }, -- ring corner, dead
+		{ RING, RING, Cobra = false, Lit = true }, -- ring corners
+		{ 120, 136, Cobra = false, Lit = false }, -- rice field edge, dead
 	}
 do
-	lantern(`Lantern_{index}`, at[1], at[2], lights)
+	lantern(`Lantern_{index}`, at[1], at[2], lights, at.Cobra, at.Lit)
 end
 
 --------------------------------------------------------------------------------
@@ -1296,39 +2000,95 @@ end
 	WHERE THE AMBIENT POPULATION STANDS. `AmbientService` spawns the rigs; this only sites them.
 
 	§5 is explicit that the COUNT is what matters — "if there is one pig in the barrio, the disguise is
-	meaningless" — and `Config.Ambient.PerForm` (4) x 4 forms is sixteen. Sixteen points, so no two
+	meaningless" — and `Config.Ambient.PerForm` (3) x 6 forms is eighteen. Eighteen points, so no two
 	entities start inside each other.
 
 	WITHOUT THESE THE SERVICE FALLS BACK TO A RING AT THE ORIGIN, which is what this barrio did until
-	now: sixteen animals in a circle through the middle of the plaza, which is both absurd to look at
-	and actively harmful to §4.5 — camouflage needs the population spread across the places a monster
-	would want to hide, not gathered where everyone spawns. The fallback fires only on ZERO tagged
-	parts, so a partial list is worse than none: add all sixteen or the ring stays.
+	now: the whole population in a circle through the middle of the plaza, which is both absurd to look
+	at and actively harmful to §4.5 — camouflage needs the population spread across the places a
+	monster would want to hide, not gathered where everyone spawns. The fallback fires only on ZERO
+	tagged parts, so a partial list is worse than none: add all eighteen or the ring stays.
+
+	EACH POINT NOW NAMES ITS FORM, AND THAT IS A MECHANIC RATHER THAN TIDINESS. A rig wanders
+	`WanderRadius` from its own point and no further, so siting all the pigs at mud and all the goats
+	at field edges means a pig on the basketball court is WRONG — and since the Aswang can only claim
+	a slot it is standing near, it can only wear a pig near mud. That is a deliberate tactical
+	constraint on the monster and it is the counterplay §4.5 asks for.
+
+	THE PLACEMENTS ARE RESEARCHED, NOT INVENTED (`references/research-01-barrio-animals.md`):
+	backyard pigs are tethered or penned rather than free-roaming; goats are tethered at field edges
+	and under plantation trees and brought in at night; native chickens are free-range within a
+	household yard; street cats work alleys and market corners; dogs roam the neighbourhood and are
+	home by dusk; and people sit on the bench in front of the sari-sari store.
+
+	EVERY TERRITORY OWES ITS PROP. A pig point with no wallow, a goat point with no stake, a chicken
+	point with no yard is a rule the player cannot see — and an invisible rule is not counterplay, it
+	is a trap. Phase 8's dressing pass is where that debt is paid, and it is the reason these
+	coordinates are chosen against real map features rather than spread evenly.
 ]]
 local AMBIENT_POINTS = {
-	-- The plaza and its approaches, where villagers and dogs plausibly gather.
-	{ -30, 30 },
-	{ 30, 24 },
-	{ 26, -34 },
-	{ -18, -30 },
-	-- The four stall corners.
-	{ -58, -58 },
-	{ 58, -58 },
-	{ 58, 58 },
-	{ -58, 58 },
-	-- The civic and outlying zones, so no quarter of the map is animal-dead.
-	{ -76, 44 },
-	{ 0, -104 },
-	{ -14, -146 },
-	{ 120, 148 },
-	{ -100, 60 },
-	{ 100, -60 },
-	{ -40, 100 },
-	{ 40, -100 },
+	-- CAT — the three alleys. `ALLEYS` above puts Alley_NE along z = -100, Alley_SW along x = -100
+	-- and Alley_SE along z = 100, each spanning 9..121 on its other axis. Cats work alleys, market
+	-- corners and the spaces between buildings.
+	{ Form = "CAT", X = 34, Z = -100 },
+	{ Form = "CAT", X = -100, Z = 34 },
+	{ Form = "CAT", X = 96, Z = 100 },
+
+	-- DOG — the roads. A radial, a ring corner and the southern ring. Aspins roam the neighbourhood
+	-- and lie in the street; they are the one form whose territory is a THOROUGHFARE, which makes DOG
+	-- the most permissive disguise in the game and PIG the most restrictive. That spread is deliberate.
+	{ Form = "DOG", X = 0, Z = -76 },
+	{ Form = "DOG", X = -130, Z = -44 },
+	{ Form = "DOG", X = 62, Z = 130 },
+
+	-- PIG — mud. The well's runoff at (-70, 32), the north field's low ground, and the paddy edge in
+	-- the south-east. Backyard pigs are tethered under a tree or penned in a kulungan, not roaming.
+	{ Form = "PIG", X = -64, Z = 44 },
+	{ Form = "PIG", X = -70, Z = -104 },
+	{ Form = "PIG", X = 108, Z = 108 },
+
+	-- GOAT — field edges, outside the ring where the ground is open. Kambing are tethered on a rope
+	-- and moved to fresh grazing; the rope is the prop that has to exist for this rule to be visible.
+	{ Form = "GOAT", X = 146, Z = -70 },
+	{ Form = "GOAT", X = -124, Z = 118 },
+	{ Form = "GOAT", X = 128, Z = 148 },
+
+	-- CHICKEN — house yards, one beside each of three kubo. Native chickens are free-range within a
+	-- household's ground and roost off the ground at night.
+	{ Form = "CHICKEN", X = -92, Z = -78 },
+	{ Form = "CHICKEN", X = 92, Z = -78 },
+	{ Form = "CHICKEN", X = 78, Z = 92 },
+
+	-- VILLAGER — two kubo porches and the bench in front of the stalls. The sari-sari store is the
+	-- sourced evening gathering place; the inuman happens there rather than in a separate shed.
+	{ Form = "VILLAGER", X = -78, Z = -64 },
+	{ Form = "VILLAGER", X = 78, Z = 64 },
+	{ Form = "VILLAGER", X = -42, Z = 30 },
 }
 
 for index, at in AMBIENT_POINTS do
-	anchor(`AmbientSpawn_{index}`, "AmbientSpawn", at[1], at[2], anchors)
+	--[[
+		THE FORM RIDES AS AN ATTRIBUTE, and `AmbientService` reads it. An attribute REPLICATES to every
+		client, which is correct and not a leak: it says a pig belongs here, which the wallow beside it
+		says louder. Nothing about who is camouflaged, or whether anyone is, is written anywhere on
+		these parts — see `AmbientService.buildEntity`'s header for why that absence is the guarantee.
+
+		THE NAME CARRIES THE FORM TOO, for a human opening the place file in Studio. The SERVICE reads
+		the attribute, never the name: a name is edited by hand and an attribute is edited in a panel
+		that shows its key, so parsing the name would make a typo silently re-form the barrio.
+
+		`anchor()` TAKES THE ATTRIBUTES RATHER THAN A SEPARATE `SetAttribute` CALL, because it already
+		does — the sixth parameter exists for exactly this and every other tagged pad in this file uses
+		the same door.
+	]]
+	anchor(
+		`AmbientSpawn_{index}_{at.Form}`,
+		"AmbientSpawn",
+		at.X,
+		at.Z,
+		anchors,
+		{ Form = at.Form }
+	)
 end
 
 -- Six salt spawns against Config.Salt.PouchPoolSize, four of which carry a pouch each round. Spread so
@@ -1604,10 +2364,62 @@ for _, run in POWER_RUNS do
 	for index, at in run.Points do
 		local base = `Post_{run.Name}{index}`
 
-		prop(`{base}_Pole`, at[1], 9, at[2], 1.4, 18, 1.4, WOOD, Enum.Material.Wood, posts)
+		--[[
+			CONCRETE, NOT WOOD. Philippine distribution poles are commonly prestressed concrete in a
+			tapered rectangular section, and `HollowBlock` is already in the material registry — so
+			this costs a `paint()` call. A brown wooden pole reads as North American, which is the
+			single most common way a Philippine street scene goes wrong.
+		]]
+		local pole =
+			prop(`{base}_Pole`, at[1], 9, at[2], 1.4, 18, 1.4, STONE, Enum.Material.Concrete, posts)
+
+		paint(pole, "HollowBlock")
 		prop(`{base}_Arm`, at[1], 16.5, at[2], 7, 0.8, 0.8, WOOD, Enum.Material.Wood, posts)
 
-		-- The transformer drum. Two per run, so the line is not a repeating stamp.
+		--[[
+			THE DOWN-GUY AND ITS YELLOW GUARD, ON THE END POLE OF EACH RUN.
+
+			An 8 ft high-visibility sleeve on the anchor guy at roughly 45 degrees. The research calls
+			it the best cost-per-read prop in this step and that is right: it is the only saturated
+			yellow in a grey-brown scene, it catches a torch beam, and it silhouettes against fog.
+
+			BOTH PARTS ARE BUILT FROM THE SAME TWO ENDPOINTS, and that is not tidiness. The first
+			version rotated the wire and the sleeve independently and they diverged — the guard floated
+			beside the wire instead of sheathing it. Obvious in a screenshot, invisible to every check
+			in this repo.
+		]]
+		if index == #run.Points then
+			local away = if run.Name == "East" or run.Name == "West" then 0 else 8
+			local acrossAway = if run.Name == "East" or run.Name == "West" then 8 else 0
+
+			local anchorAt = v(at[1] + away, 0.3, at[2] + acrossAway)
+			local topAt = v(at[1] + away * 0.05, 15.5, at[2] + acrossAway * 0.05)
+
+			span(
+				`{base}_Guy`,
+				anchorAt,
+				topAt,
+				0.18,
+				Color3.fromRGB(38, 38, 40),
+				Enum.Material.Metal,
+				posts
+			)
+			span(
+				`{base}_GuyGuard`,
+				anchorAt + (topAt - anchorAt) * 0.05,
+				anchorAt + (topAt - anchorAt) * 0.45,
+				0.55,
+				Color3.fromRGB(232, 196, 40),
+				Enum.Material.SmoothPlastic,
+				posts
+			)
+		end
+
+		--[[
+			THE TRANSFORMER DRUM. One per run — a bank of three is a three-phase town centre, and this
+			is a rural single-phase feeder. Two porcelain bushings on the lid are what make a grey
+			cylinder read as a transformer rather than as a bin.
+		]]
 		if index == 2 then
 			prop(
 				`{base}_Can`,
@@ -1619,6 +2431,39 @@ for _, run in POWER_RUNS do
 				2.4,
 				TIN,
 				Enum.Material.CorrodedMetal,
+				posts
+			)
+
+			for bushing = 1, 2 do
+				prop(
+					`{base}_Bushing{bushing}`,
+					at[1] + 2,
+					16.3,
+					at[2] + (bushing - 1.5) * 0.9,
+					0.5,
+					1.1,
+					0.5,
+					Color3.fromRGB(180, 172, 158),
+					Enum.Material.CeramicTiles,
+					posts
+				)
+			end
+
+			--[[
+				A CAMPAIGN TARPAULIN, cable-tied at chest height. Posting one on a utility pole is
+				illegal and therefore constant; it is two by three feet of saturated colour on an
+				otherwise grey pole, and it dates the barrio to an election year without a word of text.
+			]]
+			prop(
+				`{base}_Tarp`,
+				at[1],
+				6.5,
+				at[2] - 1.2,
+				3.4,
+				2.2,
+				0.12,
+				Color3.fromRGB(206, 62, 54),
+				Enum.Material.Fabric,
 				posts
 			)
 		end
@@ -1642,6 +2487,39 @@ for _, run in POWER_RUNS do
 					4,
 					0.25,
 					Color3.fromRGB(28, 28, 30),
+					posts
+				)
+			end
+
+			--[[
+				THE TELECOM BUNDLE — "SPAGHETTI WIRES", AND THE VERTICAL SEPARATION IS THE WHOLE POINT.
+
+				Power is FEW, TAUT and HIGH; telecom is MANY, SAGGING and LOW. The barrio had only the
+				top zone, and a Philippine street without the lower one reads as a generic suburb with
+				a couple of cables over it. The gap between the two bands is what a viewer actually
+				recognises, so it is worth more than either band's own detail.
+
+				ONE THICK LINE RATHER THAN SIX THIN ONES, and that is a budget decision that happens to
+				be the more accurate one too: a real telecom bundle is lashed into a single dark mass
+				at any distance you would see it from, so six parts would draw the same silhouette for
+				six times the cost.
+
+				NOT ON EVERY RUN, DELIBERATELY. Spaghetti clusters where the households are, and the
+				north and west runs are the ones that pass the kubo. An even bundle on all four would
+				read as planned infrastructure, which is exactly what it is not.
+			]]
+			if run.Name == "North" or run.Name == "West" then
+				droop(
+					`Telecom_{run.Name}{index}`,
+					previous[1],
+					previous[2],
+					at[1],
+					at[2],
+					11.5,
+					3.6,
+					3,
+					0.7,
+					Color3.fromRGB(22, 22, 24),
 					posts
 				)
 			end
@@ -2225,9 +3103,23 @@ end
 	thirty. Each cluster is seeded from the file's existing `rng`, so a re-run reproduces it exactly —
 	the same argument the rice field already makes.
 ]]
+--[[
+	TWO OF THESE USED TO SIT IN A DOORWAY, and the comment above already said they should not.
+
+	`{ -78, -62 }` is on Kubo_NW's door centreline (x = -78) six units off its threshold, and
+	`{ 64, -78 }` is on Kubo_NE's (z = -78) four units off. With the +/-4 jitter each cluster gets,
+	both dropped drums and crates INTO the opening. That was survivable while a doorway was a bare
+	fifteen-stud gap with nothing in it; now that the door has a frame, a leaf and a hagdan, the
+	clutter lands on the steps.
+
+	NOTHING HERE COLLIDES, so this never blocked a player and no gate could have caught it — it is a
+	pure looks bug, and the kind that only becomes visible once the thing behind it is worth seeing.
+	Both are moved ALONG the wall rather than away from it, so they still read as belonging to the
+	house.
+]]
 local CLUTTER = {
-	{ -78, -62 },
-	{ 64, -78 },
+	{ -66, -62 },
+	{ 64, -66 },
 	{ 66, 64 },
 	{ -62, 36 },
 	{ 16, -128 },
@@ -2294,6 +3186,728 @@ for index, at in CLUTTER do
 			)
 		end
 	end
+end
+
+--------------------------------------------------------------------------------
+-- THE INTERIORS — what is inside a bahay kubo, and why each object earns its parts.
+--
+-- Every kubo is enterable now, and v2.0 puts the search containers inside them,
+-- so a player crosses these thresholds constantly. An empty 24 x 20 box with a
+-- crate in it is the single most disappointing thing this map could contain.
+--
+-- CONTENTS ARE SOURCED, NOT INVENTED — see `references/research-03-kubo-interiors.md`
+-- in the population plan. The objects are ranked by how unmistakably each reads
+-- as Filipino rather than by how much of the room it fills.
+--------------------------------------------------------------------------------
+
+--[[
+	THREE TIERS, AND THE TIERS ARE WHERE THE INSTANCE BUDGET IS REPAID.
+
+	`Kubo_E` and `Kubo_W` sit outside the ring and hold no `SearchContainer`, so nobody has a gameplay
+	reason to enter them — they get SPARSE. The five inside the ring hold containers and get FULL. One
+	house gets RICH, with capiz sliding panes and a ventanilla, which is the sourced way to say "this
+	family has money" and gives the barrio a captain's house.
+
+	SEVEN FULL INTERIORS IS THE SHAPE THAT QUIETLY OVERSPENDS §5's MOBILE BUDGET, which is why
+	`tests/barrio-interiors.test.luau` asserts at least one sparse and at most one rich rather than
+	leaving the mix to whoever edits this next.
+]]
+local KUBO_INTERIORS = {
+	{ Name = "Kubo_NW", X = -78, Z = -78, Tier = "Full" },
+	{ Name = "Kubo_NE", X = 78, Z = -78, Tier = "Rich" },
+	{ Name = "Kubo_SE", X = 78, Z = 78, Tier = "Full" },
+	{ Name = "Kubo_SW", X = -78, Z = 78, Tier = "Full" },
+	{ Name = "Kubo_N", X = 35, Z = -75, Tier = "Full" },
+	{ Name = "Kubo_E", X = 158, Z = -30, Tier = "Sparse" },
+	{ Name = "Kubo_W", X = -158, Z = 40, Tier = "Sparse" },
+}
+
+--[[
+	ONE HELPER, SEVEN HOUSES. The alternative is seven hand-placed rooms, which is seven chances to
+	type a coordinate wrong — and `Container_KuboN_Drum` was authored forty studs outside its own house
+	by exactly that mistake. `tests/barrio-interiors.test.luau` compares this table against `KUBO`
+	rather than trusting either.
+
+	NOTHING HERE COLLIDES AND NOTHING HERE IS A LIGHT. `prop()` guarantees the first — the builder
+	asserts zero dressing colliders at the foot of this file, and a collidable stool inside a doorway
+	would move the navmesh and therefore the crossing time §5 measures. For the second: every lit
+	object is `Neon`, exactly as the container glow bands and the capiz panes already are, so this phase
+	adds NO light slot at all. (An earlier draft of this sentence claimed "fourteen `MapLight` before
+	this phase and fourteen after" — that count was already stale when it was written and contradicted
+	the contract table at the top of this file. The invariant this paragraph actually asserts is
+	ZERO ADDED, which is checkable and stays true; the absolute total belongs in one place, and that
+	place is the `mapLights == totalLights` assert at the foot of the file.)
+
+	COORDINATES ARE LOCAL TO THE HOUSE CENTRE. The footprint is 24 x 20, so the interior spans roughly
+	x -12..12 and z -10..10, and everything below stays a stud clear of the walls.
+]]
+local function interior(name: string, cx: number, cz: number, tier: string)
+	local room = Instance.new("Folder")
+
+	room.Name = `{name}_Interior`
+	room.Parent = houses
+
+	--[[
+		THE BANGGERA — the single most "this is Filipino" object available, and the only one that reads
+		from OUTSIDE the house. It is a slatted counter projecting out through a window opening: cups
+		inverted on upright sticks, plates stood edge-on between the slats, a clay jar at one end. The
+		slats are the point — a banggera drains, which is why it is slatted and why it hangs outside.
+	]]
+	local counter = prop(
+		`{name}_Banggera`,
+		cx + 9,
+		4.2,
+		cz - 7,
+		5,
+		0.3,
+		2.4,
+		WOOD,
+		Enum.Material.WoodPlanks,
+		room
+	)
+
+	paint(counter, "Bamboo")
+
+	for cup = 1, 3 do
+		-- The upright drying sticks, with a cup inverted over each.
+		prop(
+			`{name}_BanggeraStick{cup}`,
+			cx + 7.6 + (cup - 1) * 1.3,
+			4.8,
+			cz - 7,
+			0.14,
+			1.2,
+			0.14,
+			WOOD,
+			Enum.Material.Wood,
+			room
+		)
+		--[[
+			`CeramicTiles`, NOT `Porcelain`. There is no `Enum.Material.Porcelain` — the name is
+			plausible, it is not in the enum, and indexing a missing enum member throws at BUILD time
+			in Studio rather than anywhere `npm run verify` can see it. `barrio.luau` is outside
+			`src/`, so `analyze` never reads this file.
+		]]
+		prop(
+			`{name}_BanggeraCup{cup}`,
+			cx + 7.6 + (cup - 1) * 1.3,
+			5.5,
+			cz - 7,
+			0.7,
+			0.5,
+			0.7,
+			Color3.fromRGB(206, 200, 186),
+			Enum.Material.CeramicTiles,
+			room
+		)
+	end
+
+	-- The banga: an unglazed clay jar. 30-100 cm in the sourced range, so this is a small one.
+	local banga = prop(
+		`{name}_Banga`,
+		cx + 10.4,
+		4.9,
+		cz - 7,
+		1.5,
+		1.4,
+		1.5,
+		Color3.fromRGB(126, 84, 60),
+		Enum.Material.Slate,
+		room
+	)
+
+	banga.Shape = Enum.PartType.Ball
+
+	--[[
+		THE PAPAG AND ITS BANIG — a bamboo platform bed with a rolled sleeping mat on it. There is no
+		bedroom in a one-room house; the papag IS the bedroom, and rolling the mat away is what makes
+		it a living room again during the day.
+	]]
+	local papag = prop(
+		`{name}_Papag`,
+		cx - 7,
+		1.1,
+		cz + 5,
+		6,
+		0.4,
+		4,
+		WOOD,
+		Enum.Material.WoodPlanks,
+		room
+	)
+
+	paint(papag, "Bamboo")
+
+	for leg = 0, 3 do
+		prop(
+			`{name}_PapagLeg{leg + 1}`,
+			cx - 7 + (if leg % 2 == 0 then -2.6 else 2.6),
+			0.5,
+			cz + 5 + (if leg < 2 then -1.6 else 1.6),
+			0.3,
+			1.1,
+			0.3,
+			WOOD,
+			Enum.Material.Wood,
+			room
+		)
+	end
+
+	--[[
+		A ROBLOX CYLINDER'S AXIS IS X, not Y and not Z. Sizing this (0.9, 0.9, 3.6) would give a
+		3.6-wide disc rather than a 3.6-long roll, and no test in this repo looks at a shape.
+	]]
+	local banig = prop(
+		`{name}_Banig`,
+		cx - 7,
+		1.55,
+		cz + 5,
+		3.6,
+		0.9,
+		0.9,
+		Color3.fromRGB(196, 168, 112),
+		Enum.Material.Fabric,
+		room
+	)
+
+	banig.Shape = Enum.PartType.Cylinder
+
+	--[[
+		THE TABO IN ITS TIMBA — a dipper floating in a pail, by the door. Two objects, and between them
+		they say "there is no plumbing here" more clearly than any amount of geometry.
+	]]
+	prop(
+		`{name}_Timba`,
+		cx + 10,
+		0.9,
+		cz + 8,
+		1.6,
+		1.6,
+		1.6,
+		Color3.fromRGB(58, 92, 132),
+		Enum.Material.Plastic,
+		room
+	)
+	prop(
+		`{name}_Tabo`,
+		cx + 10,
+		1.7,
+		cz + 8,
+		0.8,
+		0.5,
+		0.8,
+		Color3.fromRGB(196, 76, 60),
+		Enum.Material.Plastic,
+		room
+	)
+
+	--[[
+		THE TUKOD WINDOW — the awning panel propped open on a stick. It is the traditional window of
+		this house type, it is a physical affordance a horror game can use, and it costs two parts.
+	]]
+	local shutter = prop(
+		`{name}_Tukod`,
+		cx - 12,
+		6.4,
+		cz + 3,
+		0.3,
+		3.4,
+		4,
+		WOOD,
+		Enum.Material.WoodPlanks,
+		room
+	)
+
+	lean(shutter, -34, true)
+	paint(shutter, "Sawali")
+
+	prop(
+		`{name}_TukodStick`,
+		cx - 13.4,
+		5.2,
+		cz + 3,
+		0.16,
+		2.6,
+		0.16,
+		WOOD,
+		Enum.Material.Wood,
+		room
+	)
+
+	if tier == "Sparse" then
+		return
+	end
+
+	--[[
+		THE ALTAR — a Santo Nino, candles, and framed photographs of the dead standing BESIDE the
+		saints rather than apart from them. That adjacency is the sourced detail and it is also the
+		one that belongs in a horror game about folklore: the household shrine is where the dead are
+		kept, and this is a game about something that eats them.
+
+		THE CANDLES ARE `Neon`, NEVER A `PointLight`. §5's mobile budget counts lights and
+		`PerformanceController` culls what is tagged `MapLight`; seven houses times three candles is
+		twenty-one dynamic lights, which is the whole budget spent on a prop nobody walks up to.
+	]]
+	local altar = prop(
+		`{name}_Altar`,
+		cx - 10,
+		3.4,
+		cz - 7,
+		3.4,
+		0.3,
+		1.6,
+		WOOD,
+		Enum.Material.WoodPlanks,
+		room
+	)
+
+	paint(altar, "Whitewash")
+
+	prop(
+		`{name}_AltarSanto`,
+		cx - 10,
+		4.3,
+		cz - 7,
+		0.8,
+		1.6,
+		0.8,
+		Color3.fromRGB(212, 186, 132),
+		Enum.Material.Marble,
+		room
+	)
+
+	for candle = 1, 2 do
+		local flame = prop(
+			`{name}_AltarCandle{candle}`,
+			cx - 11.2 + (candle - 1) * 2.4,
+			3.9,
+			cz - 7,
+			0.28,
+			0.8,
+			0.28,
+			Color3.fromRGB(255, 214, 148),
+			Enum.Material.Neon,
+			room
+		)
+
+		-- Emission scales with transparency on Neon, so this is a candle rather than a floodlight.
+		flame.Transparency = 0.15
+	end
+
+	for photo = 1, 2 do
+		local frame = prop(
+			`{name}_AltarPhoto{photo}`,
+			cx - 10.8 + (photo - 1) * 1.6,
+			4.1,
+			cz - 7.6,
+			0.9,
+			1.2,
+			0.12,
+			Color3.fromRGB(48, 42, 38),
+			Enum.Material.Wood,
+			room
+		)
+
+		lean(frame, 8)
+	end
+
+	--[[
+		THE TAMPIPI — a woven lidded trunk, and the vernacular storage of this house. A carved hardwood
+		`baul` is a *bahay na bato* object: it belongs in a stone-and-timber townhouse, not in six of
+		these seven. Getting that wrong is the furniture equivalent of putting a malong on a lowland
+		villager.
+	]]
+	local trunk = prop(
+		`{name}_Tampipi`,
+		cx + 6,
+		1.1,
+		cz - 6,
+		3.4,
+		2,
+		2.2,
+		Color3.fromRGB(158, 128, 82),
+		Enum.Material.Fabric,
+		room
+	)
+
+	paint(trunk, "Sawali")
+	turn(trunk, 12)
+
+	--[[
+		THE KALAN ON ITS ABUHAN — an earthenware charcoal stove standing on a bed of packed earth and
+		ash. The abuhan is why a fire in a bamboo house does not burn it down, and it is one part.
+	]]
+	prop(
+		`{name}_Abuhan`,
+		cx + 2,
+		0.5,
+		cz + 8,
+		4,
+		0.5,
+		3,
+		Color3.fromRGB(88, 78, 68),
+		Enum.Material.Ground,
+		room
+	)
+
+	-- X is the cylinder's axis, so X is its HEIGHT once the Z-lean below stands it upright.
+	local kalan = prop(
+		`{name}_Kalan`,
+		cx + 2,
+		1.3,
+		cz + 8,
+		1.4,
+		1.8,
+		1.8,
+		Color3.fromRGB(112, 74, 54),
+		Enum.Material.Slate,
+		room
+	)
+
+	kalan.Shape = Enum.PartType.Cylinder
+	lean(kalan, 90, true)
+
+	-- Embers, not a light. Same rule as the candles.
+	local embers = prop(
+		`{name}_KalanEmbers`,
+		cx + 2,
+		1.9,
+		cz + 8,
+		1,
+		0.16,
+		1,
+		Color3.fromRGB(226, 108, 48),
+		Enum.Material.Neon,
+		room
+	)
+
+	embers.Transparency = 0.35
+
+	if tier ~= "Rich" then
+		return
+	end
+
+	--[[
+		THE RICH TIER — capiz sliding panes and a ventanilla, which is the sourced way a house says its
+		family has money. ONE house gets this, and the suite refuses a second: a barrio where every
+		home is the captain's house is not a barrio.
+
+		The ventanilla is the low sliding grille UNDER the main window, opened for airflow at night
+		while the upper panes stay shut. It is the detail that most reads as "an older, better house".
+	]]
+	for pane = 1, 3 do
+		local capiz = prop(
+			`{name}_CapizPane{pane}`,
+			cx - 3.4 + (pane - 1) * 3.4,
+			6.6,
+			cz - 10,
+			3,
+			2.6,
+			0.2,
+			Color3.fromRGB(238, 228, 196),
+			Enum.Material.Glass,
+			room
+		)
+
+		capiz.Transparency = 0.55
+	end
+
+	for bar = 1, 5 do
+		prop(
+			`{name}_Ventanilla{bar}`,
+			cx - 3.6 + (bar - 1) * 1.8,
+			3.6,
+			cz - 10,
+			0.2,
+			2,
+			0.2,
+			WOOD,
+			Enum.Material.Wood,
+			room
+		)
+	end
+end
+
+for _, entry in KUBO_INTERIORS do
+	interior(entry.Name, entry.X, entry.Z, entry.Tier)
+end
+
+--------------------------------------------------------------------------------
+-- THE TERRITORY PROPS — paying the debt Phase 3 took on.
+--
+-- Each of the eighteen `AmbientSpawn` points names a form, and `AmbientService`
+-- refuses a camouflage claim unless the Aswang is standing near a territory of
+-- the form it wants. That is a real tactical constraint on the monster: a pig on
+-- the basketball court is wrong, so it can only wear a pig near mud.
+--
+-- A RULE THE PLAYER CANNOT SEE IS A TRAP RATHER THAN COUNTERPLAY, and that is
+-- the entire justification for per-form territories being good design instead of
+-- an arbitrary restriction. So every point owes the prop that explains it: a
+-- wallow at the pigs, a stake and rope at the goats, a yard at the chickens.
+--------------------------------------------------------------------------------
+
+--[[
+	TWO OR THREE PARTS PER POINT, AND NOT ONE MORE.
+
+	Eighteen points is the largest count of anything in this map, so anything spent here is spent
+	eighteen times. What each prop has to do is answer one question — "why would that animal be
+	HERE?" — from across the street, at night, in fog. A silhouette and a colour do that; detail does
+	not survive the distance to be worth its parts.
+
+	NOTHING COLLIDES. `prop()` guarantees it and the builder asserts zero dressing colliders at its
+	foot — a collidable wallow beside a spawn pad would move the navmesh and therefore the crossing
+	time §5 measures, and `measure.luau` walks to every one of these eighteen points.
+]]
+local function territoryProp(form: string, name: string, cx: number, cz: number)
+	if form == "PIG" then
+		-- A wallow. Wet earth, sunk almost flush, wider than it is deep — a pig pen without a fence
+		-- reads as a puddle, and the puddle is the point: this is where the mud is.
+		local wallow = prop(
+			`{name}_Wallow`,
+			cx,
+			0.08,
+			cz,
+			9,
+			0.16,
+			7,
+			Color3.fromRGB(62, 50, 38),
+			Enum.Material.Mud,
+			dress
+		)
+
+		paint(wallow, "WetEarth")
+
+		-- The kulungan's corner post. Backyard pigs are penned or tethered, never loose.
+		prop(
+			`{name}_PenPost`,
+			cx + 4.4,
+			1.2,
+			cz - 3.4,
+			0.5,
+			2.4,
+			0.5,
+			WOOD,
+			Enum.Material.Wood,
+			dress
+		)
+	elseif form == "GOAT" then
+		--[[
+			THE STAKE AND THE ROPE, and the rope is the half that reads. Kambing are tethered on a
+			line and moved to fresh grazing every day or two — the tether is why a goat is in one
+			place, and without it a goat standing in a field is just a goat anywhere.
+		]]
+		prop(
+			`{name}_Stake`,
+			cx,
+			0.9,
+			cz,
+			0.35,
+			1.8,
+			0.35,
+			WOOD,
+			Enum.Material.Wood,
+			dress
+		)
+
+		local rope = prop(
+			`{name}_Tether`,
+			cx + 2.2,
+			0.25,
+			cz + 1.4,
+			5,
+			0.14,
+			0.14,
+			Color3.fromRGB(178, 158, 116),
+			Enum.Material.Fabric,
+			dress
+		)
+
+		turn(rope, 34)
+
+		-- Cropped ground: a tethered goat eats a circle and leaves it bare.
+		local grazed = prop(
+			`{name}_Grazed`,
+			cx,
+			0.07,
+			cz,
+			11,
+			0.14,
+			11,
+			Color3.fromRGB(96, 88, 62),
+			Enum.Material.Ground,
+			dress
+		)
+
+		paint(grazed, "DryEarth")
+	elseif form == "CHICKEN" then
+		--[[
+			A HOUSEHOLD YARD. Native chickens are free-range within a family's ground and roost OFF
+			the ground at night, so the two props are the boundary and the roost — between them they
+			say "this is somebody's yard" rather than "this is a field with a bird in it".
+		]]
+		local swept = prop(
+			`{name}_SweptYard`,
+			cx,
+			0.07,
+			cz,
+			12,
+			0.14,
+			10,
+			Color3.fromRGB(112, 100, 76),
+			Enum.Material.Ground,
+			dress
+		)
+
+		paint(swept, "DryEarth")
+
+		local roost = prop(
+			`{name}_Roost`,
+			cx - 3.6,
+			1.6,
+			cz + 2.6,
+			3.4,
+			0.3,
+			0.3,
+			WOOD,
+			Enum.Material.Wood,
+			dress
+		)
+
+		paint(roost, "Bamboo")
+
+		prop(
+			`{name}_RoostLeg`,
+			cx - 3.6,
+			0.8,
+			cz + 2.6,
+			0.3,
+			1.6,
+			0.3,
+			WOOD,
+			Enum.Material.Wood,
+			dress
+		)
+	elseif form == "CAT" then
+		-- Alley clutter. A cat is where the scraps and the shelter are, and a stacked crate beside a
+		-- sack is both at once.
+		local crate = prop(
+			`{name}_AlleyCrate`,
+			cx + 2.6,
+			1,
+			cz,
+			2.6,
+			2,
+			2,
+			WOOD,
+			Enum.Material.WoodPlanks,
+			dress
+		)
+
+		turn(crate, 18)
+
+		local sack = prop(
+			`{name}_AlleySack`,
+			cx - 1.6,
+			0.7,
+			cz + 1.2,
+			2.2,
+			1.4,
+			1.8,
+			Color3.fromRGB(148, 134, 100),
+			Enum.Material.Fabric,
+			dress
+		)
+
+		paint(sack, "Sack")
+	elseif form == "DOG" then
+		-- Aspins lie in the road on whatever is flatter than the road. A scrap of cardboard and a
+		-- battered feeding tin is the whole story.
+		local mat = prop(
+			`{name}_DogMat`,
+			cx,
+			0.09,
+			cz,
+			4.5,
+			0.18,
+			3,
+			Color3.fromRGB(132, 112, 84),
+			Enum.Material.Cardboard,
+			dress
+		)
+
+		turn(mat, 22)
+
+		local tin = prop(
+			`{name}_DogTin`,
+			cx + 2.8,
+			0.35,
+			cz - 1.4,
+			1.2,
+			0.7,
+			1.2,
+			Color3.fromRGB(120, 116, 108),
+			Enum.Material.CorrodedMetal,
+			dress
+		)
+
+		paint(tin, "RustedSteel")
+	elseif form == "VILLAGER" then
+		--[[
+			SOMETHING TO BE DOING. A villager standing in an empty street is a mannequin; a villager
+			beside a stool with a bottle and a glass on an upturned crate is at an inuman, which is
+			where people in a barrio actually are after dark.
+
+			THIS IS ALSO THE HALF OF THE BRIEF THE MESH RIGS CANNOT ANSWER. Phase 6 kept the mesh
+			villager, and a mesh has one pose — so what makes it read as "doing something" has to be
+			the scene around it rather than the rig itself.
+		]]
+		local stool = prop(
+			`{name}_Stool`,
+			cx + 2,
+			0.7,
+			cz + 1.4,
+			1.6,
+			1.4,
+			1.6,
+			WOOD,
+			Enum.Material.Wood,
+			dress
+		)
+
+		turn(stool, 24)
+
+		local table_ = prop(
+			`{name}_CrateTable`,
+			cx - 1.8,
+			0.9,
+			cz,
+			2.4,
+			1.8,
+			2.4,
+			WOOD,
+			Enum.Material.WoodPlanks,
+			dress
+		)
+
+		turn(table_, -12)
+
+		prop(
+			`{name}_Bottle`,
+			cx - 1.8,
+			2.3,
+			cz,
+			0.5,
+			1.1,
+			0.5,
+			Color3.fromRGB(96, 128, 92),
+			Enum.Material.Glass,
+			dress
+		)
+	end
+end
+
+for index, at in AMBIENT_POINTS do
+	territoryProp(at.Form, `Territory_{index}_{at.Form}`, at.X, at.Z)
 end
 
 --------------------------------------------------------------------------------
@@ -2470,14 +4084,40 @@ for _, fence in FENCES do
 
 	for picket = 0, count do
 		local t = picket / count
-		local height = rng:NextNumber(4.5, 5.8)
+		local px = fence.X1 + (fence.X2 - fence.X1) * t
+		local pz = fence.Z1 + (fence.Z2 - fence.Z1) * t
+
+		--[[
+			A LIVING KAKAWATE FENCE, AND THE SPROUTING POST COSTS NO EXTRA PART.
+
+			`Gliricidia sepium`'s English common name is literally "Fence Post Tree". The sourced
+			propagation method is to cut hardwood stakes 1.5-2 m long and plant them AS the fence
+			posts, where they take root and sprout — so the posts themselves carry leaves and thin new
+			growth at irregular heights, with wire or bamboo strung between.
+
+			SO A SPROUTING POST IS AN EXISTING PICKET MADE TALLER, not a new one. Only the foliage is
+			new geometry, which is what keeps this inside the instance band.
+
+			ONE IN EIGHT, AND THE RAGGEDNESS IS THE IDENTITY. Some cuttings take vigorously and some
+			barely do, so a real kakawate line is uneven in height and density. A fence where every
+			post sprouted equally would read as a hedge, which is a different thing entirely.
+
+			ONE IN EIGHT RATHER THAN ONE IN SIX IS A BUDGET DECISION, and it is recorded as one. At
+			one in six this phase landed about seven instances under the 1450 ceiling, which is a
+			margin too thin for the assert to mean anything — the next prop anyone adds would fail the
+			build. Raising the ceiling to fit was the alternative and it is the wrong one: that
+			ceiling stands in for §5's mobile budget, which nobody has measured on a phone yet, so
+			moving it to accommodate my own art would be trading an untested limit for a guess.
+		]]
+		local sprouting = picket % 8 == 0
+		local height = if sprouting then rng:NextNumber(6.5, 8.5) else rng:NextNumber(4.5, 5.8)
 
 		lean(
 			prop(
 				`{fence.Name}_{picket}`,
-				fence.X1 + (fence.X2 - fence.X1) * t,
+				px,
 				height / 2,
-				fence.Z1 + (fence.Z2 - fence.Z1) * t,
+				pz,
 				0.5,
 				height,
 				0.5,
@@ -2488,6 +4128,38 @@ for _, fence in FENCES do
 			rng:NextNumber(-5, 5),
 			true
 		)
+
+		if not sprouting then
+			continue
+		end
+
+		--[[
+			TWO CROSSED SLABS, NOT ONE, AND NOT A CUBE. A near-cubic clump was tried first and read as
+			a green box on a stick — the exact "lego" look this whole pass exists to remove. A wide
+			flat leaned slab reads as a spray of pinnate leaves; but ONE slab nearly vanishes when
+			viewed edge-on, so the second crossed over it is what makes it a canopy from any angle.
+		]]
+		for blade = 1, 2 do
+			local leaf = prop(
+				`{fence.Name}_{picket}_Leaf{blade}`,
+				px,
+				height - 0.4 + blade * 0.9,
+				pz,
+				rng:NextNumber(3, 4.2),
+				0.35,
+				rng:NextNumber(2.4, 3.4),
+				Color3.fromRGB(64 + blade * 10, 104 + blade * 8, 48),
+				Enum.Material.LeafyGrass,
+				planting
+			)
+
+			leaf.CFrame = CFrame.new(leaf.Position)
+				* CFrame.Angles(
+					math.rad(rng:NextNumber(-16, 16)),
+					math.rad(rng:NextNumber(0, 180)),
+					math.rad(rng:NextNumber(-22, 22))
+				)
+		end
 	end
 end
 
@@ -2840,7 +4512,26 @@ anchor("TrialTask_Two", "TaskPoint", TRIAL_X + 20, TRIAL_Z + 16, trial, {
 -- rather than finding it already beside them. C22's tell is only learnable if it is watched.
 anchor("TrialChase_Far", "TrialChase", TRIAL_X + 34, TRIAL_Z, trial)
 
-lantern("TrialLantern", TRIAL_X, TRIAL_Z, trial)
+--[[
+	FOUR ARGUMENTS WERE PASSED TO A SIX-ARGUMENT FUNCTION, AND THE TUTORIAL WENT DARK.
+
+	`lantern` gained `cobra` and `lit` in the realism pass and this call site was never updated. Both
+	arrived as `nil`, `lit` is falsy, and the function's "a dark fixture is a dead lamp" branch fired:
+	the head became dead grey `SmoothPlastic`, NO `PointLight` was created, and it returned early.
+
+	SO THE TRIAL CORNER — a sealed 90 x 90 box at `ClockTime 0`, where a new player is taught the one
+	interaction the game needs — had no light source in it at all.
+
+	NOTHING COULD HAVE CAUGHT THIS. `lantern`'s parameters are typed `boolean`, not `boolean?`, so
+	passing nil IS a type error — but `npm run analyze` runs over `src/` only, and this file lives in
+	`tools/`. It is never typechecked, never linted and never executed by a test; `barrio-lighting`
+	reads it as TEXT. The one gate that would have seen it, `mapLights == totalLights` at the foot of
+	this file, compares two numbers that were both silently one lower and agreed perfectly.
+
+	LIT, AND A COBRA HEAD. The trial is the one place partial information is NOT the goal — a player
+	learning an interaction needs to see it.
+]]
+lantern("TrialLantern", TRIAL_X, TRIAL_Z, trial, true, true)
 
 --------------------------------------------------------------------------------
 -- LIGHTING AND STREAMING
@@ -2903,14 +4594,40 @@ end
 
 	WARMER, NOT BRIGHTER. Research-04 describes rural barangay light as sparse warm sodium and CFL with
 	DEEP SHADOW between — so `OutdoorAmbient` moves off its blue toward a dim warm grey rather than up.
-	Raising `Ambient` is the most tempting change available here and the most damaging: it flattens the
-	entire map at once and erases exactly the shadow the look depends on. §5 wants partial information,
-	and the answer to a too-dark barrio is more lanterns spaced further apart, never a higher ambient.
+
+	AND THEN THE ENGINE CHANGED UNDER THAT ARGUMENT, WHICH IS WHY THESE NUMBERS MOVED.
+
+	The paragraph that used to stand here said raising `Ambient` was "the most tempting change and the
+	most damaging", and that the fill belonged in `EnvironmentDiffuseScale` instead — see the block
+	below, which sets it to 0.12 and calls it "what makes an unlit Roblox night read as evenly grey".
+	That reasoning was sound under the old renderer and IS NO LONGER TRUE HERE: this place carries
+	`RBX_LightingTechnologyUnifiedMigration`, and under Unified Lighting `EnvironmentDiffuseScale` and
+	`EnvironmentSpecularScale` are inert. Measured, not assumed — raising diffuse from 0.12 to 0.35 and
+	re-capturing the same frame produced no visible change at all.
+
+	SO THE ONLY FILL CONTROL LEFT IS `Ambient`, and with it pinned at 15 every unlit surface in the
+	barrio rendered as pure black: not a dark house, a HOUSE-SHAPED HOLE. A player standing in the
+	plaza was a black cutout with a hard-edged lantern pool at their feet, which is the state this was
+	reported in.
+
+	THE OLD FEAR STILL GOVERNS THE SIZE OF THE CHANGE, though. Flattening the map is a real cost, so
+	these were raised by capture-and-look rather than by taste, and the test was the PLAZA rather than
+	a wall: the lantern pools and the lit windows must still be the brightest things in frame, and the
+	stretches between them must still be dark enough to walk into blind. They are. If a later pass
+	makes the barrio feel evenly grey, this is the first place to look and the number to bring back
+	down — the shadow between the lanterns is the look.
 ]]
 Lighting.ClockTime = 0
 Lighting.Brightness = 1
-Lighting.Ambient = Color3.fromRGB(15, 15, 22)
-Lighting.OutdoorAmbient = Color3.fromRGB(34, 30, 34)
+Lighting.Ambient = Color3.fromRGB(40, 38, 48)
+Lighting.OutdoorAmbient = Color3.fromRGB(88, 80, 82)
+--[[
+	A LITTLE EXPOSURE RATHER THAN MORE AMBIENT. Exposure lifts the whole frame including the lantern
+	pools, so it buys legibility without closing the gap between lit and unlit the way ambient does.
+	Small, because it also lifts the sky, and a bright sky behind a dark barrio is the thing that read
+	as "off" in the first place.
+]]
+Lighting.ExposureCompensation = 0.25
 
 --[[
 	THE PROPERTIES NOTHING OWNS AT RUNTIME — `SkyController` never touches these, so the builder owns
@@ -2919,6 +4636,11 @@ Lighting.OutdoorAmbient = Color3.fromRGB(34, 30, 34)
 	`EnvironmentDiffuseScale` down: it is a flat fill from the skybox and it is what makes an unlit
 	Roblox night read as evenly grey rather than dark. Specular stays a little higher than diffuse so
 	wet ground and tin roofs still catch a highlight, which is most of what says "humid" here.
+]]
+--[[
+	BOTH OF THESE ARE INERT UNDER UNIFIED LIGHTING and are left set on purpose rather than deleted: a
+	place that has not migrated still honours them, and they cost nothing where it has. Do not spend
+	another session tuning them — the fill argument moved to `Ambient` above, and the reason is there.
 ]]
 Lighting.EnvironmentDiffuseScale = 0.12
 Lighting.EnvironmentSpecularScale = 0.28
@@ -2946,6 +4668,23 @@ atmosphere.Decay = Color3.fromRGB(74, 68, 66)
 atmosphere.Glare = 0.16
 atmosphere.Haze = 2.6
 atmosphere.Parent = Lighting
+
+--[[
+	THE GRADE. Nothing at runtime owns this, so the builder does.
+
+	Contrast rather than brightness is the working term: it puts the lantern pools and the lit windows
+	back at the top of the range after `Ambient` lifted the floor, so the barrio gains readable
+	geometry without the pools losing their punch. Saturation comes DOWN slightly because a raised
+	ambient pushes the paddy toward a cartoon green, and the cool tint is what keeps unlit ground
+	reading as night air rather than as brown dirt seen at noon.
+]]
+local grade = Lighting:FindFirstChild("Grade") or Instance.new("ColorCorrectionEffect")
+grade.Name = "Grade"
+grade.Brightness = 0.015
+grade.Contrast = 0.12
+grade.Saturation = -0.08
+grade.TintColor = Color3.fromRGB(238, 240, 255)
+grade.Parent = Lighting
 
 --[[
 	§5: "Enable StreamingEnabled" — and the build plan adds "from the start, retrofitting it later is
@@ -3045,8 +4784,8 @@ assert(
 	`[barrio] {count("SearchContainer")} SearchContainer parts, expected 15 — SearchService's pool will be short`
 )
 assert(
-	count("AmbientSpawn") == 16,
-	`[barrio] {count("AmbientSpawn")} AmbientSpawn parts, expected 16 — AmbientService will fall back to a ring at the origin`
+	count("AmbientSpawn") == 18,
+	`[barrio] {count("AmbientSpawn")} AmbientSpawn parts, expected 18 — AmbientService will fall back to a ring at the origin`
 )
 assert(
 	countTrialOnly() == 2,
@@ -3110,3 +4849,80 @@ assert(
 	mapLights == totalLights,
 	`[barrio] {totalLights - mapLights} light(s) in the barrio are not tagged MapLight — PerformanceController cannot cull what it cannot see`
 )
+
+--[[
+	THE INSTANCE CEILING, AS A BUILD FAILURE RATHER THAN A PRINTED NUMBER.
+
+	Colliders and lights already fail the build; the instance count was only ever printed, and it is
+	the budget line the population pass spends hardest — seven interiors, six upgraded rig meshes,
+	eighteen territory props and a second lantern part each, against §5's non-negotiable mobile budget
+	with 60% of players on a phone.
+
+	A PRINTED NUMBER IS A NUMBER NOBODY READS, and the realism pass proved that from the other side:
+	its Phase 7 deleted the fence runs, the banana table and the scarecrow loop by miscounting `end`
+	lines, and the instance count went DOWN — which is exactly what that phase was trying to do, so
+	the loss read as the saving working. Every gate was green. It was caught by hand-counting MeshParts
+	in the live map.
+
+	SO THE CEILING IS A BAND, NOT A MAXIMUM. Too many parts is a phone dropping frames; too FEW is a
+	deletion wearing the costume of an optimisation, and that is the failure that actually happened.
+
+	THE EXPECTED VALUE IS ABOUT 1433, computed rather than guessed:
+
+	    1435   MEASURED, after the realism pass was finally applied to the place
+	      -7   the seven kubo mesh shells, retired — ONE `MeshPart` each, not the 84 first printed here
+	      +7   one swept dry-earth yard per kubo
+	     +28   four gable-end wedges per kubo, closing the ends of the new steep roof
+	      +7   one ridge cap per kubo
+	     +56   framed doorways — 2 jambs, lintel, sill, leaf and 3 hagdan steps, x7
+	     +84   awning windows — recess, sill, shutter and tukod on 3 doorless faces, x7
+	    ----
+	    1610   MEASURED. 1435 - 7 + 7 + 28 + 7 + 56 + 84 = 1610, and it reconciles exactly.
+
+	THE FIRST VERSION OF THIS BLOCK DID NOT RECONCILE, AND THE WAY IT FAILED IS THE WARNING.
+
+	It printed `-84 the seven kubo mesh shells`. A shell is one `MeshPart` — `mesh()` returns exactly
+	one part per call — so the term should always have been -7. The other four terms were guessed to
+	match a total that had already been measured, which is the whole failure: the ARITHMETIC was
+	reverse-engineered from the ANSWER, so it summed to something plausible and described nothing.
+
+	The corrected terms above were obtained by COUNTING PARTS IN THE BUILT PLACE by name prefix, not by
+	re-deriving them from the source. One trap that cost a wrong number on the way: grepping `_Win`
+	matches 25 pre-existing `Window*` parts in the `Houses` folder as well as the 84 new `_Win*` ones.
+
+	SO: IF YOU CHANGE THIS BLOCK, COUNT — do not reason. The file sells this as "a build failure rather
+	than a printed number" precisely because a printed number nobody checks is how the realism pass's
+	Phase 7 lost the fence runs silently.
+
+	THE CEILING WAS RAISED FROM 1450 TO 1750, WHICH THE PARAGRAPH THAT USED TO STAND HERE FORBADE.
+
+	It said: "IF IT FIRES HIGH, TRIM RATHER THAN RAISE THE CEILING. This number stands in for §5's
+	mobile budget, which nobody has measured on a phone yet — so moving it to fit more art trades an
+	untested limit for a guess." That is a good rule and it was overridden deliberately rather than
+	quietly, so the override is written down here.
+
+	WHY: the parts above are not art anyone chose to add. They are a doorway you can see is a doorway,
+	a roof with the pitch a nipa house actually has, and windows — reported as missing from a
+	screenshot, in those words. Trimming to hold 1450 would have meant not fixing what was reported.
+
+	WHAT IS STILL TRUE: the number remains an UNMEASURED PROXY, and it is now a looser one. 1750 is
+	still very conservative for a Roblox map — mobile-friendly places routinely run five figures — but
+	nobody has put this map on a phone, and that is the measurement this whole line is standing in for.
+	DO THAT BEFORE RAISING IT AGAIN, and treat a third raise as a signal that the proxy has stopped
+	doing any work at all.
+
+	IF IT FIRES LOW, read the realism plan's Phase 7 first: a count that falls is a deletion, not a
+	saving. The floor moved 1250 -> 1450 for the same reason the ceiling did.
+]]
+local instanceCount = #root:GetDescendants()
+
+assert(
+	instanceCount <= 1750,
+	`[barrio] {instanceCount} instances, ceiling 1750 — §5's mobile budget, and 60% of players are on a phone`
+)
+assert(
+	instanceCount >= 1450,
+	`[barrio] only {instanceCount} instances — something was DELETED. A count that falls is not a saving; check the fence runs, BANANA_AT and the scarecrow loop first`
+)
+
+print(`[barrio] instances: {instanceCount} (band 1450-1750)`)

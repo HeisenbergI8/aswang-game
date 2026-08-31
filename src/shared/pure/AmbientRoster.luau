@@ -26,7 +26,7 @@
 	are structural.
 ]]
 
-export type CamouflageForm = "CAT" | "DOG" | "PIG" | "VILLAGER"
+export type CamouflageForm = "CAT" | "DOG" | "PIG" | "GOAT" | "CHICKEN" | "VILLAGER"
 
 -- One ambient entity. `Claimed` means the monster is wearing this slot; the real entity has wandered
 -- off and `AmbientService` has parked its Model out of the world until the slot is released.
