@@ -27,24 +27,30 @@ check("salt is thrown", ItemUse.verbFor("SALT") == "USE_THROW")
 check("an empty hand has no verb", ItemUse.verbFor(nil) == "USE_NOTHING_HELD")
 
 --[[
-	THE TWO CELLS V09 AND V10 FLIP.
+	THE CELL V10 STILL HAS TO FLIP, AND THE ONE V09 ALREADY DID.
 
-	READ THIS BEFORE "FIXING" A FAILURE HERE. If one of these two goes red, either the boundary moved
-	deliberately — in which case the chunk that moved it deletes the assertion and replaces it with
-	one about the new verb — or somebody gave an item an effect without building the mechanic behind
-	it. Those have opposite fixes and this file is the only place that tells them apart.
+	READ THIS BEFORE "FIXING" A FAILURE HERE. If the buntot pagi's cell goes red, either the boundary
+	moved deliberately — in which case the chunk that moved it deletes the assertion and replaces it
+	with one about the new verb — or somebody gave an item an effect without building the mechanic
+	behind it. Those have opposite fixes and this file is the only place that tells them apart.
+
+	V09 IS WHAT THAT LOOKS LIKE WHEN IT GOES RIGHT. Bawang's cell asserted `USE_NOT_IMPLEMENTED`
+	until the chunk that placed it on a doorway landed, and the chunk replaced the assertion in the
+	same step as the verdict. The "indistinguishable unimplemented items" check went with it: there
+	is only one such item now, so there is nothing left for it to be indistinguishable FROM.
 ]]
-check("bawang has no verb until V09", ItemUse.verbFor("BAWANG") == "USE_NOT_IMPLEMENTED")
+check("bawang is placed on a doorway (V09)", ItemUse.verbFor("BAWANG") == "USE_PLACE")
 check(
 	"the buntot pagi has no verb until V10",
 	ItemUse.verbFor("BUNTOT_PAGI") == "USE_NOT_IMPLEMENTED"
 )
 
--- The two unimplemented items are INDISTINGUISHABLE, which keeps the roadmap out of the game.
-check(
-	"the two unimplemented items answer identically",
-	ItemUse.verbFor("BAWANG") == ItemUse.verbFor("BUNTOT_PAGI")
-)
+--[[
+	THE TWO REAL VERBS ARE DISTINCT, which is the property that replaced "the two unimplemented items
+	answer identically". Salt is thrown and bawang is placed; a service routing on this module must
+	be able to tell them apart, and `InputController` now does exactly that on the `Q` key.
+]]
+check("salt and bawang have different verbs", ItemUse.verbFor("SALT") ~= ItemUse.verbFor("BAWANG"))
 
 --[[
 	THE ASSERTION THE SERVICE DEPENDS ON, stated here rather than only at the call site.

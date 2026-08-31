@@ -1245,6 +1245,11 @@ local function anchor(
 	-- `Tasks.PresenceRangeStuds` (9) and `Salt.PickupRangeStuds` (6). Letting it grow with the map
 	-- would silently widen the affordance away from the number that actually governs it, and the pad
 	-- would start promising a reach the server does not honour.
+	--
+	-- THAT READING DOES NOT HOLD FOR THE `Doorway` TAG (V09), and it is the one exception. A doorway
+	-- pad is read for its `CFrame` and its two attributes only — its size means nothing, and the
+	-- barrier built from it takes its width from the `Width` attribute and its height from
+	-- `Config.Items`. See `doorway()` below.
 	local p = box(name, cx, 0.4, cz, 6 / SCALE, 0.8, 6 / SCALE, ANCHOR_C, parent)
 
 	p.Material = Enum.Material.SmoothPlastic
@@ -1279,6 +1284,39 @@ local function anchor(
 	CollectionService:AddTag(p, tag)
 
 	return p
+end
+
+--[[
+	V09, §4.6. A DOORWAY, AS A SERVICE CAN FIND IT.
+
+	`ItemService.discoverDoorways` reads the `Doorway` tag exactly as `SearchService.discoverPool`
+	reads `SearchContainer`, and for the same reason: this file is outside `src/`, so a doorway that
+	failed to appear would be behind no gate at all and the symptom would be "bawang does nothing".
+
+	THE TAG AND THE ATTRIBUTES ARE REPLICATED, AND THAT IS FINE ON `placeItem`'s ARGUMENT. They
+	describe a hole in a wall every client can already walk through, they name no player, and they
+	carry no round state. `check:secrecy` inspects tags and this one passes because it carries nothing.
+
+	`Width` IS IN REAL STUDS, WHICH IS NOT WHAT THE BUILDER'S `door` IS. `building()` works in
+	pre-scale units and both `v()` and `box()` multiply X/Z by `SCALE` (1.55), so the door gap of 6
+	units is `6 * 1.55` = 9.3 STUDS on the ground — the file's own comment says "Six is nine and a
+	half studs". Writing 6 here would build a barrier two thirds the width of the doorway it is
+	supposed to deny, and an Aswang would walk around its edge with nothing anywhere reporting a fault.
+
+	`Yaw` IS IN DEGREES because a human editing a layout reads degrees; `pure/GarlicBarrier` works in
+	radians and `ItemService` converts once, at the boundary. The convention is `building()`'s own:
+	an E or W door is a wall running along Z, so the barrier's width runs along Z, which is 90.
+
+	THE PAD'S SIZE MEANS NOTHING HERE. `anchor()`'s comment explains its fixed 6 x 0.8 x 6 as "a
+	reading of a Config range", which is true of the three tags that existed when it was written and
+	is NOT true of this one — a doorway pad is read for its `CFrame` and these two attributes only,
+	and the barrier's dimensions come from `Width` plus `Config.Items`.
+]]
+local function doorway(house: string, side: string, cx: number, cz: number, parent: Instance): Part
+	return anchor(`{house}_Doorway{side}`, "Doorway", cx, cz, parent, {
+		Yaw = if side == "E" or side == "W" then 90 else 0,
+		Width = 6 * SCALE,
+	})
 end
 
 --------------------------------------------------------------------------------
@@ -1544,6 +1582,22 @@ paint(box("Arko_Lintel", 0, 17, -32, 26, 3, 4, STONE, arko), "Whitewash")
 ]]
 local chapel = building("Chapel", 0, -152, 46, 36, 16, { S = true, E = true }, STONE, Enum.Material.Cobblestone)
 
+--[[
+	V09. THE CHAPEL'S TWO DOORWAYS, TAGGED FOR `ItemService`'s BAWANG PLACEMENT (§4.6).
+
+	IT IS BUILT HERE RATHER THAN INSIDE `building()` FOR THE REASON THE DOOR FRAME IS NOT HERE EITHER:
+	the frame block is behind `if stilted`, the chapel is deliberately not stilted ("a visita sits on
+	the ground"), and moving the block out would put four decor parts in a doorway that has never had
+	them. The tag is scaffolding; the geometry is not this chunk's business.
+
+	THE OFFSETS ARE THE HALF-EXTENTS OF THE CALL ABOVE — 46 wide and 36 deep, and `building()` takes
+	`hw, hd = w / 2, d / 2`, so 23 and 18 — and the sides match its `doors` set. Two literals typed
+	twice is exactly the drift `tests/barrio-interiors.test.luau` was written for, so
+	`tests/barrio-doorways.test.luau` parses both the call and these and compares them.
+]]
+doorway("Chapel", "S", 0, -152 + 18, chapel)
+doorway("Chapel", "E", 0 + 23, -152, chapel)
+
 for _, wall in chapel:GetChildren() do
 	if wall:IsA("BasePart") and string.find(wall.Name, "Wall") then
 		paint(wall, "HollowBlock")
@@ -1657,6 +1711,33 @@ for index, kubo in KUBO do
 		nil,
 		true
 	)
+
+	--[[
+		V09. ONE `Doorway` PAD PER DOOR THIS HOUSE ACTUALLY HAS (§4.6).
+
+		DRIVEN OFF `kubo.Doors` RATHER THAN OFF A SECOND LIST. The KUBO table is this file's source of
+		truth for which face is open — `tests/barrio-interiors.test.luau` already rests three
+		invariants on it — so a doorway pad that disagreed with it would be a barrier in a wall, and
+		garlic would deny a doorway nobody can walk through. Sealed houses have an empty `Doors` set
+		and correctly get nothing.
+
+		24 WIDE AND 20 DEEP ARE THE `building()` CALL DIRECTLY ABOVE, and it takes `hw, hd = w / 2,
+		d / 2`, so the half-extents are 12 and 10. They are hand-copied and the suite reconciles them,
+		exactly as the container coordinates are reconciled.
+
+		THE SIGNS ARE `building()`'S OWN: it writes `nz = if tag == "S" then 1 elseif tag == "N" then
+		-1`, so S is +Z and N is -Z; and `nx = if tag == "E" then 1 elseif tag == "W" then -1`, so E
+		is +X and W is -X. Inverting either pair would put every pad on the far side of the house
+		from its door, which is a barrier in a solid wall and denies nothing.
+	]]
+	for _, side in { "N", "S", "E", "W" } do
+		if kubo.Doors[side] then
+			local dx = if side == "E" then 12 elseif side == "W" then -12 else 0
+			local dz = if side == "S" then 10 elseif side == "N" then -10 else 0
+
+			doorway(kubo.Name, side, kubo.X + dx, kubo.Z + dz, root:FindFirstChild(kubo.Name))
+		end
+	end
 
 	--[[
 		A GENERATED SHELL OVER THE TWO SEALED KUBO, AND ONLY THOSE TWO.
@@ -4790,6 +4871,19 @@ assert(
 assert(
 	countTrialOnly() == 2,
 	`[barrio] {countTrialOnly()} TrialOnly TaskPoint parts, expected 2 — the Solo Trial has nothing to do`
+)
+
+--[[
+	V09. NINE DOORWAYS — seven kubo, one door each, plus the chapel's two.
+
+	ASSERTED RATHER THAN PRINTED, on the three above's argument: a missing doorway's player-visible
+	symptom is "I pressed the key and nothing happened", which is indistinguishable from bawang not
+	being implemented yet. The number is hand-copied from the KUBO table and the chapel call, and
+	`tests/barrio-doorways.test.luau` reconciles it against both.
+]]
+assert(
+	count("Doorway") == 9,
+	`[barrio] {count("Doorway")} Doorway parts, expected 9 — bawang will have nothing to be placed on`
 )
 
 --[[

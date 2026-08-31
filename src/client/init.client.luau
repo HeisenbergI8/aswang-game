@@ -72,6 +72,9 @@ local CONTROLLER_ORDER = {
 		round presses G — which may be before this player has pressed anything at all.
 	]]
 	"SmokeController",
+	-- V09. The Aswang's own barriers. Loaded by every client and does nothing for four of five —
+	-- see the file's header for why that asymmetry is not observable.
+	"GarlicController",
 	"TrialController",
 	"InputController",
 }

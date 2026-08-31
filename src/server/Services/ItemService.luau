@@ -1,17 +1,19 @@
 --!strict
 --[[
-	ItemService — the three items: the carry slot, dropping, throwing, stun and reveal.
+	ItemService — the three items: the carry slot, dropping, throwing, placing, stun and reveal.
 
-	Milestone: V08
+	Milestone: V09
 	Spec: docs/MVP-SPEC.md §4.6
 
 	THE ITEMS ARE THE ONLY COUNTERPLAY IN THE GAME (§4.6), and this file is deliberately the least
-	clever one in the repo. Four things happen here and each is server-decided:
+	clever one in the repo. Six things happen here and each is server-decided:
 
 	  · a completed search yields an item into ONE carry slot     (V08, SearchService.ItemFound)
 	  · RequestDropItem() puts it back on the floor               (V08, argument-free)
 	  · RequestThrowSalt(direction) is resolved into a hit        (C14, pure/ItemThrow)
 	  · a hit stuns, forces a revert, and glows for RevealDuration (C14)
+	  · RequestPlaceGarlic() denies one doorway for 15 seconds    (V09, pure/GarlicPlacement)
+	  · the Aswang's crossings are sampled against live barriers  (V09, pure/GarlicBarrier)
 
 	ITEMS COME FROM CONTAINERS, NEVER FROM A SPAWN POINT. V08 deleted the `SaltSpawn` pool, the pouch
 	parts and the walk-over pickup tick that C13 shipped. V03 had already built the replacement —
@@ -26,10 +28,24 @@
 	and the server already knows what it is. A `RequestDropItem(itemType)` would be a handler that
 	spawns an item the client named, and one of the three items is the round's only win condition.
 
-	ONE SLOT, THREE ITEM TYPES, NO RECHARGE. `pure/ItemCarry` owns whether a pickup is allowed and
-	`pure/ItemThrow` owns whether a throw connects. Bawang and the buntot pagi are CARRIED AND
-	DROPPED ONLY in V08 — the doorway block is V09 and the strike is V10, and neither is half-built
-	here.
+	ONE SLOT, THREE ITEM TYPES, NO RECHARGE. `pure/ItemCarry` owns whether a pickup is allowed,
+	`pure/ItemThrow` owns whether a throw connects, and `pure/GarlicPlacement` owns whether bawang may
+	be placed. The buntot pagi is CARRIED AND DROPPED ONLY — the strike is V10 and is not half-built
+	here; `pure/ItemUse` is where that boundary is written down.
+
+	V09 ADDED THE DOORWAY BLOCK, AND THE HALF OF IT THAT IS NOT IN THIS FILE IS THE HALF THAT MATTERS.
+	This service places the public garlic bulb, owns the burn-out clock, and pushes the live barrier
+	list to exactly the Aswang. It does NOT block anybody: §4.6 requires the block to be silent and
+	invisible in its effect — no knockback, no VFX, no sound — because garlic invites a loyalty test
+	and that test only stays a game if REFUSING is indistinguishable from BEING UNABLE. So the
+	collidable part exists in the Aswang's own client's workspace (`client/GarlicController`), where
+	its own physics stops it and nothing replicates outward but a position.
+
+	WHICH MEANS THIS SERVICE IS NOT THE AUTHORITY ON THE BLOCK, AND `sampleBreaches` IS THE ANSWER TO
+	THAT. A client that deletes its barrier walks through; the server cannot see the part, so it
+	compares positions it DID see against a plane it owns. That correction is the only observable this
+	chunk permits, and it is reachable only by cheating — read `checkBreach`'s header before touching
+	any of it.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -51,6 +67,8 @@ local ItemCarry = require(Shared.pure.ItemCarry)
 local ItemDrop = require(Shared.pure.ItemDrop)
 local ItemUse = require(Shared.pure.ItemUse)
 local ItemThrow = require(Shared.pure.ItemThrow)
+local GarlicBarrier = require(Shared.pure.GarlicBarrier)
+local GarlicPlacement = require(Shared.pure.GarlicPlacement)
 local Types = require(Shared.Types)
 
 local ItemService = {}
@@ -62,6 +80,12 @@ local ItemService = {}
 	IT REPLACES THE `SaltPouches` FOLDER AND IT IS NOT THE SAME THING. `SaltPouches` held items the
 	round SPAWNED; this holds items a player PUT DOWN — on purpose, on death, or on a disconnect.
 	Nothing seeds it at STARTING, because containers are where items come from now.
+
+	AND SINCE V09 THE NAME UNDERSTATES IT: placed bawang lives here too, tagged `PlacedGarlic` rather
+	than `DroppedItem` so nothing tries to pick it back up off a threshold. It is not a dropped item —
+	it is a placed one, with a clock. A SECOND FOLDER WOULD BE WORSE: the phase sweep being a single
+	pass over a single parent is what makes it correct, and two parents means two sweeps that can
+	disagree. The name is the cost of that, and this sentence is the fix.
 ]]
 local droppedItems: Folder? = nil
 
@@ -435,6 +459,52 @@ end
 local TAG_DROPPED = "DroppedItem"
 
 --[[
+	V09, §4.6. THE DOORWAYS, AND THE LIVE BARRIERS STANDING IN THEM.
+
+	DISCOVERED BY TAG, NOT BY NAME, exactly as `SearchService.discoverPool` finds containers. The map
+	is not in git and the builder is outside `src/`, so a tag is the only contract the two can share;
+	a name pattern would silently stop matching the day a house is renamed.
+
+	`barriers` IS SERVER-ONLY AND IS NOT THE SAME KIND OF SECRET AS `slot`. A roster of who holds what
+	is a roster of who can answer the Aswang; a list of which doorways have garlic on them is public
+	by construction — every client can see the bulbs. It is server-owned because the BURN-OUT CLOCK
+	and the breach test must have one home, not because the contents are private.
+
+	AT MOST `Config.Items.GarlicSpawnCount` ENTRIES — two. A list rather than a map keyed by doorway,
+	because two is not a lookup problem and a list is what `Types.GarlicBarriersPayload` sends.
+]]
+local TAG_DOORWAY = "Doorway"
+local TAG_GARLIC = "PlacedGarlic"
+
+--[[
+	`Breached` AND `RestoreTo` ARE THE STICKY CORRECTION, AND STICKINESS IS GATED ON A CONFIRMED
+	CROSSING RATHER THAN ON WHICH SIDE THE ASWANG IS STANDING.
+
+	The distinction is the whole safety of it. `GarlicBarrier.crossed` fires only when the destination
+	is past the plane by more than the tolerance in ONE sample interval, so at walking speed it catches
+	a walk-through roughly a third of the time — and once both samples are on the far side it can never
+	fire again, which made a single lucky sample a permanent bypass. Stickiness closes that: once a
+	crossing IS confirmed, the server keeps restoring until the Aswang is back where it came from.
+
+	IT IS NOT DRIVEN BY `sideOf` ALONE, AND THAT WOULD HAVE BEEN A CATASTROPHIC FALSE POSITIVE. The
+	plane is infinite. An Aswang standing inside the chapel, having walked in through its EAST door, is
+	on the far side of the SOUTH door's plane — so a side-driven correction would restore that player
+	continuously, for a barrier they never touched, at the map's only two-door building. A confirmed
+	crossing through the opening is the only thing that may start this.
+]]
+type ActiveBarrier = {
+	Doorway: BasePart,
+	Part: BasePart,
+	Spec: GarlicBarrier.Barrier,
+	Breached: boolean,
+	HomeSign: number,
+	RestoreTo: Vector3?,
+	FarSideStreak: number,
+}
+
+local barriers: { ActiveBarrier } = {}
+
+--[[
 	THE COLOUR OF A DROPPED ITEM. Placeholder presentation, replaced at V15 with real models.
 
 	IT MUST DISTINGUISH THE THREE, because from the drop handler onward all three can be lying on the
@@ -661,6 +731,475 @@ local function dropItemInFront(player: Player, item: Types.ItemType?)
 	placeItem(item, root.Position + root.CFrame.LookVector * Config.Items.DropForwardStuds)
 end
 
+--[[
+	V09, §4.6. THE NEAREST DOORWAY TO THIS PLAYER, MEASURED FROM THE SERVER'S COPY OF THEIR CHARACTER.
+
+	`RequestPlaceGarlic` HAS NO ARGUMENT, so this is the whole of how a doorway is chosen. It returns
+	the part AND the distance rather than a boolean, because `pure/GarlicPlacement` wants the distance
+	and the service wants the part, and computing it twice is how the two come to disagree.
+
+	NIL FOR NO CHARACTER, NOT (0,0,0). A player with no root has no position, and the origin is a
+	place in the barrio somebody can stand.
+
+	IT SWEEPS `GetTagged` ON EVERY CALL, INCLUDING REFUSED ONES, AND THAT IS DELIBERATE. Nine doorways
+	against a budget of three tokens is trivially cheap, and caching the pool at STARTING the way
+	`SearchService` does would add a discovery path that can go stale when nothing in this chunk ever
+	moves a doorway. Left uncached on purpose — do not "fix" it.
+]]
+local function nearestDoorway(player: Player): (BasePart?, number?)
+	local character = player.Character
+	local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
+
+	if root == nil or not root:IsA("BasePart") then
+		return nil, nil
+	end
+
+	local best: BasePart? = nil
+	local bestDistance = math.huge
+
+	for _, part in CollectionService:GetTagged(TAG_DOORWAY) do
+		if not part:IsA("BasePart") then
+			continue
+		end
+
+		local distance = (part.Position - root.Position).Magnitude
+
+		if distance < bestDistance then
+			best, bestDistance = part, distance
+		end
+	end
+
+	if best == nil then
+		return nil, nil
+	end
+
+	return best, bestDistance
+end
+
+-- Compared by INSTANCE, never by name. Two houses could carry the same door side and the pad names
+-- are interpolated in the builder; the instance is the identity the tag actually hands us.
+local function doorwayOccupied(doorway: BasePart): boolean
+	for _, active in barriers do
+		if active.Doorway == doorway then
+			return true
+		end
+	end
+
+	return false
+end
+
+--[[
+	V09, §4.6. PUT BAWANG ON A DOORWAY.
+
+	THE VISIBLE HALF IS PUBLIC AND MUST BE. §4.6's blockquote builds the loyalty test on everyone
+	being able to see the garlic and see it burn out — "place it, ask everyone to walk inside" is not
+	playable if only the placer knows where it is. So this part is a normal replicated part, painted
+	`Items.BawangRgb` like the dropped item, and its disappearance is the public clock.
+
+	IT CARRIES NO PLACER, in the Name, in an attribute or in a child value — `placeItem`'s rule, and
+	sharper here: a garlic bulb is placed at a moment, so a `PlacedBy` attribute would be a timestamped
+	record of one player's position lying on the floor of the barrio for fifteen seconds.
+
+	NON-COLLIDING, AND THAT IS THE WHOLE DESIGN IN ONE PROPERTY. If the visible part collided it would
+	block EVERYONE, which is a wall rather than a barrier and would make the loyalty test impossible to
+	fail honestly. The thing that stops the Aswang exists on the Aswang's own client and nowhere else.
+
+	THE BARRIER'S FLOOR IS THE DOORWAY PAD'S OWN `Position.Y`, read rather than assumed, so the
+	barrier follows the map if a future pass ever raises a floor.
+]]
+--[[
+	RETURNS WHETHER IT ACTUALLY PLACED. The handler spends the slot on `true` and only then, because
+	this function has an early return and the spend used to sit above the call: a placement that hit
+	the `droppedItems == nil` branch destroyed one of the round's two bawang with no barrier, no bulb
+	and no feedback. Unreachable today (the folder exists from `Init`), but the spend-first ordering
+	comment made it a trap for the next early return anybody adds here.
+]]
+local function placeGarlic(doorway: BasePart): boolean
+	local folder = droppedItems
+
+	if folder == nil then
+		return false
+	end
+
+	-- ANNOTATED `BasePart`, NOT INFERRED `Part`. `ActiveBarrier.Part` is typed `BasePart` and a table
+	-- field is invariant, so an inferred `Part` is not "exactly" a `BasePart` and the insert below
+	-- fails to typecheck. Every property set here belongs to `BasePart`.
+	local part: BasePart = Instance.new("Part")
+
+	part.Name = Enums.ItemType.Bawang
+	part.Size = Vector3.new(1, 1, 1) -- config-ok: the item's own size, not a balance knob
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.Color = rgb(Config.Items.BawangRgb)
+	part.Material = Enum.Material.SmoothPlastic
+	-- config-ok: sits on the doorway's threshold where it was placed, not a knob
+	part.Position = doorway.Position + Vector3.new(0, 1, 0)
+
+	--[[
+		A DIFFERENT TAG FROM `DroppedItem`, AND THE DIFFERENCE IS LOAD-BEARING. `placeItem` connects a
+		`Touched` pickup to everything it tags `DroppedItem`; placed garlic must NOT be pickup-able,
+		or a survivor walks through their own barrier's doorway and takes it straight back off the
+		threshold. `PlacedGarlic` carries no player and no round state, so it passes `check:secrecy`
+		on `DroppedItem`'s argument.
+	]]
+	CollectionService:AddTag(part, TAG_GARLIC)
+	part.Parent = folder
+
+	local now = os.clock()
+
+	table.insert(barriers, {
+		Doorway = doorway,
+		Part = part,
+		Spec = {
+			X = doorway.Position.X,
+			Y = doorway.Position.Y,
+			Z = doorway.Position.Z,
+			Yaw = math.rad((doorway:GetAttribute("Yaw") :: number?) or 0),
+			HalfWidth = (((doorway:GetAttribute("Width") :: number?) or 0) / 2)
+				+ Config.Items.GarlicBarrierPadStuds,
+			Height = Config.Items.GarlicBarrierHeight,
+			CreatedAt = now,
+			ExpiresAt = now + Config.Items.GarlicDuration,
+		},
+		Breached = false,
+		HomeSign = 0,
+		RestoreTo = nil,
+		FarSideStreak = 0,
+	})
+
+	return true
+end
+
+local garlicRemote = Remotes.Get("GarlicBarriers")
+
+--[[
+	V09, §4.6. SEND THE ASWANG THE LIST OF LIVE BARRIERS, AND SEND IT TO NOBODY ELSE.
+
+	ONE `FireClient`, NEVER `FireAllClients`. `check-secrecy.mjs` allowlists two remotes to carry the
+	secret and this is not one of them, which is correct — the PAYLOAD carries no role. What is
+	role-derived is the RECIPIENT, and that is `FeedUpdate`'s and `CamouflageUpdate`'s arrangement
+	exactly: the server resolves who from `RoundService.GetAswangUserId()` and the wire says nothing.
+
+	EVERY CALLER IS A STATE CHANGE, NOT A CLOCK. Placement, burn-out, the phase sweep, and the
+	Aswang's own `CharacterAdded`. There is no periodic push: the Aswang's client owns its barriers'
+	countdowns from `SecondsRemaining` and re-syncs whenever the server's list actually moves. A
+	periodic push would be a fixed-rate signal arriving at exactly one client for the whole round,
+	which is a shape worth not building even though nobody else can observe it.
+
+	NIL-SAFE IN BOTH DIRECTIONS. No Aswang assigned (IDLE, INTERMISSION) sends nothing; an Aswang who
+	has left the server resolves to no Player and sends nothing. Neither is an error — `RoundService`
+	owns the roster and this function is a renderer for it.
+
+	IT SENDS AN EMPTY LIST RATHER THAN SKIPPING. `clearBarriers` must reach the client or the last
+	round's walls stand in the next one, and "no barriers" is a state the snapshot has to be able to
+	express. That is the half a delta protocol would have got wrong.
+]]
+local function pushBarriers()
+	local aswangUserId = RoundService.GetAswangUserId()
+
+	if aswangUserId == nil then
+		return
+	end
+
+	local player = Players:GetPlayerByUserId(aswangUserId)
+
+	if player == nil then
+		return
+	end
+
+	local now = os.clock()
+	local specs: { Types.GarlicBarrierSpec } = {}
+
+	for _, active in barriers do
+		table.insert(specs, {
+			Position = Vector3.new(active.Spec.X, active.Spec.Y, active.Spec.Z),
+			Yaw = active.Spec.Yaw,
+			Width = active.Spec.HalfWidth * 2,
+			Height = active.Spec.Height,
+			SecondsRemaining = GarlicBarrier.secondsRemaining(active.Spec, now),
+		})
+	end
+
+	local payload: Types.GarlicBarriersPayload = { Barriers = specs }
+
+	garlicRemote:FireClient(player, payload)
+end
+
+--[[
+	V09, §4.6. THE ONE THING IN THIS CHUNK THAT IS ALLOWED TO BE SEEN, AND ONLY BY CHEATING.
+
+	READ THE BLOCKQUOTE BEFORE CHANGING THIS FUNCTION. §4.6: "The moment the barrier plays any effect
+	on the monster, bluffing dies and the test becomes a perfect oracle." A server correction that
+	snaps a character back IS an effect, and a third player watching a doorway would read it exactly
+	as the oracle the spec forbids.
+
+	THE ASYMMETRY THAT MAKES IT SAFE ANYWAY: that sentence binds the HONEST case. An honest client is
+	stopped by its own barrier and never crosses the plane, so this function never runs for it. The
+	only way to be corrected here is to have ignored a barrier, which no honest client does.
+
+	SO EVERY LINE IS WRITTEN TO FAIL TOWARD DOING NOTHING:
+
+	  · `crossed` needs a STRICT sign change, so a character standing in the threshold is not a breach.
+	  · It needs the destination more than `GarlicBreachToleranceStuds` PAST the plane, so lag,
+	    a corpse's physics or a shove is not a breach.
+	  · It needs the crossing point inside the doorway's width and under the barrier's height.
+	  · The restore uses `from` — a position the server SAW on its previous sample — never a computed
+	    one. It cannot put the Aswang somewhere it has never been, which is the failure mode that
+	    would turn a false positive from an annoyance into a report.
+
+	IT WRITES `CFrame` AND NOTHING ELSE. No WalkSpeed, no anchor, no network-ownership change, no
+	Humanoid state. C14's WalkSpeed brand and C04's revert bug are what a "while we are here" property
+	write becomes six weeks later, and both shipped with `check:secrecy` green.
+
+	`SetNetworkOwner(nil)` WAS CONSIDERED AND REJECTED. Server-simulating the Aswang's character would
+	make the block authoritative — and it would make ONE character in the round move differently for
+	the whole round, felt by its owner as input lag and plausibly readable by others in its motion.
+	That trades a fifteen-second observable for a five-minute one.
+]]
+--[[
+	V09, §4.6. THE ONE THING IN THIS CHUNK THAT IS ALLOWED TO BE SEEN, AND ONLY BY CHEATING.
+
+	READ THE BLOCKQUOTE BEFORE CHANGING THIS FUNCTION. §4.6: "The moment the barrier plays any effect
+	on the monster, bluffing dies and the test becomes a perfect oracle." A server correction that
+	snaps a character back IS an effect, and a third player watching a doorway would read it exactly
+	as the oracle the spec forbids. It is permitted here because an honest client stops itself and
+	never crosses, so this never runs for one.
+
+	THREE SEPARATE THINGS HAPPEN HERE AND THEY ARE DELIBERATELY NOT THE SAME THING:
+
+	  1. OBSERVING a crossing. Runs ALWAYS, including inside the grace window.
+	  2. ACCUMULATING far-side samples, which is what makes the detection speed-independent.
+	  3. CORRECTING, which is the only step the grace window defers.
+
+	SPLITTING 1 FROM 3 IS A BUG FIX. The grace used to `continue` past a non-authoritative barrier
+	entirely, so a crossing made in the first second was never SEEN — and once the Aswang is on the far
+	side no later sample can produce the sign change `crossed` needs. One second of blindness bought
+	the whole remaining fourteen, and the window opens at a moment every client can see (a bulb appears
+	on a doorway), which is exactly when the loyalty test is happening.
+
+	ARMING TAKES NO DISTANCE TOLERANCE, AND THAT FIX IS THE IMPORTANT ONE. It used to require the
+	destination be `GarlicBreachToleranceStuds` past the plane within ONE `GarlicBreachSampleInterval`,
+	which is a threshold of `2.5 / 0.25` = **10 studs per second** — below that, `crossed` could never
+	fire at all, so setting `WalkSpeed = 9` defeated garlic permanently at no risk. The tolerance now
+	gates the STREAK instead of the arm, so a slow crosser still accumulates far-side samples and is
+	still caught; it just takes another quarter second.
+
+	TWO CONSECUTIVE FAR-SIDE SAMPLES BEFORE CORRECTING is what replaced the tolerance's old job of
+	protecting a threshold-stander. Somebody jittering across the plane under lag does not produce two
+	in a row; somebody who walked through does.
+
+	IT RETURNS THE POSITION IT RESTORED TO, so the sampler can use it as the next baseline. Writing the
+	pre-correction sample there instead would hand the next call a segment nothing traversed.
+]]
+local function checkBreach(root: BasePart, from: Vector3, to: Vector3): Vector3?
+	local a = vec(from)
+	local b = vec(to)
+	local now = os.clock()
+	local grace = Config.Items.GarlicBreachGraceSeconds
+	local tolerance = Config.Items.GarlicBreachToleranceStuds
+
+	for _, active in barriers do
+		if not GarlicBarrier.isLive(active.Spec, now) then
+			continue
+		end
+
+		-- 1. OBSERVE. No tolerance, and not gated on the grace — see the header for both.
+		if not active.Breached and GarlicBarrier.crossed(active.Spec, a, b, 0) then
+			active.Breached = true
+			active.HomeSign = if GarlicBarrier.sideOf(active.Spec, a) < 0 then -1 else 1
+			active.RestoreTo = from
+			active.FarSideStreak = 0
+		end
+
+		if not active.Breached then
+			continue
+		end
+
+		--[[
+			2. ACCUMULATE. Back on the home side is the breach walked back — disarm, and the barrier
+			returns to ordinary crossing detection rather than staying armed for the rest of the round.
+			A sample within the tolerance of the plane counts as neither: that is the threshold-stander,
+			and it must neither disarm nor advance.
+		]]
+		local side = GarlicBarrier.sideOf(active.Spec, b)
+
+		if (side < 0 and active.HomeSign < 0) or (side > 0 and active.HomeSign > 0) then
+			active.Breached = false
+			active.RestoreTo = nil
+			active.FarSideStreak = 0
+			continue
+		end
+
+		if math.abs(side) <= tolerance then
+			continue
+		end
+
+		active.FarSideStreak += 1
+
+		-- 3. CORRECT. The ONLY step the grace defers: an honest client never reaches it, and a cheater
+		-- who crossed inside the window is still on the far side when the grace ends.
+		if active.FarSideStreak < 2 then
+			continue
+		end
+
+		if not GarlicBarrier.isAuthoritative(active.Spec, now, grace) then
+			continue
+		end
+
+		local restoreTo = active.RestoreTo
+
+		if restoreTo ~= nil then
+			--[[
+				BACK TO WHERE IT WAS, ORIENTED AS IT IS. Position only: taking the character's current
+				`CFrame.Rotation` keeps the camera and the facing untouched, so the correction is a
+				position restore rather than a re-aim. A re-aim would be a second observable on top of
+				the first, and this function is already spending the only one it is allowed.
+
+				IT WRITES `CFrame` AND NOTHING ELSE. No WalkSpeed, no anchor, no network-ownership
+				change, no Humanoid state. C14's WalkSpeed brand and C04's revert bug are what a "while
+				we are here" property write becomes six weeks later, and both shipped green.
+			]]
+			root.CFrame = CFrame.new(restoreTo) * root.CFrame.Rotation
+
+			if Config.Debug.VerboseLogging then
+				-- No UserId. There is exactly one player this can ever be, so printing the id would
+				-- write the round's secret into the server log for anything that reads it later.
+				print("[ItemService] Garlic breach corrected")
+			end
+
+			return restoreTo
+		end
+	end
+
+	return nil
+end
+
+--[[
+	V09, §4.6. THE BREACH SAMPLER, AND ITS ONLY JOB IS TO NOT FIRE ON HONEST PLAYERS.
+
+	IT IS A BOUNDED LOOP, NOT A TICK, AND `ItemService`'S OWN RULE IS WHY. This file deleted C13's
+	quarter-second sweep and its closing comment says nothing should bring one back. This runs only
+	while at least one barrier is live — started by the first placement, stopped when the list empties
+	— so its worst case is `Config.Items.GarlicDuration` seconds of sampling ONE player's root
+	position against at most two planes. That is a bound on the exception rather than an exception to
+	the rule, and if it ever becomes unbounded the rule has been broken.
+
+	IT SAMPLES ONE PLAYER. Survivors are not blocked by garlic and are never tested against it; there
+	is no per-player state here and no roster.
+
+	`lastSample` IS A POSITION THE SERVER SAW, WHICH IS WHY THE CORRECTION CANNOT TELEPORT ANYONE
+	SOMEWHERE THEY HAVE NEVER BEEN. `checkBreach` restores it verbatim.
+]]
+local breachRunning = false
+local lastSample: Vector3? = nil
+
+local function sampleBreaches()
+	--[[
+		`lastSample` IS DROPPED ON EVERY CALL, INCLUDING WHEN A LOOP IS ALREADY RUNNING, and the
+		"including" is a bug fix. This used to sit below the `breachRunning` early return, so the SECOND
+		bawang of a round inherited a sample taken before its barrier existed — and a stale baseline
+		straddling a brand-new plane is a crossing the Aswang never made. `GarlicBreachGraceSeconds`
+		covers the same window from the other side; this covers it even if the grace is ever shortened.
+
+		The cost of dropping a baseline is one sample interval of not watching. The cost of keeping a
+		stale one is correcting an honest player.
+	]]
+	lastSample = nil
+
+	if breachRunning then
+		return
+	end
+
+	breachRunning = true
+
+	task.spawn(function()
+		while #barriers > 0 do
+			local aswangUserId = RoundService.GetAswangUserId()
+			local player = if aswangUserId ~= nil
+				then Players:GetPlayerByUserId(aswangUserId)
+				else nil
+			local character = if player ~= nil then player.Character else nil
+			local root = if character ~= nil
+				then character:FindFirstChild("HumanoidRootPart")
+				else nil
+
+			if root ~= nil and root:IsA("BasePart") then
+				local from = lastSample
+				local to = root.Position
+
+				--[[
+					THE BASELINE IS WHERE THE CHARACTER ACTUALLY ENDED UP. On a correction that is the
+					RESTORED position, not the sampled one — writing the sample would hand the next
+					call a segment the character never traversed, and `crossed` would evaluate a
+					fabricated four-stud jump against every other live barrier.
+				]]
+				if from ~= nil then
+					to = checkBreach(root, from, to) or to
+				end
+
+				lastSample = to
+			else
+				--[[
+					NO CHARACTER MEANS NO BASELINE. Dropping the sample rather than keeping a stale one
+					is what stops a respawn on the far side of a doorway reading as a crossing — the
+					single most likely way this loop would brand an honest player.
+				]]
+				lastSample = nil
+			end
+
+			task.wait(Config.Items.GarlicBreachSampleInterval)
+		end
+
+		breachRunning = false
+		lastSample = nil
+	end)
+end
+
+--[[
+	BURN-OUT. §4.6: fifteen seconds, then it is gone.
+
+	`task.delay` RATHER THAN A TICK, AND THE FILE'S OWN RULE IS WHY. `ItemService` deleted C13's
+	quarter-second sweep and its closing comment says nothing should bring one back. A burn-out is an
+	event at a known time, so it is scheduled rather than polled — and the sweep re-checks `isLive`
+	rather than trusting the timer, so a barrier cleared early by a phase change cannot be cleared
+	twice.
+]]
+local function expireGarlic()
+	local now = os.clock()
+	local kept: { ActiveBarrier } = {}
+
+	for _, active in barriers do
+		if GarlicBarrier.isLive(active.Spec, now) then
+			table.insert(kept, active)
+		else
+			active.Part:Destroy()
+		end
+	end
+
+	barriers = kept
+	pushBarriers()
+end
+
+--[[
+	EVERY BARRIER GONE AT ONCE, for a phase change rather than for a clock. Separate from
+	`expireGarlic` because they answer different questions — "which of these has run out" versus
+	"none of these applies any more" — and a single function taking a flag would be one function with
+	two meanings, which is the argument `ItemDrop` makes for not being folded into `ItemCarry`.
+
+	IT DESTROYS THE PARTS TOO, even though `clearDroppedItems` will sweep the folder at INTERMISSION.
+	`ENDING` reaches here and does not reach that sweep, and a garlic bulb still sitting on a doorway
+	with no barrier behind it is the one thing in this chunk that would be a visible lie.
+]]
+local function clearBarriers()
+	for _, active in barriers do
+		active.Part:Destroy()
+	end
+
+	table.clear(barriers)
+	pushBarriers()
+end
+
 -- Everything this service put in the world. Called on the way into INTERMISSION and IDLE, mirroring
 -- MonsterService.clearCorpses — NOT on "any phase that is not ACTIVE", which is the mistake that
 -- destroyed the winning kill's corpse within a frame of creating it.
@@ -785,6 +1324,16 @@ local function onPhaseChanged(phase: Types.RoundPhase)
 	]]
 	if phase ~= Enums.RoundPhase.Active then
 		clearAllEffects()
+		--[[
+			V09. BARRIERS DIE THE MOMENT THE ROUND STOPS BEING ACTIVE, on the same side of this split
+			as the glow rather than the same side as the dropped items — and the file's own
+			distinction is the reason. Items lying on the ground during ENDING are scenery; a live
+			barrier is a rule still being applied to one player after the round it belonged to has
+			finished. The garlic PARTS are scenery and are swept above with everything else at
+			INTERMISSION, but `clearBarriers` destroys them too because ENDING never reaches that
+			sweep and a bulb with no barrier behind it would be a visible lie.
+		]]
+		clearBarriers()
 	end
 end
 
@@ -823,6 +1372,22 @@ end
 	There is no branch on role here and there must never be one.
 ]]
 local function watchCharacter(player: Player, character: Model)
+	--[[
+		V09. A RESPAWN OR A REJOIN REBUILDS THE ASWANG'S BARRIERS FROM THE SERVER'S LIST.
+
+		The barrier parts live in the Aswang's own client's workspace and are destroyed with its
+		character's session; without this line an Aswang who respawns mid-round walks through garlic
+		with nothing anywhere reporting a fault, and the symptom is "bawang stopped working" in one
+		round out of ten.
+
+		CALLED UNCONDITIONALLY, AND THAT IS THE POINT. `pushBarriers` resolves the recipient by role
+		itself, so this does nothing for the four players it does not concern. A
+		`if player.UserId == RoundService.GetAswangUserId()` guard HERE would be a role-shaped branch
+		in the character-spawn path of a service every player reaches — the exact shape `ItemCarry`'s
+		header refuses for the slot table. The role test belongs in one function.
+	]]
+	pushBarriers()
+
 	-- A character that has not produced a Humanoid in ten seconds is not going to; the nil branch
 	-- below is the whole handling.
 	local humanoid = character:WaitForChild("Humanoid", 10) -- config-ok: a load timeout, not a knob
@@ -909,6 +1474,88 @@ function ItemService.Start()
 		-- half of this is `MonsterService.onPlayerRemoving`, which since V05 calls `clearExposed`
 		-- BEFORE nilling the entry — nilling alone orphans the Highlight onto the husk.
 		stunned[player.UserId] = nil
+	end)
+
+	--[[
+		V09, §4.6. PUT BAWANG ON A DOORWAY.
+
+		THE RATE LIMIT IS INLINE AND FIRST, copying the throw and drop handlers exactly.
+		`check-ratelimit.mjs` matches `AntiCheat\w*[.:](Allow|Check|Consume|RateLimit|Permit)` within
+		1200 characters of an `.OnServerEvent:Connect(`, by its own admission a proximity tripwire —
+		so a handler that IS limited but does it elsewhere reads as unguarded and fails the build.
+		Consume FIRST, before anything is read.
+
+		THERE IS NO ARGUMENT TO VALIDATE. See the declaration in `Remotes.luau`: the doorway is
+		resolved from the player's own character position and the item from the server's own slot.
+
+		PLACING MAKES NOISE, AND THAT IS A DECISION RATHER THAN AN INHERITANCE. §4.4's four noisy
+		actions include ITEM_USE and the salt throw already emits it — on a MISS as well as a hit,
+		precisely so a throw sounds the same either way. Garlic is the second item use in the game and
+		a silent one would be the only item use that makes no sound, which is
+		`.claude/lessons/absence-is-observable.md` in miniature: a survivor who hears nothing when
+		somebody uses an item learns something about which item it was. Both roles place bawang, both
+		emit the same cue, from the placer's own position.
+	]]
+	Remotes.Get("RequestPlaceGarlic").OnServerEvent:Connect(function(player: Player)
+		if not AntiCheatService.Consume(player, "RequestPlaceGarlic") then
+			return
+		end
+
+		local doorway, distance = nearestDoorway(player)
+
+		local verdict = GarlicPlacement.evaluate({
+			Phase = RoundService.GetPhase(),
+			PlayerState = RoundService.GetPlayerState(player),
+			Held = slot[player.UserId],
+			DoorwayDistance = distance,
+			Range = Config.Items.GarlicPlaceRangeStuds,
+			DoorwayOccupied = doorway ~= nil and doorwayOccupied(doorway),
+		})
+
+		--[[
+			NOTHING IS RETURNED TO THE CALLER ON ANY PATH, including OK — the throw handler's rule and
+			the drop handler's, inherited. `GARLIC_DOORWAY_TAKEN` echoed back would be a free map
+			probe; see the union's comment in `Types.luau`.
+		]]
+		if verdict ~= "GARLIC_OK" or doorway == nil then
+			if Config.Debug.VerboseLogging then
+				-- A UserId and a verdict. NEVER the doorway, and never the item: a doorway id beside
+				-- a UserId in the log is a record of where a player was standing, written to disk.
+				print(`[ItemService] Garlic placement refused for {player.UserId}: {verdict}`)
+			end
+
+			return
+		end
+
+		--[[
+			§4.6: "Once used, it's gone." THE SLOT IS SPENT ABOVE THE PLACEMENT so no future early
+			return can skip it, which is the throw handler's ordering and the reason it has it.
+		]]
+		--[[
+			§4.6: "Once used, it's gone." SPENT ONLY IF IT WAS ACTUALLY PLACED. The spend used to sit
+			ABOVE the call, on the reasoning that no future early return could then skip it — but
+			`placeGarlic` already had one, so a placement that hit it destroyed one of the round's two
+			bawang with no barrier, no bulb and no feedback. The ordering that was supposed to make the
+			spend un-skippable is what made it unconditional.
+		]]
+		if not placeGarlic(doorway) then
+			return
+		end
+
+		slot[player.UserId] = nil
+		pushBarriers()
+		-- Returns instantly when a loop is already running, so two barriers never start two loops.
+		sampleBreaches()
+
+		local placerRoot = if player.Character
+			then player.Character:FindFirstChild("HumanoidRootPart")
+			else nil
+
+		if placerRoot ~= nil and placerRoot:IsA("BasePart") then
+			NoiseService.Emit(player, "ITEM_USE", placerRoot.Position)
+		end
+
+		task.delay(Config.Items.GarlicDuration, expireGarlic)
 	end)
 
 	--[[

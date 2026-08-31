@@ -1122,6 +1122,75 @@ check(
 	`cue={Config.Monster.SmokeCueRadius}, cloud={Config.Monster.SmokeRadius}`
 )
 
+--[[
+	V09, §6.5 INVARIANT 4. GARLIC BUYS TIME, NEVER SAFETY.
+
+	`GarlicDuration < Round.Duration / 4` is written in the spec (line 758) and restated in
+	`Config.Items`' own comment, and until this line it was pinned NOWHERE. It is pillar six's
+	invariant: §3's OUT list forbids a permanent safe room outright, and a garlic duration that crept
+	toward a quarter of the round would build one a doorway at a time, with two bawang in play and no
+	symptom anywhere — the round would simply start ending in a locked house.
+
+	A QUARTER RATHER THAN SOME OTHER FRACTION, because two bawang is the whole supply: at the shipped
+	values two consecutive placements deny one doorway for 30 of 300 seconds, a tenth of the round.
+	The pin is the ceiling on ONE of them.
+]]
+check(
+	"garlic buys time, never safety — one bawang is under a quarter of the round",
+	Config.Items.GarlicDuration < Config.Round.Duration / 4,
+	`GarlicDuration={Config.Items.GarlicDuration}, Round.Duration={Config.Round.Duration}`
+)
+
+--[[
+	V09. THE BREACH TOLERANCE IS A SANITY BOUND, NOT A BALANCE RELATIONSHIP, and it is here because
+	the failure is silent in the direction that matters.
+
+	Positive-and-finite is `ItemCarry`'s `Limit` guard in a second file: `0` makes every jitter across
+	the threshold a breach and rubber-bands an HONEST Aswang, which is the one observable this whole
+	chunk exists to prevent, and `math.huge` deletes the backstop with nothing to say so. Under the
+	place range because a tolerance wider than the reach that placed the garlic is not a tolerance.
+]]
+--[[
+	V09. THE BREACH BACKSTOP MUST BE ABLE TO FIRE AT WALKING PACE, AND THIS PIN EXISTS BECAUSE IT ONCE
+	COULD NOT.
+
+	`GarlicBarrier.crossed` originally needed the destination sample more than
+	`GarlicBreachToleranceStuds` past the plane within ONE `GarlicBreachSampleInterval`. That is a
+	speed threshold of `tolerance / interval` — at the shipped 2.5 / 0.25 it was exactly 10 studs per
+	second, and BELOW it the test could never fire at all. Setting `WalkSpeed = 9` deleted garlic
+	permanently, at no risk, with the survivors concluding bawang was broken.
+
+	The arming step no longer takes a tolerance, so the floor is gone — but the tolerance still gates
+	the far-side streak, and if it ever grows past one sample interval of ordinary walking the streak
+	stops accumulating for a player moving at normal pace and the floor comes back wearing a different
+	hat. Pinned against the baseline walk speed rather than against a literal, so re-tuning either
+	number is what fails this.
+]]
+check(
+	"the garlic breach tolerance is under one sample interval of ordinary walking",
+	Config.Items.GarlicBreachToleranceStuds
+		< Config.Items.GarlicBreachSampleInterval * Config.Trial.PlayerBaselineWalkSpeed,
+	`tolerance={Config.Items.GarlicBreachToleranceStuds}, interval={Config.Items.GarlicBreachSampleInterval}, walk={Config.Trial.PlayerBaselineWalkSpeed}`
+)
+
+--[[
+	V09. THE SUPPRESSION MARGIN MUST EXCEED A CHARACTER'S HULL RADIUS, or the Aswang reaches the
+	barrier plane and makes contact — restoring the `MoveDirection` signature and the deterministic
+	resting offset that the whole suppression design exists to remove.
+]]
+check(
+	"the garlic suppression margin clears a character's hull",
+	Config.Items.GarlicSuppressMarginStuds > 2,
+	`margin={Config.Items.GarlicSuppressMarginStuds}`
+)
+
+check(
+	"the garlic breach tolerance is positive, finite, and under the place range",
+	Config.Items.GarlicBreachToleranceStuds > 0
+		and Config.Items.GarlicBreachToleranceStuds < Config.Items.GarlicPlaceRangeStuds,
+	`tolerance={Config.Items.GarlicBreachToleranceStuds}, range={Config.Items.GarlicPlaceRangeStuds}`
+)
+
 if failures > 0 then
 	error(`{failures} balance invariant(s) violated`, 0)
 end

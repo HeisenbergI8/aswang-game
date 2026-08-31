@@ -65,6 +65,9 @@ local UP_REMOTES = {
 	-- two — see Config for why a refused hide is cheap and a hide firehose is not.
 	"RequestCamouflage",
 	"RequestSmoke",
+	-- V09. The doorway placement. Argument-free, like the two above it: the server resolves the
+	-- nearest tagged `Doorway` from the placer's own character position and the client names nothing.
+	"RequestPlaceGarlic",
 }
 
 local failures = 0

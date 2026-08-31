@@ -73,6 +73,100 @@ local Items = {
 	GarlicDuration = 15,
 
 	--[[
+		V09. HOW CLOSE TO A DOORWAY YOU MUST BE STANDING TO PLACE BAWANG ON IT.
+
+		DELIBERATELY SMALLER THAN `Search.RangeStuds` (10), for `DropForwardStuds`' reason: a player
+		standing at a container must not also be able to seal the doorway they came through without
+		walking back to it. Placing garlic is a trip, and the trip is the cost.
+
+		THE SERVER RESOLVES THE DOORWAY, NOT THE CLIENT. `RequestPlaceGarlic` has no argument, so this
+		is the radius the server measures from the placer's OWN character position — the same rule
+		`RequestSearch` applies to containers, and the reason there is no doorway probe.
+	]]
+	GarlicPlaceRangeStuds = 8,
+
+	--[[
+		V09. THE BARRIER'S SHAPE. It is never seen by anybody, including the Aswang, so these are
+		physics numbers rather than art numbers.
+
+		HEIGHT IS TALL ENOUGH THAT A JUMP DOES NOT CLEAR IT. A Roblox character's default jump peaks
+		around 7 studs; the barrier stands from the doorway's floor upward, and a doorway a monster can
+		hop through is a doorway that is not denied. Raise this rather than adding a second rule.
+
+		THE PAD WIDENS THE BARRIER PAST THE WALKABLE GAP so the Aswang cannot squeeze between the
+		barrier's edge and the jamb. `barrio.luau`'s door gap is `6 * SCALE` = 9.3 studs and the
+		`Doorway` anchor carries that as its `Width` attribute; this is added to each side.
+	]]
+	GarlicBarrierHeight = 12,
+	GarlicBarrierPadStuds = 1.5,
+
+	--[[
+		V09. THE ANTI-CHEAT BACKSTOP, AND ITS ONLY JOB IS TO NOT FIRE ON HONEST PLAYERS.
+
+		The block itself is a movement the ASWANG'S OWN CLIENT never issues (see `GarlicController` and
+		`pure/GarlicBarrier.suppress`). An honest client stops itself and never crosses the plane, so
+		the server-side correction never runs for it. These numbers exist for the client that disabled
+		its own suppression.
+
+		THE TOLERANCE IS WHY A CORRECTION CANNOT BRAND AN HONEST ASWANG. A crossing is only a breach
+		when the destination sample is more than this far PAST the plane, so a character standing in
+		the threshold or jittering across it under lag is never corrected. A rubber-band at a garlic
+		doorway is the exact tell §4.6's blockquote forbids, so this number fails toward doing nothing.
+
+		IT IS NOT WHAT PROTECTS AGAINST A SHOVE FROM A CORPSE — an earlier version of this comment said
+		so and was wrong. Corpses are `Anchored = true, CanCollide = false` (`MonsterService.makeCorpse`)
+		and cannot push anybody. `GarlicBreachGraceSeconds` below covers the vector that IS real.
+
+		THE SAMPLE INTERVAL IS SLOW ON PURPOSE. Two barriers at most, one player sampled, for at most
+		`GarlicDuration` seconds — the loop starts on the first placement and stops when the last
+		barrier burns out, so `ItemService`'s "there is no tick any more" rule survives with a bound
+		on it rather than an exception to it.
+	]]
+	GarlicBreachToleranceStuds = 2.5,
+	GarlicBreachSampleInterval = 0.25,
+
+	--[[
+		V09. HOW LONG AFTER A BARRIER IS PLACED BEFORE THE SERVER WILL ENFORCE IT.
+
+		THIS NUMBER EXISTS BECAUSE THE ABSENCE OF IT WAS A SHIPPED BUG. A barrier is in the server's
+		list the instant the placement resolves, but the Aswang's client cannot build its collidable
+		part until `GarlicBarriers` has crossed the wire and `GarlicController.rebuild` has run. In
+		that window the server would enforce a wall the monster has nothing to be stopped by — so a
+		survivor could stand everyone at a doorway, wait for someone to walk through, place garlic, and
+		watch the Aswang get snapped backwards. That is §4.6's forbidden rubber-band, produced against
+		an honest player, in front of the witnesses the loyalty test just gathered, with two free
+		attempts per round.
+
+		SIZED FOR A BAD ROUND TRIP PLUS A SAMPLE INTERVAL, not for a good one. It is a one-off delay on
+		enforcement at the start of a fifteen-second denial, and it costs a cheater nothing they could
+		not already get by waiting — so it is worth being generous with. The failure it prevents is
+		unrecoverable (a branded honest player); the failure it causes is half a second of a doorway.
+	]]
+	GarlicBreachGraceSeconds = 1,
+
+	--[[
+		V09. HOW FAR FROM A BARRIER THE ASWANG'S OWN MOVEMENT STOPS BEING ISSUED.
+
+		THIS NUMBER EXISTS BECAUSE A COLLIDABLE WALL IS NOT SILENT, AND THAT WAS MEASURED RATHER THAN
+		argued. A character held against a `CanCollide` part reports `Humanoid.MoveDirection` of
+		`(-1, 0, -0)` while one standing still reports `(0, 0, 0)` — reproduced across three reads and
+		two approach angles, read FROM THE SERVER off the live character. `MoveDirection` is an
+		ordinarily replicated Humanoid property, so every other client can read it off a peer, and
+		§4.6's loyalty test becomes a perfect oracle for anyone willing to script one.
+
+		NOTHING IN `GarlicController` COULD SUPPRESS THAT, because the engine computes `MoveDirection`
+		from the input the player is holding, not from whether the motion succeeded. So the block
+		stopped being a wall the monster walks into and became a movement that is never issued — which
+		is §4.6's own sentence read literally: "its movement simply does not carry it through."
+
+		IT MUST EXCEED A CHARACTER'S HULL RADIUS (~2 studs), or the character reaches the barrier and
+		makes contact anyway, restoring both the `MoveDirection` signature and the deterministic
+		resting offset that corroborated it. Bigger is safer for secrecy and only costs the monster a
+		little standoff distance at a doorway it cannot use regardless.
+	]]
+	GarlicSuppressMarginStuds = 3.5,
+
+	--[[
 		BUNTOT PAGI (§4.6) — the only thing that kills, and there is exactly ONE per round.
 
 		ONE IS A DESIGN CONSTANT, NOT A TUNABLE. Denying survivors the buntot pagi is a real Aswang
@@ -1580,6 +1674,18 @@ local Config = {
 				reconnect retry and nothing else.
 			]]
 			RequestSmoke = { Capacity = 2, RefillPerSecond = 0.1 },
+			--[[
+				V09, §4.6. TWO BAWANG EXIST IN THE WHOLE ROUND, so the honest ceiling on this handler
+				is two successful calls in five minutes and the budget is not protecting throughput.
+
+				IT IS PROTECTING THE REFUSAL PATH, which is where the only interesting attack is. A
+				refused placement costs the server a `GetTagged` sweep and a distance comparison per
+				doorway, and an unbudgeted handler would let one client run that sweep as fast as it
+				can send — with no item in hand, forever. The capacity is small and the refill is slow
+				because a player who legitimately needs a third press within twelve seconds does not
+				exist: they are standing at a doorway with one item.
+			]]
+			RequestPlaceGarlic = { Capacity = 3, RefillPerSecond = 0.25 },
 			RequestEquipCosmetic = { Capacity = 5, RefillPerSecond = 0.5 },
 			--[[
 				C34. Priced like the equip next door rather than tighter, even though it SPENDS: the

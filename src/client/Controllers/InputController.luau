@@ -38,8 +38,24 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared.Config)
 local Enums = require(Shared.Enums)
 local Remotes = require(Shared.Remotes)
+local Types = require(Shared.Types)
+local ItemUse = require(Shared.pure.ItemUse)
 
 local InputController = {}
+
+--[[
+	V09, §4.6. WHAT THIS CLIENT LAST HEARD IT WAS HOLDING, so `Q` can route to the right remote.
+
+	KEPT HERE RATHER THAN READ OFF `UIController`, which deliberately keeps nothing — it renders
+	`snapshot.YourCarriedItem` straight through and holds no copy (`UIController.luau:322`). Adding an
+	accessor would have meant giving the HUD state it does not want in order to answer a question the
+	HUD is not asked. `SkyController` subscribes to `RoundSnapshot` for its own two fields on exactly
+	this reasoning, so this is the file's established shape rather than a new one.
+
+	IT IS A CONVENIENCE AND NEVER AN AUTHORITY. See `performThrow` for the full argument: the server
+	re-derives the item from its own slot on every path, so a stale or lying value earns a refusal.
+]]
+local carriedItem: Types.ItemType? = nil
 
 local TRANSFORM_ACTION = "AswangTransform"
 local KILL_ACTION = "AswangKill"
@@ -297,6 +313,26 @@ local function performThrow(): boolean
 	]]
 	if TrialController.IsActive() then
 		Remotes.Get("RequestTrialThrow"):FireServer(camera.CFrame.LookVector)
+	elseif ItemUse.verbFor(carriedItem) == "USE_PLACE" then
+		--[[
+			V09, §4.6. THE CLIENT'S CHOICE IS A CONVENIENCE AND NEVER AN AUTHORITY.
+
+			`ClientRoundSnapshot.YourCarriedItem` is the receiving player's OWN slot, which the server
+			owns and pushes every `Round.SnapshotInterval`. A client that guesses wrong — because its
+			snapshot is half a second stale, or because it lied — gets a refusal rather than an
+			advantage: `RequestPlaceGarlic` re-reads the slot on the server and `pure/GarlicPlacement`
+			returns `GARLIC_NOT_HELD`, and `RequestThrowSalt` already asks `ItemUse` before it spends.
+			This is `TrialController.IsActive()`'s own reasoning one line above: "the server re-checks
+			either way, so a client that picks wrongly gets a refusal rather than an advantage".
+
+			IT ASKS `pure/ItemUse`, NOT `== "BAWANG"`. That is the same call `ItemService`'s throw
+			handler makes, so the client and the server route on one rule rather than two copies of
+			it, and `tests/item-use.test.luau` covers both.
+
+			NO DIRECTION IS SENT. A placement has no aim — the server resolves the doorway from the
+			placer's own position — so the camera's `LookVector` stops at this branch.
+		]]
+		Remotes.Get("RequestPlaceGarlic"):FireServer()
 	else
 		Remotes.Get("RequestThrowSalt"):FireServer(camera.CFrame.LookVector)
 	end
@@ -405,6 +441,21 @@ end
 function InputController.Init() end
 
 function InputController.Start()
+	--[[
+		V09. TRACK THIS CLIENT'S OWN CARRIED ITEM so `Q` can route to the right remote.
+
+		THE SAME REMOTE EVERYTHING ELSE RENDERS FROM, and no new one: `check:remotes` has no new name
+		to learn and `check:secrecy` has no new payload to argue with, because `YourCarriedItem` is a
+		field this client already receives about ITSELF. `SkyController` subscribes to `RoundSnapshot`
+		for its own two fields on the same argument.
+
+		IT READS ONE FIELD AND KEEPS ONE FIELD. Nothing about any other player is retained here, which
+		is the property that keeps this subscription uninteresting to `check:secrecy` and to a reader.
+	]]
+	Remotes.Get("RoundSnapshot").OnClientEvent:Connect(function(snapshot: Types.ClientRoundSnapshot)
+		carriedItem = snapshot.YourCarriedItem
+	end)
+
 	--[[
 		HAND THE HUD THE SAME TWO FUNCTIONS THE KEYS RUN.
 

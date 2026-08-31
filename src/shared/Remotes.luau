@@ -210,6 +210,42 @@ local EVENTS_DOWN = {
 		role tokens, not a field called `Source`.
 	]]
 	"SmokeBurst",
+	--[[
+		V09, §4.6. FireClient to the ONE player who is the Aswang. Never FireAllClients — there is no
+		broadcast form of this payload, and adding one would not be an optimisation, it would hand
+		every client a live list of where the survivors are fortifying.
+
+		WHAT A SECOND CLIENT LEARNS FROM THIS REMOTE: nothing, because it never receives it. The
+		PUBLIC half of garlic needs no remote at all and never gets one — a bulb appears on a doorway
+		and fifteen seconds later it is gone, and both of those replicate as geometry. That is the
+		whole of what the barrio is told, and it is exactly what §4.6's loyalty test needs: everyone
+		can see the garlic and everyone can see the clock.
+
+		IT IS THE ONLY REMOTE IN THIS GAME WHOSE RECIPIENT IS CHOSEN BY ROLE RATHER THAN BY ACTION,
+		and that difference is worth naming rather than glossing. `FeedUpdate` and `CamouflageUpdate`
+		also reach only the Aswang, but they are replies to that player's own request; this one is
+		fired UNPROMPTED, triggered by a survivor's placement. The safety argument is nonetheless
+		`RoleAssigned`'s and it is unchanged: it is fired to a single player, the payload carries no
+		role and no UserId, and the set of clients that learn anything is the set that already knew.
+		The recipient is resolved server-side from `RoundService.GetAswangUserId()`.
+
+		THE PAYLOAD NAMES NO PLACER AND NO DOORWAY. `Types.GarlicBarrierSpec` is a position, a yaw, a
+		width, a height and a remaining duration. With no player field there is nothing that would
+		hand the monster a survivor's movements; with no doorway id there is no key on which a
+		compromised Aswang client could log, difference or accumulate anything. It learns where the
+		garlic is, which it learns by looking at the doorway.
+
+		A FULL SNAPSHOT, NOT A DELTA. `RequestSearch`/`RequestCancelSearch`'s header is the argument
+		inverted: two messages for one state are how a client and a server come to disagree about it.
+		A dropped "added" leaves the Aswang walking through garlic; a dropped "expired" leaves it
+		walled out for the rest of the round. A snapshot is idempotent, and re-sending it on
+		`CharacterAdded` is the entire rejoin path.
+
+		IT IS NOT AN AUTHORITY. A client that deletes its barriers walks through, and that is what
+		Phase 4's server-side breach test is for. This remote is what the block LOOKS like, never what
+		makes it — `SmokeController`'s header states the same property about the smoke cloud.
+	]]
+	"GarlicBarriers",
 }
 
 -- Client -> Server (the client asks; the server decides)
@@ -374,6 +410,32 @@ local EVENTS_UP = {
 		disagree about it.
 	]]
 	"RequestSmoke",
+	--[[
+		V09, §4.6. NO ARGUMENTS, and the absent argument is the entire security design.
+
+		THE DOORWAY IS NOT NAMED BY THE CLIENT. The server resolves the nearest part tagged `Doorway`
+		within `Config.Items.GarlicPlaceRangeStuds` of that player's OWN character position — the rule
+		`RequestSearch` states in full and `RequestDropItem` restates: the server resolves what a
+		player is standing at from that player's own character position, and the client names nothing.
+
+		A `RequestPlaceGarlic(doorway)` WOULD HAVE BEEN A FREE MAP PROBE. It needs a verdict for "that
+		doorway is not near you", which is the distance comparison the server was already positioned
+		to make; and it hands a compromised client the ability to name every tagged part in turn and
+		read back which doorways are already sealed — an index of where the survivors are fortifying,
+		delivered to whoever asks, including the one player who most wants it. The map's part names
+		are readable by any client because Workspace replicates, so the probe would be trivial.
+
+		NOR IS THERE AN ITEM ARGUMENT. `Config.Items.CarryLimit` is 1, so there is exactly one thing a
+		player can be holding and the server already knows what it is. `RequestDropItem`'s header has
+		the full argument; the sharp end is the same one — a handler that acts on an item the client
+		named is a handler that can be asked about the round's only win condition.
+
+		IT IS NOT A ROLE ORACLE IN EITHER DIRECTION. §4.4 has the Aswang searching and carrying on
+		identical rules, so the monster can place bawang exactly as a survivor can, and must — see
+		`Types.ClientRoundSnapshot.YourCarriedItem`. It is then blocked by its own garlic. Nothing is
+		returned to the caller on any path, including OK.
+	]]
+	"RequestPlaceGarlic",
 }
 
 local Remotes = {}

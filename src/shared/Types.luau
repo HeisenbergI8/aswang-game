@@ -382,7 +382,71 @@ export type ItemDropVerdict = "OK" | "ITEM_WRONG_PHASE" | "ITEM_NOT_ALIVE" | "IT
 	something to be filled in by whoever notices the hole. A named verdict means the hole is asserted
 	in `tests/item-use.test.luau` rather than left to be discovered.
 ]]
-export type ItemUseVerdict = "USE_THROW" | "USE_NOT_IMPLEMENTED" | "USE_NOTHING_HELD"
+export type ItemUseVerdict = "USE_THROW" | "USE_NOT_IMPLEMENTED" | "USE_NOTHING_HELD" | "USE_PLACE"
+
+--[[
+	V09, §4.6. MAY THIS PLAYER PUT BAWANG ON THIS DOORWAY?
+
+	PREFIXED `GARLIC_`, which is `ItemCarryVerdict`'s rule and `SearchVerdict`'s before it. A fourth
+	union sharing the bare `WRONG_PHASE` spelling makes a handler wired to the wrong path a working
+	program with the wrong meaning, and this one runs beside three others in the same service.
+
+	NOTHING HERE IS ECHOED BACK TO THE CALLER, on any path including OK — the throw handler's rule and
+	the drop handler's, inherited. `GARLIC_DOORWAY_TAKEN` in particular would be a free doorway probe:
+	fire the remote from across the barrio and difference the refusals to learn which doorways are
+	sealed without walking to any of them. It exists so the server can log WHY.
+
+	IT IS NOT A ROLE ORACLE IN EITHER DIRECTION. §4.4 has the Aswang searching and carrying on
+	identical rules, so the monster reaches this union and gets `GARLIC_OK` exactly as a survivor
+	does — and is then blocked by its own garlic, which is correct and is the funniest outcome in the
+	chunk. A "the monster may not place" verdict would be an oracle readable by pressing a key.
+]]
+export type GarlicPlaceVerdict =
+	"GARLIC_OK"
+	| "GARLIC_WRONG_PHASE"
+	| "GARLIC_NOT_ALIVE"
+	| "GARLIC_NOT_HELD"
+	| "GARLIC_NO_DOORWAY"
+	| "GARLIC_DOORWAY_TAKEN"
+
+--[[
+	V09, §4.6. ONE LIVE BARRIER, AS THE ASWANG'S OWN CLIENT NEEDS IT TO BUILD A COLLIDABLE PART.
+
+	WHAT IS ABSENT IS THE SECURITY DESIGN, and every absence is deliberate:
+
+	  · NO PLACER. Not a UserId, not a name, not a `PlacedByYou`. Who put the garlic there is a fact
+	    about a player, and the recipient is the one player in the round who must not be handed a
+	    survivor's movements for free. `placeItem`'s header refuses the same field on the dropped part.
+	  · NO DOORWAY ID. With no key in the payload there is nothing to log, difference or accumulate —
+	    `SearchUpdatePayload`'s structural argument. The Aswang can see the garlic on the doorway; the
+	    server never tells it which doorway the doorway is.
+	  · NO ROLE, AND NO FLAG THAT WOULD IMPLY ONE. The recipient is resolved server-side from
+	    `RoundService.GetAswangUserId()`, exactly as `FeedUpdate` and `CamouflageUpdate` resolve theirs.
+
+	`SecondsRemaining` RATHER THAN AN EXPIRY TIMESTAMP. A server `os.clock()` is meaningless on a
+	client and an `os.time()` would be a shared clock two clients could difference. A duration is what
+	the client needs and states nothing about when the round started.
+]]
+export type GarlicBarrierSpec = {
+	Position: Vector3,
+	Yaw: number,
+	Width: number,
+	Height: number,
+	SecondsRemaining: number,
+}
+
+--[[
+	V09. A FULL SNAPSHOT OF THE LIVE BARRIERS, NOT A DELTA, and `RequestSearch`/`RequestCancelSearch`'s
+	header is the argument: two messages for one state are how a client and a server come to disagree
+	about it. A dropped "barrier added" leaves the Aswang walking through garlic; a dropped "barrier
+	expired" leaves it walled out of a room forever. A snapshot cannot desync, is idempotent on a
+	duplicate, and re-sending it on `CharacterAdded` is the whole of the rejoin path.
+
+	AT MOST `Config.Items.GarlicSpawnCount` ENTRIES — two. The list is not a cost worth optimising.
+]]
+export type GarlicBarriersPayload = {
+	Barriers: { GarlicBarrierSpec },
+}
 
 --[[
 	The salt throw, broadcast to every client (§4.6, C14). THREE FIELDS, ALL ABOUT A TRAJECTORY AND
