@@ -107,8 +107,9 @@ you insert somewhere durable — the place file is not searchable and `git log` 
 
 ## Images — the honest gap
 
-**No tool here generates images.** `store_image` and `upload_image` both take images that ALREADY EXIST
-on disk or at a URL and bring them in:
+**No tool here generates images**, and neither Claude Code nor the Claude app can make one either.
+`store_image` and `upload_image` both take images that ALREADY EXIST on disk or at a URL and bring them
+in:
 
 - `store_image(filePath)` → an `IMAGEID_` URI you can pass to `generate_procedural_model` as a reference.
 - `upload_image(imagePaths)` → uploads to Roblox and returns `rbxassetid://…` for use as a Decal or
@@ -122,6 +123,9 @@ Three ways to need no generated image at all, in order of preference:
 2. **Use `generate_material`** for anything that is a *surface* rather than a *picture*. Wood, plaster,
    corrugated roofing, mud. This covers most texture needs.
 3. **`search_asset({ assetType: "Image" })`** for genuine artwork — icons, signage, decals.
+
+When an image genuinely IS needed, `visual-pass` is the routine: it triages what the toolchain can make
+itself, then hands the developer a prompt and a destination filename for the remainder.
 
 **The store-page icon and thumbnails are a different problem and are out of this pipeline's scope.** §13
 calls them 80% of whether anyone clicks. They are a real design job, they need a person, and they are the
