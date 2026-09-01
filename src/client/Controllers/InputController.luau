@@ -333,6 +333,32 @@ local function performThrow(): boolean
 			placer's own position — so the camera's `LookVector` stops at this branch.
 		]]
 		Remotes.Get("RequestPlaceGarlic"):FireServer()
+	elseif ItemUse.verbFor(carriedItem) == "USE_STRIKE" then
+		--[[
+			V10, §4.6. THE CLIENT'S ENTIRE CONTRIBUTION TO THE STRIKE IS THAT IT HAPPENED.
+
+			No target, no direction, no item. It does not pick a player, does not measure a distance,
+			does not raycast, and — critically — does not predict a kill and render one
+			optimistically. The salt branch below already refuses that for the same reason, and here
+			the lie would be bigger: it would tell the player the round is over.
+
+			THE CHOICE IS A CONVENIENCE AND NEVER AN AUTHORITY — the garlic branch's reasoning above,
+			unchanged. A client with a stale snapshot or a lying one gets a refusal rather than an
+			advantage: `RequestStrike` re-reads the slot on the server and `pure/StrikeValidation`
+			answers `STRIKE_NOT_HELD`, ABOVE the spend line, costing nothing.
+
+			IT ASKS `pure/ItemUse`, NOT `== "BUNTOT_PAGI"`. Same call `ItemService`'s throw handler
+			makes, so the client and the server route on one rule rather than two copies of it, and
+			`tests/item-use.test.luau` covers both.
+
+			`Q` RATHER THAN A NEW KEY, AND THAT IS A DECISION. Binding the strike to `F` beside the
+			Aswang's kill reads well as "attack" and is refused: `KILL_ACTION` is bound
+			unconditionally for every player precisely so the bind itself is not a tell, and giving it
+			a second role-shaped meaning is exactly the client-side branch this game does not allow.
+			`Q` already means "use the thing in my hand", so V10 costs one branch — no new key, no
+			seventh mobile button, no new `ContextActionService` binding.
+		]]
+		Remotes.Get("RequestStrike"):FireServer()
 	else
 		Remotes.Get("RequestThrowSalt"):FireServer(camera.CFrame.LookVector)
 	end

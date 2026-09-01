@@ -42,7 +42,7 @@
 
 export type ItemType = "SALT" | "BAWANG" | "BUNTOT_PAGI"
 
-export type Verdict = "USE_THROW" | "USE_PLACE" | "USE_NOT_IMPLEMENTED" | "USE_NOTHING_HELD"
+export type Verdict = "USE_THROW" | "USE_PLACE" | "USE_STRIKE" | "USE_NOTHING_HELD"
 
 local ItemUse = {}
 
@@ -80,11 +80,25 @@ function ItemUse.verbFor(held: ItemType?): Verdict
 	end
 
 	--[[
-		BUNTOT PAGI (V10), AND IT IS NOW THE ONLY ITEM WITHOUT A VERB. The reason a split between two
-		unimplemented items would have been a roadmap hint has expired with the split — there is one
-		left, and `tests/item-use.test.luau` is where its boundary is written down until V10 moves it.
+		BUNTOT PAGI (V10), §4.6's third verb: a strike that kills an Aswang which is BOTH Exposed and
+		Weakened, and does nothing to anything else. `pure/StrikeValidation` owns that grid; this
+		module owns only which remote the key press belongs to.
+
+		THE UNION LOST `USE_NOT_IMPLEMENTED` WITH THIS LINE, AND THAT IS THE BOUNDARY CLOSING RATHER
+		THAN A CLEANUP. This module's header sells itself as "not a feature flag — no config, no
+		toggle and no dead code path behind the unimplemented verb"; a value no item can return after
+		the last item acquires a verb is exactly the dead path it refuses. Three items, three verbs,
+		and an empty hand. There is no fifth world left for this module to have an opinion about.
+
+		IT IS STILL WHAT STOPS THE THROW HANDLER DESTROYING THE WIN CONDITION. `pure/ItemThrow`
+		collapses a player holding the buntot pagi into MISS — the fifth world, deliberately — and
+		MISS reaches `ItemService`'s spend line. That handler asks this module for `USE_THROW` before
+		spending, so pressing throw with the buntot pagi in hand still costs nothing. THAT COMPARISON
+		IS POSITIVE AND MUST STAY POSITIVE: a `~= "USE_NOT_IMPLEMENTED"` would have inverted to allow
+		the moment this line changed. What changed instead is that the same key press now routes to
+		`RequestStrike`.
 	]]
-	return "USE_NOT_IMPLEMENTED"
+	return "USE_STRIKE"
 end
 
 return ItemUse

@@ -436,6 +436,54 @@ local EVENTS_UP = {
 		returned to the caller on any path, including OK.
 	]]
 	"RequestPlaceGarlic",
+	--[[
+		V10, §4.6. NO ARGUMENTS, and the absent argument is the entire security design — the fifth
+		remote in this list to say so, and the one where it matters most.
+
+		THE TARGET IS NOT NAMED BY THE CLIENT. The server resolves the candidate within
+		`Config.Items.BuntotPagiStrikeRangeStuds` of the striker's OWN character position, through its
+		own line-of-sight raycast (`MonsterService.ResolveStrikeTarget`) — the rule `RequestSearch`
+		states in full and `RequestCamouflage`, `RequestDropItem` and `RequestPlaceGarlic` each
+		restate: the server resolves what a player is standing at from that player's own character
+		position, and the client names nothing.
+
+		A `RequestStrike(targetUserId)` WOULD HAVE BEEN THE SHARPEST PROBE IN THE GAME, and sharper
+		than the two this list already refuses. `RequestPlaceGarlic(doorway)` would leak a map;
+		`RequestCamouflage(form)` would leak an ambient population. A target argument here leaks a
+		PERSON: it lets a compromised client aim at ONE NAMED PLAYER and observe whether that player
+		died — an oracle whose answer is "yes" for exactly one of the five and "no" for the rest.
+		With no argument the only question a client can ask is "is there something killable within
+		arm's reach of me", and the answer to that is a monster falling over in the open, which every
+		client with line of sight was going to see anyway. The question is unaskable, not merely
+		unanswered.
+
+		NOR IS THERE AN ITEM ARGUMENT, for `RequestDropItem`'s reason: `Config.Items.CarryLimit` is 1,
+		so there is exactly one thing a player can be holding and the server already knows what it is.
+		And no direction — a strike is resolved from a position, not aimed, so the camera's
+		`LookVector` stops at `InputController`'s branch.
+
+		NOTHING IS RETURNED TO THE CALLER ON ANY PATH, INCLUDING A KILL, and this remote is where that
+		convention stops being politeness. `pure/StrikeValidation` collapses all four target-side
+		worlds into one verdict, so there is nothing meaningful left to echo — but the reason the
+		SERVER stays silent even on `STRIKE_KILL` is that a kill acknowledgement is a timestamp. The
+		striker learns they killed the monster by watching it fall over, at the same moment as
+		everyone else with line of sight.
+
+		AND NO DOWNWARD REMOTE ACCOMPANIES IT. There is no `StrikeEffect` to match `SaltEffect`. The
+		public half of a strike needs no remote at all: the monster's death replicates as geometry and
+		as the round ending. What the swing DOES emit is a `NoiseCue` of `ITEM_USE` from the striker's
+		own position, on every swing that reaches the spend line, hit or miss — §4.4's rule and the
+		salt throw's, for `.claude/lessons/absence-is-observable.md`'s reason: an item use that made
+		no sound would be the only silent one in the game, and a listener who heard nothing would
+		learn which item was used.
+
+		IT IS NOT A ROLE ORACLE IN EITHER DIRECTION. §4.4 has the Aswang searching and carrying on
+		identical rules, so the monster can hold the buntot pagi and fire this remote exactly as a
+		survivor can, and must — see `Types.ClientRoundSnapshot.YourCarriedItem`. Its swing resolves
+		against itself, finds `IsExposed`/`IsWeakened` about its own state, and spends the item. That
+		is correct, and it is the case that keeps an unused buntot pagi from being a tell.
+	]]
+	"RequestStrike",
 }
 
 local Remotes = {}

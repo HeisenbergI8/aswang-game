@@ -3130,6 +3130,179 @@ function MonsterService.IsExposed(userId: number): boolean
 end
 
 --[[
+	WHO, IF ANYONE, IS THIS STRIKE ABOUT? (V10, §4.6) `ItemService`'s only way to name a target.
+
+	Returns the candidate's UserId and its distance, or `nil, nil`. `pure/GarlicPlacement`'s
+	`DoorwayDistance` convention: the caller gets a distance because the pure module wants one, and
+	the service gets the identity because it needs to ask `IsExposed`/`IsWeakened` about it — and
+	computing the distance twice is how the two come to disagree.
+
+	IT RESOLVES EXACTLY ONE CANDIDATE, AND THAT CANDIDATE IS THE ASWANG. Not "the nearest player."
+	The difference is worth stating because "nearest" is the obvious implementation and it is worse in
+	both directions: a survivor standing between the striker and the monster would BLOCK a strike that
+	§4.6 says should land, and a striker could learn something from being blocked. Resolving the one
+	player the strike could ever be about, and then asking the pure module whether it may land, means
+	the crowd is irrelevant and there is nothing to infer from it.
+
+	IT LIVES HERE RATHER THAN IN `ItemService` FOR TWO REASONS, AND THE SECOND IS THE ONE THAT DECIDES.
+	`RoundService.GetAswangUserId()` is reachable from both. But `hasLineOfSight` is a file-local in
+	THIS file, and it is not a raycast with a filter — it excludes the corpse folder AND the husk
+	folder AND both characters, and it consults `smokeBlocksSegment` first. Every one of those
+	exclusions is a rule somebody was bitten by (a body is not cover; two alts do not make a safe
+	room; smoke breaks it symmetrically). Reimplementing the ray in `ItemService` would be a second
+	copy that starts correct and drifts, on the surface where drift is an exploit.
+
+	IT NEVER ENUMERATES AND IT IS NOT A ROLE ORACLE, on `IsTransformed`'s terms: it is SERVER ONLY,
+	the return value crosses no wire, and `ItemService` hands the UserId straight back into
+	`IsExposed`/`IsWeakened` and then into a pure module that has no role field. The role is resolved
+	once, here, and never travels.
+
+	NIL FOR NO CHARACTER, NOT (0,0,0) — `nearestDoorway`'s rule. A player with no root has no position,
+	and the origin is a place in the barrio somebody can stand.
+
+	IT RETURNS THE MONSTER STATE AS A THIRD VALUE RATHER THAN THE SERVICE GROWING A `GetMonsterState`
+	SEAM. `monsterStateOf` is a file-local and the header's list of seams is a list of FOUR things
+	callers may ask about a UserId they already hold; a fifth that answers for any UserId would be a
+	probe, where this one answers only about the candidate this function itself resolved. Two new
+	seams for V10, not three.
+
+	THE STATE IS NOT A GATE — see `pure/StrikeValidation`'s `TargetState` comment. `monsterStateOf`
+	never produces EXPOSED (it is a latch, not an activity), so a gate on it would refuse every cell
+	of the grid forever. It is carried so the Done line's grid is literal, and a Weakened, Exposed
+	Aswang dies whether this said TRANSFORMED, CAMOUFLAGED or FEEDING.
+
+	THE ASWANG STRIKING ITSELF RESOLVES TO ITSELF AND THAT IS DELIBERATE. Distance 0, line of sight
+	trivially true, and `pure/StrikeValidation` then answers on its Exposed/Weakened state exactly as
+	it would for a survivor's swing. A guard here would make the monster's own buntot pagi behave
+	differently from everybody's, which is a role oracle readable by pressing a key. If the Aswang
+	wants to salt itself three times and then kill itself, §4.6 does not forbid it and V11 will score
+	it; the item was spent either way.
+]]
+function MonsterService.ResolveStrikeTarget(
+	striker: Player,
+	range: number
+): (number?, number?, Types.MonsterState?)
+	local aswangUserId = RoundService.GetAswangUserId()
+
+	if aswangUserId == nil then
+		return nil, nil, nil
+	end
+
+	local monster: MonsterState? = monsters[aswangUserId]
+
+	if monster == nil then
+		return nil, nil, nil
+	end
+
+	local target = Players:GetPlayerByUserId(aswangUserId)
+	local strikerCharacter = striker.Character
+	local targetCharacter = if target ~= nil then target.Character else nil
+
+	if strikerCharacter == nil or targetCharacter == nil then
+		return nil, nil, nil
+	end
+
+	local strikerRoot = rootOf(strikerCharacter)
+	local targetRoot = rootOf(targetCharacter)
+
+	if strikerRoot == nil or targetRoot == nil then
+		return nil, nil, nil
+	end
+
+	local distance = (strikerRoot.Position - targetRoot.Position).Magnitude
+
+	--[[
+		THE RANGE TEST HAPPENS TWICE, HERE AND IN THE PURE MODULE, AND THAT IS NOT REDUNDANCY.
+		This one gates the RAYCAST — the only expensive thing in the path — so an unauthorised spam
+		of `RequestStrike` costs a subtraction rather than a physics query. The kill handler makes the
+		identical trade for the identical reason ("LAST, because it is the only check that touches the
+		physics engine").
+	]]
+	if distance > range then
+		return nil, nil, nil
+	end
+
+	if not hasLineOfSight(strikerRoot, targetRoot) then
+		return nil, nil, nil
+	end
+
+	return aswangUserId, distance, monsterStateOf(monster)
+end
+
+--[[
+	THE ASWANG DIES (V10, §4.6). The ONLY entry point, and the ordering below is the whole function.
+
+	§4.6: the buntot pagi is "the only thing that kills." `ItemService` decides WHETHER — it owns the
+	slot, the remote and `pure/StrikeValidation` — and this owns WHAT HAPPENS, exactly as
+	`RequestThrowSalt` decides a hit and `ApplySaltHit` performs one. Returns whether monster state
+	existed, never anything about it, on `HealFromFeed`'s terms.
+
+	V10 ENDS AT "THE MONSTER IS DEAD" AND SAYS NOTHING ABOUT WHAT THAT MEANS FOR THE ROUND.
+	`RoundService.MarkKilled` currently routes an Aswang death to `RoundResult.Aborted`, on the
+	disconnect path's reasoning. For a STRIKE that is the wrong result — the survivors did not abort,
+	they won the second win condition — and V11 owns replacing it. Do not change `RoundResult` here:
+	§6.5's six invariants and the roster-freeze rule land together in that chunk, and a result changed
+	without them is a win condition nobody pinned.
+
+	`causedByKill = false`, DELIBERATELY. That flag increments `state.AswangKills`, which is the
+	ASWANG's progress toward ITS win. A survivor killing the monster must not advance the monster's
+	counter, and `MarkKilled`'s own comment is right that "a departure simply is not a kill" — neither
+	is this.
+
+	THE FOUR TEARDOWNS RUN BEFORE THE DEATH, AND THE ORDER IS `ApplySaltHit`'S, NOT THE OBVIOUS ONE.
+	Every one of them removes a REPLICATED difference from a character that is about to become a body
+	somebody can walk up to and inspect:
+
+	  1. `exitCamouflage` — FIRST, and this is the ordering `ApplySaltHit` had to discover. `revert`
+	     restores from `OriginalParts`, which `applyCamouflageLook` OVERWROTE on top of, so a revert
+	     that runs while the disguise is still on leaves "a player-shaped nothing wearing a cat". And
+	     `endFeed` CALLS `revert` ITSELF — so exiting camouflage after the feed ends is already too
+	     late. It also releases the ambient slot, which `enterCamouflage` names as a leak if orphaned.
+	  2. `endFeed` — releases `WalkSpeed = 0`, which is "THE ONE REPLICATED DIFFERENCE A FEED CREATES"
+	     per this file's own header. `FEED_INTERRUPTED`, never nil: the struck feeder did not complete
+	     a feed, and nil is reserved for `completeFeed`, which sends its own FEED_OK.
+	  3. `revert` — restores the captured look. C04's bug was a revert that restored HARDCODED
+	     DEFAULTS instead of captured state, permanently branding the ex-Aswang; `restoreLook` is the
+	     repaired path and this uses it rather than reimplementing a reset. Runs a second time when
+	     the monster was feeding, and early-returns — the same deliberate redundancy `ApplySaltHit`
+	     documents, because a contract that removed its own revert on the grounds that a callee
+	     happens to do it would make the ordering depend on `endFeed`'s internals.
+	  4. `clearExposed` — destroys the Highlight and clears the boolean TOGETHER, which is the
+	     invariant that function's header states. A glow orphaned onto a corpse is a permanent,
+	     map-wide, remote-free answer to "which body was the monster" — readable after the round by
+	     anyone who did not watch it die. That is C04's bug shape exactly.
+
+	IT DOES NOT DESTROY THE CHARACTER AND DOES NOT MAKE A CORPSE. `commitKill` does that for a
+	survivor; V12 owns what body a dead Aswang leaves. `MarkKilled` calls `applyBodyRule(player,
+	"KILLED")`, which `BodyTransitions` answers KEEP for, so the Aswang's own avatar stays where it
+	fell — which is the correct v2.0 behaviour and needs no new code.
+]]
+function MonsterService.StrikeDown(userId: number): boolean
+	local monster: MonsterState? = monsters[userId]
+
+	-- READ, do not construct. `stateFor` here would re-insert a departed player's UserId — the bug
+	-- `revert()`'s first line and `applyHealthEvent`'s first line were both written to avoid.
+	if monster == nil then
+		return false
+	end
+
+	local player = Players:GetPlayerByUserId(userId)
+
+	if player == nil then
+		return false
+	end
+
+	exitCamouflage(player)
+	endFeed(userId, "FEED_INTERRUPTED")
+	revert(player)
+	clearExposed(userId)
+
+	RoundService.MarkKilled(player, false)
+
+	return true
+end
+
+--[[
 	THE CORPSE FOLDER (C34). Exposed as the FOLDER rather than as an event, mirroring
 	`RoundService.GetHusksFolder` and for the same reason: a caller wants to know when a body arrives,
 	and `ChildAdded` on a folder that outlives every round is a subscription that cannot go stale

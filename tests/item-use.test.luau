@@ -38,19 +38,35 @@ check("an empty hand has no verb", ItemUse.verbFor(nil) == "USE_NOTHING_HELD")
 	until the chunk that placed it on a doorway landed, and the chunk replaced the assertion in the
 	same step as the verdict. The "indistinguishable unimplemented items" check went with it: there
 	is only one such item now, so there is nothing left for it to be indistinguishable FROM.
+
+	V10 IS THE LAST TIME. Three items, three verbs; there is no unimplemented cell left to guard and
+	`USE_NOT_IMPLEMENTED` is gone from the union with this commit. What this suite pins from here is
+	the ROUTING — that each item maps to exactly one verb and no two share — which is the property
+	`InputController` and `ItemService`'s throw handler both depend on and neither states.
 ]]
 check("bawang is placed on a doorway (V09)", ItemUse.verbFor("BAWANG") == "USE_PLACE")
-check(
-	"the buntot pagi has no verb until V10",
-	ItemUse.verbFor("BUNTOT_PAGI") == "USE_NOT_IMPLEMENTED"
-)
+check("the buntot pagi strikes (V10)", ItemUse.verbFor("BUNTOT_PAGI") == "USE_STRIKE")
 
 --[[
-	THE TWO REAL VERBS ARE DISTINCT, which is the property that replaced "the two unimplemented items
-	answer identically". Salt is thrown and bawang is placed; a service routing on this module must
-	be able to tell them apart, and `InputController` now does exactly that on the `Q` key.
+	ALL THREE VERBS ARE DISTINCT, which is the property that replaced "the two unimplemented items
+	answer identically" and which V10 completes. Salt is thrown, bawang is placed, the buntot pagi
+	strikes; a service routing on this module must be able to tell all three apart, and
+	`InputController` does exactly that on the `Q` key.
+
+	PAIRWISE RATHER THAN "SALT vs BAWANG", because the union can no longer express it. While
+	`USE_NOT_IMPLEMENTED` existed, an item that lost its verb collapsed to a value nothing else
+	returned and the collision was visible; now every value is a real verb, so two items answering
+	identically would route two different mechanics to one remote and typecheck perfectly.
 ]]
 check("salt and bawang have different verbs", ItemUse.verbFor("SALT") ~= ItemUse.verbFor("BAWANG"))
+check(
+	"salt and the buntot pagi have different verbs",
+	ItemUse.verbFor("SALT") ~= ItemUse.verbFor("BUNTOT_PAGI")
+)
+check(
+	"bawang and the buntot pagi have different verbs",
+	ItemUse.verbFor("BAWANG") ~= ItemUse.verbFor("BUNTOT_PAGI")
+)
 
 --[[
 	THE ASSERTION THE SERVICE DEPENDS ON, stated here rather than only at the call site.
@@ -67,7 +83,10 @@ check(
 
 --[[
 	Exhaustive: every member of the union plus nil, so a fourth item type added later fails here
-	rather than silently inheriting USE_NOT_IMPLEMENTED. `check:scope` arms `weapons?` for that day.
+	rather than silently falling through the if-chain to the buntot pagi's `USE_STRIKE`. That is a
+	SHARPER trap than it was under `USE_NOT_IMPLEMENTED`, which was inert: a new item inheriting the
+	strike verb would route to `RequestStrike` and be refused server-side at `STRIKE_NOT_HELD`, which
+	looks exactly like a mechanic that has not been built. `check:scope` arms `weapons?` for that day.
 
 	THE ANNOTATION IS LOAD-BEARING — without `: { ItemUse.ItemType }` the loop variable is plain
 	`string`, `verbFor` accepts it, and the exhaustiveness this loop claims does not exist.

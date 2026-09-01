@@ -68,6 +68,9 @@ local UP_REMOTES = {
 	-- V09. The doorway placement. Argument-free, like the two above it: the server resolves the
 	-- nearest tagged `Doorway` from the placer's own character position and the client names nothing.
 	"RequestPlaceGarlic",
+	-- V10. Argument-free, for `RequestPlaceGarlic`'s reason escalated: a target argument here would
+	-- let a client aim at one named player and read back whether they died.
+	"RequestStrike",
 }
 
 local failures = 0
@@ -147,6 +150,26 @@ check(
 	"the drop budget covers a swap",
 	Config.AntiCheat.Budgets.RequestDropItem.Capacity >= Config.Items.CarryLimit,
 	`DropCapacity={Config.AntiCheat.Budgets.RequestDropItem.Capacity}, `
+		.. `CarryLimit={Config.Items.CarryLimit}`
+)
+
+--[[
+	V10. THE STRIKE'S CAPACITY COVERS A DOUBLE-PRESS AND NOTHING MORE.
+
+	An honest client can fire `RequestStrike` at most ONCE per round: there is one buntot pagi
+	(`Items.BuntotPagiSpawnCount`) and every swing that reaches the spend line consumes it, so the
+	second press finds an empty slot and refuses ABOVE the spend. Capacity therefore only has to
+	absorb a double-click and a reconnect retry — `>= CarryLimit + 1` states that as a relationship
+	rather than as the literal 2, so raising `CarryLimit` moves this with it.
+
+	IT IS NOT WHAT STOPS A PROBE. The remote has no argument, so there is nothing to probe with; this
+	is a cost ceiling on a handler that walks to a raycast. The absent argument is the security design
+	and it is stated at the declaration in `Remotes.luau`.
+]]
+check(
+	"the strike budget covers a double-press",
+	Config.AntiCheat.Budgets.RequestStrike.Capacity >= Config.Items.CarryLimit + 1,
+	`StrikeCapacity={Config.AntiCheat.Budgets.RequestStrike.Capacity}, `
 		.. `CarryLimit={Config.Items.CarryLimit}`
 )
 

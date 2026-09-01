@@ -101,6 +101,30 @@ local Items = {
 	GarlicBarrierPadStuds = 1.5,
 
 	--[[
+		V10, §4.6. HOW CLOSE THE STRIKER MUST GET, AND IT IS A CEILING RATHER THAN A REACH.
+
+		THE SERVER RESOLVES THE TARGET, NOT THE CLIENT. `RequestStrike` has no argument, so this is
+		the radius the server measures from the striker's OWN character position — the same rule
+		`RequestSearch` applies to containers and `GarlicPlaceRangeStuds` to doorways, and the reason
+		there is no per-player strike probe.
+
+		IT MUST NOT EXCEED `Monster.KillRange` (8), AND `tests/config.test.luau` PINS THAT. §4.6 gives
+		the buntot pagi to a survivor who has already salted the monster three times and caught it
+		inside a ten-second reveal; what it does not give them is the ability to finish from further
+		away than the monster can reach back. A strike range above the kill range makes the last beat
+		of the round free, and §C.5's third property — "it cannot be used to hunt; it can only
+		finish" — starts leaking. At the shipped value the two are EQUAL: you stand exactly where it
+		could take you.
+
+		AT OR BELOW IT, NEVER BELOW `Monster.FeedLeashStuds` (6) IN PRACTICE. The feed is the window
+		§4.3 built for this item — the monster locked on a corpse for FeedDuration — and a striker who
+		walks to the body is within 6 studs of the feeder by construction. This number therefore
+		decides whether the DESIGNED window works; anything under the leash makes it a coin flip
+		against a faster player, which is the sentence §4.6 uses about having no window at all.
+	]]
+	BuntotPagiStrikeRangeStuds = 8,
+
+	--[[
 		V09. THE ANTI-CHEAT BACKSTOP, AND ITS ONLY JOB IS TO NOT FIRE ON HONEST PLAYERS.
 
 		The block itself is a movement the ASWANG'S OWN CLIENT never issues (see `GarlicController` and
@@ -1686,6 +1710,26 @@ local Config = {
 				exist: they are standing at a doorway with one item.
 			]]
 			RequestPlaceGarlic = { Capacity = 3, RefillPerSecond = 0.25 },
+			--[[
+				V10, §4.6. THE TIGHTEST ITEM BUDGET IN THIS TABLE, AND THE ONE HONEST PLAYERS WILL
+				NEVER NOTICE — because an honest client can fire this remote at most ONCE per round.
+
+				There is exactly one buntot pagi (`Items.BuntotPagiSpawnCount`) and every swing that
+				reaches the spend line consumes it, hit or miss (see the handler in `ItemService`).
+				So the second press of an honest player's key finds an empty slot and refuses at
+				`STRIKE_NOT_HELD`, ABOVE the spend — which is why a capacity of 2 covers a
+				double-click and a reconnect retry without ever costing anybody a second item.
+
+				PRICED LIKE `RequestSmoke` ABOVE RATHER THAN LIKE THE BUTTON PRESSES BESIDE IT. Both
+				are once-in-a-round deliberate acts whose handler walks the player list and casts a
+				ray, so an unbudgeted firehose here is server CPU spent on a question whose answer is
+				"no" for every player but one.
+
+				IT IS NOT WHAT STOPS THE PROBE. `RequestStrike` has no argument, so there is no probe
+				to rate-limit — the limiter is a cost ceiling, and the ABSENT argument is the security
+				design. See the declaration in `Remotes.luau`.
+			]]
+			RequestStrike = { Capacity = 2, RefillPerSecond = 0.1 },
 			RequestEquipCosmetic = { Capacity = 5, RefillPerSecond = 0.5 },
 			--[[
 				C34. Priced like the equip next door rather than tighter, even though it SPENDS: the

@@ -194,6 +194,41 @@ check(
 		.. `SearchRangeStuds={Config.Search.RangeStuds}`
 )
 
+--[[
+	V10, §4.6 / §C.5. THE STRIKE IS NEVER SAFER THAN BEING KILLED.
+
+	`Items.BuntotPagiStrikeRangeStuds <= Monster.KillRange`. §C.5's exception for shipping a weapon at
+	all rests on four properties, and the third is "it cannot be used to hunt; it can only finish."
+	A strike range above the kill range is the first step out of that: the survivor finishes the
+	monster from outside the distance at which the monster could have answered, and the last beat of
+	the round stops costing anything. Nothing in the game reports this — the strike simply starts
+	landing from further away and feels good.
+
+	`Monster.KillRange` NOW ANCHORS FOUR RELATIONSHIPS: salt must reach further than it (§6.5
+	invariant 3), the feed leash must be shorter than it, camouflage's witness radius must exceed it,
+	and the strike must not exceed it. Anyone tuning it at V16 moves all four.
+]]
+check(
+	"the strike reaches no further than the monster's own kill range",
+	Config.Items.BuntotPagiStrikeRangeStuds <= Config.Monster.KillRange,
+	`StrikeRange={Config.Items.BuntotPagiStrikeRangeStuds}, KillRange={Config.Monster.KillRange}`
+)
+
+--[[
+	AND POSITIVE AND FINITE, for `pure/KillValidation.withinRange`'s reason, which this suite has now
+	pinned for the fifth range in the game. `pure/StrikeValidation` fails closed on a degenerate range
+	— it must, or a Config typo of `-8` maps onto the same squared 64 and keeps working — so a bad
+	value here produces a buntot pagi that never kills rather than one that kills from across the
+	barrio. That is the safe direction and it is also the SILENT one: §6.5 invariant 1's whole subject
+	is a second win condition that stops existing without a symptom. This assertion is the symptom.
+]]
+check(
+	"the strike range is a positive finite number",
+	Config.Items.BuntotPagiStrikeRangeStuds > 0
+		and Config.Items.BuntotPagiStrikeRangeStuds < math.huge,
+	`StrikeRange={Config.Items.BuntotPagiStrikeRangeStuds}`
+)
+
 -- V08. `pure/ItemCarry` fails closed on a limit that is not positive-and-finite, so a typo here is
 -- a game in which nobody can carry anything. One is the design (§4.6); this pins the range.
 check(

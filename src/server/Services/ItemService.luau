@@ -69,6 +69,7 @@ local ItemUse = require(Shared.pure.ItemUse)
 local ItemThrow = require(Shared.pure.ItemThrow)
 local GarlicBarrier = require(Shared.pure.GarlicBarrier)
 local GarlicPlacement = require(Shared.pure.GarlicPlacement)
+local StrikeValidation = require(Shared.pure.StrikeValidation)
 local Types = require(Shared.Types)
 
 local ItemService = {}
@@ -1556,6 +1557,149 @@ function ItemService.Start()
 		end
 
 		task.delay(Config.Items.GarlicDuration, expireGarlic)
+	end)
+
+	--[[
+		V10, §4.6. SWING THE BUNTOT PAGI.
+
+		THE RATE LIMIT IS INLINE AND FIRST, copying the throw, drop and garlic handlers exactly.
+		`check-ratelimit.mjs` matches `AntiCheat\w*[.:](Allow|Check|Consume|RateLimit|Permit)` within
+		1200 characters of an `.OnServerEvent:Connect(`, by its own admission a proximity tripwire —
+		so a handler that IS limited but does it elsewhere reads as unguarded and fails the build.
+		Consume FIRST, before anything is read.
+
+		THERE IS NO ARGUMENT TO VALIDATE. See the declaration in `Remotes.luau`: the target is
+		resolved from the striker's own character position through `MonsterService.ResolveStrikeTarget`
+		and the item from this service's own slot. A `typeof()` guard like the throw handler's has
+		nothing to guard.
+
+		THE ORDER OF THE FIVE THINGS BELOW IS THE ENTIRE SECURITY DESIGN OF THIS CHUNK, and the spend
+		line is where it turns. Read §4.6 twice before reordering it.
+	]]
+	Remotes.Get("RequestStrike").OnServerEvent:Connect(function(player: Player)
+		if not AntiCheatService.Consume(player, "RequestStrike") then
+			return
+		end
+
+		--[[
+			THE THREE ANNOTATIONS ARE LOAD-BEARING, and `targetState`'s is the one that fails without
+			them. `.claude/lessons/pure-module-unions-widen-in-lists.md` records that a literal union
+			survives `require` as a scalar but NOT inside a list — and a MULTI-RETURN is a list. The
+			analyzer widens `Types.MonsterState?` to `(string | string | string | string | string)?`
+			across the unpacking, and `StrikeValidation.evaluate` then rejects the whole request
+			table with an error that names the field but not the cause.
+		]]
+		local targetUserId: number?, distance: number?, targetState: Types.MonsterState? =
+			MonsterService.ResolveStrikeTarget(player, Config.Items.BuntotPagiStrikeRangeStuds)
+
+		--[[
+			THE TWO BOOLEANS, AND THE ROLE STOPS HERE. `ResolveStrikeTarget` resolved the Aswang, so
+			`targetUserId` IS the role — and it goes no further than these two calls. Both answer
+			false for a UserId with no monster state, so there is no arrangement in which a nil
+			target and a healthy one produce different code below.
+
+			THE HEALTH VALUE IS NEVER READ. `IsWeakened` is the seam `MonsterService`'s header names
+			as "V08's strike gate, half two" precisely so that the number stays in the service that
+			owns it. Do not add a `GetHealth`.
+		]]
+		local exposed = targetUserId ~= nil and MonsterService.IsExposed(targetUserId)
+		local weakened = targetUserId ~= nil and MonsterService.IsWeakened(targetUserId)
+
+		local targetPlayer = if targetUserId ~= nil
+			then Players:GetPlayerByUserId(targetUserId)
+			else nil
+
+		local verdict = StrikeValidation.evaluate({
+			Phase = RoundService.GetPhase(),
+			StrikerState = RoundService.GetPlayerState(player),
+			Held = slot[player.UserId],
+			TargetDistance = distance,
+			TargetState = targetState,
+			TargetPlayerState = if targetPlayer ~= nil
+				then RoundService.GetPlayerState(targetPlayer)
+				else nil,
+			TargetExposed = exposed,
+			TargetWeakened = weakened,
+			Range = Config.Items.BuntotPagiStrikeRangeStuds,
+		})
+
+		--[[
+			THE THREE STRIKER-SIDE REFUSALS RETURN WITHOUT SPENDING. They sit above the spend line
+			because they are facts about the requester that the requester already holds — its own
+			phase, its own aliveness, its own hand — so returning early costs nothing and reveals
+			nothing. `STRIKE_NOT_HELD` in particular is what makes a double-press free: the second
+			press finds an empty slot and stops here.
+		]]
+		if
+			verdict == "STRIKE_WRONG_PHASE"
+			or verdict == "STRIKE_NOT_ALIVE"
+			or verdict == "STRIKE_NOT_HELD"
+		then
+			if Config.Debug.VerboseLogging then
+				-- A UserId and a verdict. NEVER the resolved target, and never the item: a target
+				-- UserId beside a striker UserId in the log is a record of who was standing where,
+				-- written to disk. The garlic handler states the same rule about the doorway.
+				print(`[ItemService] Strike refused for {player.UserId}: {verdict}`)
+			end
+
+			return
+		end
+
+		--[[
+			§4.6: "IT BREAKS ON USE." THE SPEND IS UNCONDITIONAL FROM HERE AND SITS ABOVE EVERY
+			REMAINING BRANCH, so no future early return can skip it. This is the throw handler's
+			ordering — "the salt is spent on a MISS too" — and V09's correction to it does NOT apply:
+			the garlic spend was moved below `placeGarlic` because that function could itself fail,
+			and nothing below this line can.
+
+			IT IS A SECRECY RULE BEFORE IT IS A BALANCE ONE. `ClientRoundSnapshot.YourCarriedItem` is
+			pushed to this client every `Round.SnapshotInterval`, so whether the item survived a swing
+			is readable off the striker's own HUD. A spend conditional on the kill would make the
+			buntot pagi a REUSABLE detector — swing at each player in turn, watch your slot, and the
+			swing that costs nothing has named the Aswang and reported it is not yet Weakened. The
+			throw handler refuses the identical trade for salt, and there is exactly ONE of these.
+
+			CLEARED RATHER THAN DECREMENTED: reaching here means the slot held BUNTOT_PAGI and the
+			slot holds one thing.
+		]]
+		slot[player.UserId] = nil
+
+		--[[
+			V04, §4.4. A SWING IS LOUD, AND IT IS EQUALLY LOUD WHEN IT HITS NOTHING.
+
+			The throw handler's argument and the garlic handler's, third use: a cue that only fired on
+			a kill would be an identity probe with a sound instead of a return value. More sharply
+			here — a SILENT item use would be the only silent one in the game, so a listener who heard
+			an ITEM_USE cue and saw no salt burst would learn that somebody within earshot is holding
+			bawang or the buntot pagi. `.claude/lessons/absence-is-observable.md` in miniature.
+
+			From the STRIKER's own position, which the server has. Emitted BELOW the spend so it fires
+			on exactly the swings that cost something, and ABOVE the kill so a refused swing and a
+			landed one sound alike.
+		]]
+		local strikerRoot = if player.Character
+			then player.Character:FindFirstChild("HumanoidRootPart")
+			else nil
+
+		if strikerRoot ~= nil and strikerRoot:IsA("BasePart") then
+			NoiseService.Emit(player, "ITEM_USE", strikerRoot.Position)
+		end
+
+		--[[
+			NOTHING IS RETURNED TO THE CALLER ON EITHER PATH, INCLUDING THE KILL — the throw
+			handler's rule, the drop handler's and the garlic handler's, inherited. The striker
+			learns they killed the monster by watching it fall over, at the same moment as everyone
+			else with line of sight. An acknowledgement would be a timestamp.
+		]]
+		if verdict ~= "STRIKE_KILL" or targetUserId == nil then
+			if Config.Debug.VerboseLogging then
+				print(`[ItemService] Strike spent by {player.UserId}: {verdict}`)
+			end
+
+			return
+		end
+
+		MonsterService.StrikeDown(targetUserId)
 	end)
 
 	--[[

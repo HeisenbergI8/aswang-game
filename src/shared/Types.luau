@@ -376,13 +376,18 @@ export type ItemDropVerdict = "OK" | "ITEM_WRONG_PHASE" | "ITEM_NOT_ALIVE" | "IT
 --[[
 	V08, §4.6. WHAT `pure/ItemUse` ANSWERS — which verb, if any, this item currently has.
 
-	`USE_NOT_IMPLEMENTED` IS THE V09/V10 BOUNDARY AND IT IS DELIBERATELY A VALUE RATHER THAN A GAP.
-	V08 gives all three items carry, drop and a slot; only salt gets a verb. Bawang's doorway block
-	is V09 and the buntot pagi's strike is V10, and each is a real mechanic with its own rules — not
-	something to be filled in by whoever notices the hole. A named verdict means the hole is asserted
-	in `tests/item-use.test.luau` rather than left to be discovered.
+	`USE_NOT_IMPLEMENTED` WAS THE V09/V10 BOUNDARY AND IS GONE AS OF V10, which is that boundary
+	CLOSING rather than a tidy-up. It was deliberately a value rather than a gap: V08 gave all three
+	items carry, drop and a slot and only salt a verb, so the hole was asserted in
+	`tests/item-use.test.luau` rather than left to be discovered. V09 filled bawang's, V10 fills the
+	buntot pagi's, and a value no item can return is exactly the dead path `pure/ItemUse`'s header
+	refuses ("it is not a feature flag").
+
+	THREE ITEMS, THREE VERBS, AND AN EMPTY HAND. What this union pins from here is the ROUTING — each
+	item maps to exactly one verb and no two share — which is the property `InputController` and
+	`ItemService`'s throw handler both depend on and neither states.
 ]]
-export type ItemUseVerdict = "USE_THROW" | "USE_NOT_IMPLEMENTED" | "USE_NOTHING_HELD" | "USE_PLACE"
+export type ItemUseVerdict = "USE_THROW" | "USE_PLACE" | "USE_STRIKE" | "USE_NOTHING_HELD"
 
 --[[
 	V09, §4.6. MAY THIS PLAYER PUT BAWANG ON THIS DOORWAY?
@@ -408,6 +413,39 @@ export type GarlicPlaceVerdict =
 	| "GARLIC_NOT_HELD"
 	| "GARLIC_NO_DOORWAY"
 	| "GARLIC_DOORWAY_TAKEN"
+
+--[[
+	V10, §4.6. WHY THE SERVER REFUSED — OR DID NOT REFUSE — A `RequestStrike`. Mirrored from
+	`pure/StrikeValidation.Verdict`.
+
+	PREFIXED `STRIKE_`, which is `ItemCarryVerdict`'s rule and `SearchVerdict`'s before it. A sixth
+	union sharing a bare `WRONG_PHASE` spelling makes a handler wired to the wrong path a working
+	program with the wrong meaning. It matters more here than anywhere else in this file because
+	`ItemService`'s strike handler tests verdict values BY NAME to decide whether to spend the round's
+	only win condition; a spelling collision there is a destroyed win condition.
+
+	IT IS NEVER ECHOED TO A CLIENT, which is `SaltVerdict`'s rule and `KillVerdict`'s — and here it is
+	the WHOLE mechanic rather than a precaution. See `pure/StrikeValidation`'s header: the four
+	target-side worlds are collapsed into ONE value on purpose, so that even a future author who
+	echoed this union by mistake would echo nothing usable. "Never echoed" is a rule someone has to
+	keep; "nothing to echo" is a property. The union is shaped so the leak is unavailable.
+
+	FIVE VALUES: a kill, THREE about the striker's own business, and ONE for every world that involves
+	a target. There is no `STRIKE_NOT_EXPOSED`, no `STRIKE_NOT_WEAKENED`, no `STRIKE_NO_TARGET` and no
+	`STRIKE_TARGET_NOT_ALIVE`. Adding any of them reds the indistinguishability property in
+	`tests/strike-validation.test.luau`, which is where the argument for their absence is enforced
+	rather than remembered.
+
+	THE THREE STRIKER-SIDE VALUES ARE ALLOWED TO DIFFER because they sit ABOVE the spend line and
+	describe facts the striker already holds: their own phase, their own aliveness, their own hand.
+	Nothing about anybody else is derivable from any of them.
+]]
+export type StrikeVerdict =
+	"STRIKE_KILL"
+	| "STRIKE_WRONG_PHASE"
+	| "STRIKE_NOT_ALIVE"
+	| "STRIKE_NOT_HELD"
+	| "STRIKE_NO_EFFECT"
 
 --[[
 	V09, §4.6. ONE LIVE BARRIER, AS THE ASWANG'S OWN CLIENT NEEDS IT TO BUILD A COLLIDABLE PART.

@@ -361,8 +361,20 @@ signal — property, sound, animation state, network event — that separates bl
 
 One per round. Breaks on use. Two conditions, both required.
 
-- Pure module **`src/shared/pure/StrikeValidation.luau`** — `(monsterState, monsterHealth, distance,
-  phase) → verdict`. Kills **only** if `Exposed` **and** `Weakened`. Against anything else: nothing.
+- Pure module **`src/shared/pure/StrikeValidation.luau`** — `(request) → verdict`. Kills **only** if
+  `Exposed` **and** `Weakened`. Against anything else: nothing.
+  > **CORRECTED DURING V10.** This line originally read `(monsterState, monsterHealth, distance,
+  > phase) → verdict`, and **that signature cannot be implemented — building it literally ships a
+  > buntot pagi that never kills.** `MonsterService.monsterStateOf` has four producers and `EXPOSED`
+  > is not one of them; its header says why ("EXPOSED IS A LATCH, NOT AN ACTIVITY — a salted Aswang
+  > is Exposed *and* still an Aswang"). A module gating on `monsterState == "EXPOSED"` refuses every
+  > cell of the grid forever, and the symptom is that the second win condition silently does not
+  > exist — §6.5 invariant 1's exact failure mode. The shipped module takes two booleans from
+  > `MonsterService.IsExposed`/`IsWeakened`, which that file already names "V08's strike gate, half
+  > one / half two". `monsterHealth` is likewise absent by decision: `IsWeakened` collapses it to a
+  > boolean in the one service that owns it, and none of that service's seams returns the health
+  > value. `monsterState` *is* still carried, as `TargetState`, so the grid stays literal — but it
+  > is not a gate.
 - Droppable, passable, and it **drops where the carrier falls**. A corpse in the open with the win
   condition next to it is the design's best clip and it is free if the drop is implemented.
 - It is not purchasable and never will be (§8.3). §C.5's exception depends on all four of its
@@ -379,6 +391,18 @@ kill end to end.
 **Tier** Large · **Runner** 🤖 · **Deps** V10, V12 · 🔒
 
 Both conditions, and the six Config invariants that keep them reachable.
+
+> **V10 LEFT THIS ONE THING FOR YOU AND IT IS OBSERVABLE IN THE GAME TODAY.** A successful buntot
+> pagi strike calls `RoundService.MarkKilled`, which routes an Aswang death to
+> `RoundResult.Aborted` — the disconnect path's result, inherited because V10 deliberately did not
+> touch win conditions. So the second win condition currently FIRES and then SCORES WRONG: the end
+> screen says the round was void. That is the line to replace (`RoundService.luau`, the
+> `state.AswangUserId == player.UserId` branch of `MarkKilled`), and it is the same line the timeout
+> inversion below warns may exist in more than one place.
+>
+> **That branch's comment is now stale and will mislead you.** It reads "A kill can never reach this
+> branch — `TARGET_IS_ASWANG` refuses it." True of `RequestKill`, false as of V10:
+> `MonsterService.StrikeDown` reaches `MarkKilled` for the Aswang by design.
 
 - Pure module **`src/shared/pure/WinConditions.luau`**, rewritten: survivors win at sunrise with ≥1
   alive **or** on the Aswang's death; the Aswang wins at `kills == RequiredKills`.
