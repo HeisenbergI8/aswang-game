@@ -308,9 +308,36 @@ const status = () => {
 // and rarely finishes the whole backlog in one sitting, so `--before <ISO-date>` clears the part that
 // WAS read. Dropping an unread backlog is worse than leaving it: the next review starts from a false
 // baseline and the incidents are gone.
+// Arg parsing is split out and pure so both directions can be self-tested. The failure it prevents
+// happened: `clear --help` found no `--before`, fell through to the wipe-everything branch, and took
+// 80 unreviewed candidates with it. The file is gitignored, so there was nothing to recover. An
+// unrecognised flag must therefore REFUSE rather than fall back to the destructive default.
+export const parseClearArgs = args => {
+  if (args.length === 0) return { ok: true, before: null }
+
+  if (args[0] !== '--before') {
+    return { ok: false, error: `unknown argument ${JSON.stringify(args[0])} — expected \`--before <ISO-date>\` or no arguments` }
+  }
+
+  if (args.length === 1) return { ok: false, error: '--before needs an ISO date' }
+  if (args.length > 2) {
+    return { ok: false, error: `unexpected extra arguments after --before: ${JSON.stringify(args.slice(2))}` }
+  }
+
+  return { ok: true, before: args[1] }
+}
+
 const clear = () => {
-  const beforeArg = process.argv.indexOf('--before')
-  const before = beforeArg > -1 ? process.argv[beforeArg + 1] : null
+  const parsed = parseClearArgs(process.argv.slice(3))
+
+  if (!parsed.ok) {
+    console.error(`- ${parsed.error}`)
+    process.exitCode = 1
+
+    return
+  }
+
+  const before = parsed.before
 
   let entries
 
@@ -425,6 +452,20 @@ const selfTest = () => {
   check('a quoted example is not', matches(stripQuoted('The detector matches "I was wrong" as an admission.'), SELF_CORRECTION), false)
   check('a fenced example is not', matches(stripQuoted('```\nI missed the remote\n```'), SELF_CORRECTION), false)
   check('a bold example is not', matches(stripQuoted('It fires on **I should have** phrases.'), SELF_CORRECTION), false)
+
+  // CLEAR ARGS — the destructive default. `clear --help` once wiped 80 unreviewed candidates from a
+  // gitignored file. Both directions matter here more than anywhere else in this script: the REFUSE
+  // half prevents the data loss, and the ALLOW half is what keeps the reviewed-tail workflow usable.
+  check('bare clear still wipes', parseClearArgs([]), { ok: true, before: null })
+  check('--before with a date is accepted', parseClearArgs(['--before', '2026-08-10']), {
+    ok: true,
+    before: '2026-08-10',
+  })
+  check('--help REFUSES rather than wiping', parseClearArgs(['--help']).ok, false)
+  check('an unknown flag REFUSES', parseClearArgs(['--all']).ok, false)
+  check('a bare date with no flag REFUSES', parseClearArgs(['2026-08-10']).ok, false)
+  check('--before with no date REFUSES', parseClearArgs(['--before']).ok, false)
+  check('extra args after --before REFUSE', parseClearArgs(['--before', '2026-08-10', 'oops']).ok, false)
 
   console.log(failures ? `  FAIL  candidates: ${ran - failures}/${ran}` : `  PASS  candidates: ${ran}/${ran} cases`)
 
